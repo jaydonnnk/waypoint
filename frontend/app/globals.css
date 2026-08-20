@@ -1,0 +1,113 @@
+/* Waypoint — consolidated styles, ported from docs/plans/waypoint/mockups.
+   Class names match the mockups for pixel-close fidelity across the 3 screens. */
+
+:root {
+  --bg: #f4f4f2;
+  --card: #fff;
+  --ink: #1a1a1a;
+  --mut: #6b6b6b;
+  --line: #dcdcd8;
+  --bad: #c0392b;
+  --good: #2e7d32;
+  --accent: #1f6feb;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 15px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.wrap { max-width: 640px; margin: 0 auto; padding: 24px 18px; }
+.brand { font-weight: 700; letter-spacing: .5px; font-size: 18px; }
+.sub { color: var(--mut); font-size: 13px; margin-top: 2px; }
+
+/* ---- Screen 1: trip disrupted ---- */
+.pax {
+  display: flex; align-items: center; gap: 8px; margin: 18px 0;
+  padding: 10px 12px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 8px;
+}
+.pax b { font-weight: 600; }
+
+.leg {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px 16px; margin: 10px 0; position: relative;
+}
+.leg.dead { border-color: var(--bad); }
+.route { font-size: 17px; font-weight: 600; }
+.meta { color: var(--mut); font-size: 13px; margin-top: 4px; }
+
+.badge {
+  position: absolute; top: 12px; right: 14px;
+  font-size: 11px; font-weight: 700; letter-spacing: .5px;
+  padding: 3px 8px; border-radius: 20px;
+}
+.badge.ok { background: #eef3ee; color: var(--good); }
+.badge.dead { background: #fbeaea; color: var(--bad); }
+
+.cta {
+  margin-top: 18px; width: 100%; padding: 14px; border: none; border-radius: 10px;
+  background: var(--accent); color: #fff; font-size: 15px; font-weight: 600;
+  cursor: pointer;
+}
+.cta:disabled { opacity: .6; cursor: default; }
+.note { color: var(--mut); font-size: 12px; text-align: center; margin-top: 10px; }
+
+/* ---- Screen 2: agent recovering ---- */
+.stream {
+  background: #111; color: #d7f0d7;
+  font: 13px/1.7 ui-monospace, Menlo, Consolas, monospace;
+  border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  min-height: 60px;
+}
+.stream .dim { color: #7fae7f; }
+.budget { color: var(--mut); font-size: 12px; margin: -6px 0 14px; }
+
+table {
+  width: 100%; border-collapse: collapse; background: var(--card);
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+}
+th, td { text-align: left; padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--line); }
+th { background: #efefec; color: var(--mut); font-weight: 600; }
+tr:last-child td { border-bottom: none; }
+
+.via { font-weight: 600; }
+.verdict.bad { color: var(--bad); font-weight: 600; }
+.verdict.ok { color: var(--good); font-weight: 600; }
+.verdict.unknown { color: #b07d1a; font-weight: 600; }
+.struck { text-decoration: line-through; color: var(--mut); }
+tr.pick { background: #eef5ee; }
+tr.pick td:first-child { border-left: 3px solid var(--good); }
+.cap { color: var(--mut); font-size: 12px; margin-top: 8px; }
+
+/* ---- Screen 3: recovery confirmed ---- */
+.head { font-size: 20px; font-weight: 700; margin: 12px 0 4px; }
+.cols { display: flex; gap: 12px; margin: 16px 0; }
+.col { flex: 1; border-radius: 10px; padding: 14px; border: 1px solid var(--line); background: var(--card); }
+.col.bad { border-color: #eecccc; background: #fcf3f3; }
+.col.good { border-color: #cfe3cf; background: #f1f7f1; }
+.tag { font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
+.tag.bad { color: var(--bad); }
+.tag.good { color: var(--good); }
+.big { font-size: 18px; font-weight: 700; margin: 6px 0 2px; }
+.small { color: var(--mut); font-size: 13px; }
+.strike { text-decoration: line-through; }
+
+.settle { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 8px 0; }
+.settle b { font-weight: 600; }
+.row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 14px; }
+.ticket {
+  background: #111; color: #d7f0d7;
+  font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace;
+  border-radius: 10px; padding: 12px 14px; margin-top: 10px;
+}
+.punch { color: var(--bad); font-weight: 600; margin-top: 14px; }
+.rationale { color: var(--mut); font-size: 13px; margin: 4px 0 12px; }
+
+/* ---- shared status/error line ---- */
+.status { color: var(--mut); font-size: 13px; margin-top: 14px; }
+.status.err { color: var(--bad); }
