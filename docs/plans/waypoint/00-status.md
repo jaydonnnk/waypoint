@@ -2,11 +2,11 @@
 
 - Gate 1 — Product: APPROVED 2026-08-20
 - Gate 2 — Architecture: APPROVED 2026-08-20
-- Gate 3 — Program Design: in progress
-- Gate 4 — Slice plan: pending
+- Gate 3 — Program Design: APPROVED 2026-08-20
+- Gate 4 — Slice plan: APPROVED 2026-08-20
 
 ## Slices
-- [ ] Slice 1 — tracer bullet: mocked end-to-end, 3 screens + SSE, hardcoded recovery
+- [ ] Slice 1 — tracer bullet: mocked end-to-end, 3 screens + SSE, hardcoded recovery (design proven via a throwaway Claude Code tracer on 2026-08-20, then deleted — to be REBUILT in Qoder)
 - [ ] Slice 2 — real Atlas sandbox search (read path), NormalizedOffer→Offer
 - [ ] Slice 3 — rules engine: visa + passport rules, curated data, fail-closed + freshness
 - [ ] Slice 4 — Qwen judge (advise gate): rank + narrate over all offers
@@ -47,3 +47,5 @@ Sequencing: slices 1–4 + 6 need NO ticketing — build now. Slice 5 blocks on 
 
 ## Notes for a fresh session
 Read every doc in this folder + `docs/external/atlas-integration.md` before continuing. Atlas Skill CLI = `atlas-flight` (uv tool v0.3.12), auth in OS keyring, env currently sandbox. **Gate check PASSED:** sandbox returns rich connecting itineraries (SIN→NRT on 2026-09-04: 16 of 19 options connect, via SGN/ICN/PUS/DMK, price $236–$691, layovers 1.75–13.4h) — enough genuine trade-off for real reroute reasoning.
+
+**BUILD WORKFLOW (from Slice 1 onward):** ALL implementation code is built in **Qoder** (Qwen), not Claude Code — required for the 20% Use-of-Qoder gate (80%+ of core must be Qoder-built or the category scores 0). Gates 1–3 planning docs (product/architecture/program-design/ADRs) were intentionally built here in Claude Code; that is fine (planning, not core code). Claude Code's role now: per-slice build briefs + cross-checking/reviewing Qoder's output; Jaydon makes the final call. Do NOT write implementation code in Claude Code.
