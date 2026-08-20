@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waypoint — Recovered</title>
+<style>
+  :root { --bg:#f4f4f2; --card:#fff; --ink:#1a1a1a; --mut:#6b6b6b; --line:#dcdcd8; --bad:#c0392b; --good:#2e7d32; --accent:#1f6feb; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:640px; margin:0 auto; padding:24px 18px; }
+  .brand { font-weight:700; letter-spacing:.5px; font-size:18px; }
+  .head { font-size:20px; font-weight:700; margin:12px 0 4px; }
+  .cols { display:flex; gap:12px; margin:16px 0; }
+  .col { flex:1; border-radius:10px; padding:14px; border:1px solid var(--line); background:var(--card); }
+  .col.bad { border-color:#eecccc; background:#fcf3f3; }
+  .col.good { border-color:#cfe3cf; background:#f1f7f1; }
+  .tag { font-size:11px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; }
+  .tag.bad { color:var(--bad); } .tag.good { color:var(--good); }
+  .big { font-size:18px; font-weight:700; margin:6px 0 2px; }
+  .small { color:var(--mut); font-size:13px; }
+  .strike { text-decoration:line-through; }
+  .settle { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin:8px 0; }
+  .settle b { font-weight:600; }
+  .row { display:flex; justify-content:space-between; padding:3px 0; font-size:14px; }
+  .ticket { background:#111; color:#d7f0d7; font:13px/1.6 ui-monospace,Menlo,Consolas,monospace; border-radius:10px; padding:12px 14px; margin-top:10px; }
+  .punch { color:var(--bad); font-weight:600; margin-top:14px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">WAYPOINT</div>
+    <div class="head">Recovered — and you can actually board.</div>
+
+    <div class="cols">
+      <div class="col bad">
+        <div class="tag bad">Naive cheapest — rejected</div>
+        <div class="big strike">$236 · via SGN</div>
+        <div class="small">Vietnam self-transfer · <b>visa required</b> for your passport → denied at gate</div>
+      </div>
+      <div class="col good">
+        <div class="tag good">Waypoint booked</div>
+        <div class="big">$458 · via ICN</div>
+        <div class="small">South Korea airside transit · <b>legal on your passport</b></div>
+      </div>
+    </div>
+
+    <div class="settle">
+      <div class="row"><span>Original fare paid</span><b>$366</b></div>
+      <div class="row"><span>New legal reroute</span><b>$458</b></div>
+      <div class="row"><span>Fare difference — auto-settled in sandbox</span><b>+$92</b></div>
+      <div class="ticket">
+        ✔ order created · PNR <b>WPX9K2</b><br>
+        ✔ payment confirmed (sandbox)<br>
+        ✔ ticket issued — outcome asserted, not assumed
+      </div>
+    </div>
+
+    <div class="punch">Without Waypoint you'd have been denied boarding in Ho Chi Minh City.</div>
+  </div>
+</body>
+</html>

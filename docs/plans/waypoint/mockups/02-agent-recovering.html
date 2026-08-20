@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waypoint — Recovering</title>
+<style>
+  :root { --bg:#f4f4f2; --card:#fff; --ink:#1a1a1a; --mut:#6b6b6b; --line:#dcdcd8; --bad:#c0392b; --good:#2e7d32; --accent:#1f6feb; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:620px; margin:0 auto; padding:24px 18px; }
+  .brand { font-weight:700; letter-spacing:.5px; font-size:18px; }
+  .stream { background:#111; color:#d7f0d7; font:13px/1.7 ui-monospace,Menlo,Consolas,monospace; border-radius:10px; padding:14px 16px; margin:14px 0; }
+  .stream .dim { color:#7fae7f; }
+  .budget { color:var(--mut); font-size:12px; margin:-6px 0 14px; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  th,td { text-align:left; padding:10px 12px; font-size:13px; border-bottom:1px solid var(--line); }
+  th { background:#efefec; color:var(--mut); font-weight:600; }
+  tr:last-child td { border-bottom:none; }
+  .via { font-weight:600; }
+  .verdict.bad { color:var(--bad); font-weight:600; }
+  .verdict.ok  { color:var(--good); font-weight:600; }
+  .struck { text-decoration:line-through; color:var(--mut); }
+  tr.pick { background:#eef5ee; }
+  tr.pick td:first-child { border-left:3px solid var(--good); }
+  .cap { color:var(--mut); font-size:12px; margin-top:8px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">WAYPOINT · recovering</div>
+
+    <div class="stream">
+      <div><span class="dim">›</span> Detected cancellation: SIN→NRT (TR866)</div>
+      <div><span class="dim">›</span> Searched alternatives — <b>19 options</b> found (Atlas)</div>
+      <div><span class="dim">›</span> Re-verified live availability &amp; price (no stale offers)</div>
+      <div><span class="dim">›</span> Checking transit eligibility for <b>India 🇮🇳</b> passport…</div>
+      <div><span class="dim">›</span> Weighing price × time × visa × layover…</div>
+    </div>
+    <div class="budget">step budget: 6 / 12 used · agent will stop and ask if it can't resolve</div>
+
+    <table>
+      <tr><th>Option</th><th>Via</th><th>Price</th><th>Total time</th><th>Passport verdict</th></tr>
+      <tr>
+        <td class="struck">Cheapest</td><td class="via struck">SGN (Vietnam)</td>
+        <td class="struck">$236</td><td class="struck">16h</td>
+        <td class="verdict bad">⛔ self-transfer needs Vietnam visa</td>
+      </tr>
+      <tr>
+        <td>Option B</td><td class="via">DMK (Thailand)</td>
+        <td>$480</td><td>17h</td>
+        <td class="verdict bad">⛔ landside transfer needs Thai visa</td>
+      </tr>
+      <tr class="pick">
+        <td>Waypoint pick</td><td class="via">ICN (South Korea)</td>
+        <td>$458</td><td>13h</td>
+        <td class="verdict ok">✅ airside transit OK for IN passport</td>
+      </tr>
+    </table>
+    <div class="cap">Visa rules: curated table for major transit hubs (approximation, stated openly). Airside vs. self-transfer distinguished.</div>
+  </div>
+</body>
+</html>
