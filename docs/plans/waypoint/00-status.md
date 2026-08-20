@@ -6,7 +6,7 @@
 - Gate 4 — Slice plan: APPROVED 2026-08-20
 
 ## Slices
-- [ ] Slice 1 — tracer bullet: mocked end-to-end, 3 screens + SSE, hardcoded recovery (design proven via a throwaway Claude Code tracer on 2026-08-20, then deleted — to be REBUILT in Qoder)
+- [x] Slice 1 — tracer bullet: mocked end-to-end, 3 screens + SSE, hardcoded recovery (BUILT IN QODER; reviewed + proven 2026-08-20: 3/3 backend tests pass, `next build` clean)
 - [ ] Slice 2 — real Atlas sandbox search (read path), NormalizedOffer→Offer
 - [ ] Slice 3 — rules engine: visa + passport rules, curated data, fail-closed + freshness
 - [ ] Slice 4 — Qwen judge (advise gate): rank + narrate over all offers
