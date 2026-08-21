@@ -1,157 +1,145 @@
-"""Demo data + canned choreography.
+"""Seeded demo portfolio + curated volatility priors (honesty-first).
 
-Slice 2: the SEARCH is real (Atlas sandbox), so this module's offers now
-serve as deterministic test/stub data only. Verdicts, the decision, and
-the booking result remain canned until Slices 3-5 replace them — nothing
-downstream of the Gate 3 types changes shape.
+S1 honesty register: cost bases are SEEDED and volatility priors are
+CURATED per route type — no ML, no scores dressed as predictions. Both
+carry provenance notes and are disclosed on the mandate card / meta event
+(ADR 0002 precedent: honest curation with provenance).
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
+from uuid import uuid4
 
-from app.data.loaders import load_iata_city, load_iata_country
-from app.models import (
-    Offer,
-    OfferAssessment,
-    Passenger,
-    RecoveryResult,
-    RuleVerdict,
-    Segment,
+from app.models import Budget, Mandate, Position
+
+# Curated per-route-type volatility bands (fraction-of-fare move considered
+# "normal" between reprices). Provenance is part of the data — the desk
+# never surfaces a band without its disclosure note.
+PRIOR_PROVENANCE = (
+    "curated approximation — no ML (ADR 0002 precedent); disclosed, "
+    "never dressed as a prediction"
 )
 
-# The sandbox-verified demo date for SIN -> NRT.
-_DEMO_DATE = "2026-09-04"
+VOLATILITY_PRIORS: dict[str, dict] = {
+    "short_haul": {
+        "label": "short-haul (< 3h)",
+        "band_pct": (0.02, 0.07),
+        "note": PRIOR_PROVENANCE,
+    },
+    "mid_haul": {
+        "label": "mid-haul (3–6h)",
+        "band_pct": (0.03, 0.10),
+        "note": PRIOR_PROVENANCE,
+    },
+    "long_haul": {
+        "label": "long-haul (6–12h)",
+        "band_pct": (0.05, 0.14),
+        "note": PRIOR_PROVENANCE,
+    },
+    "transcontinental": {
+        "label": "transcontinental (> 12h)",
+        "band_pct": (0.07, 0.18),
+        "note": PRIOR_PROVENANCE,
+    },
+}
 
-DEMO_PASSENGER = Passenger(
-    name="TEST/TRAVELER",
-    passport_country="IN",
-    passport_expiry=date(2031, 5, 10),
-    doc_number="Z1234567",
-    issuing_country="IN",
+# Disclosed on the mandate card (02-architecture.md honesty register).
+SEED_DISCLOSURES = (
+    "sandbox money only",
+    "cost bases seeded — demo seeds, not historical fact",
+    "volatility priors curated per route type — no ML",
 )
 
-
-def _seg(dep: str, arr: str, dep_t: str, arr_t: str, flight: str,
-         status: str = "active") -> Segment:
-    return Segment(
-        dep_airport=dep,
-        arr_airport=arr,
-        dep_time=datetime.fromisoformat(f"{_DEMO_DATE}T{dep_t}:00"),
-        arr_time=datetime.fromisoformat(f"{_DEMO_DATE}T{arr_t}:00"),
-        flight_number=flight,
-        status=status,  # type: ignore[arg-type]
-    )
+# Demo mandate parameters (deterministic values; the desk id is unique).
+BUDGET_TOTAL = Decimal("12000.00")
+AUTHORITY_CAP = Decimal("1500.00")
+CONTINGENCY_PCT = 0.05
 
 
-# The disrupted original leg (what Screen 1 shows as CANCELLED).
-DEMO_CANCELLED_LEG = _seg("SIN", "NRT", "01:00", "11:15", "TR866", status="cancelled")
+def seeded_portfolio() -> tuple[Mandate, list[Position], list[Budget]]:
+    """Deterministic demo portfolio: 6 positions with seeded cost bases.
 
-
-def demo_offers() -> list[Offer]:
-    """Deterministic reroute candidates for tests / stub clients.
-
-    Shape-identical to real Atlas offers (Slice 2 probe: 2-segment
-    connection itineraries, USD totals) but with stable ids + prices so
-    the pipe tests stay deterministic without live calls.
+    Position 2 (DAC→LHR) is the injected escalation-spike position: its
+    cost basis sits well below the current mark, and the mark is above the
+    authority cap — the S3 escalation beat arms on it. Everything else is
+    plain deterministic data (no randomness beyond the unique desk id).
     """
-    sgn = Offer(
-        id="opt-sgn",
-        atlas_offer_id="atlas-sgn-001",
-        price=Decimal("236"),
-        total_minutes=960,  # 16h
-        segments=[
-            _seg("SIN", "SGN", "03:00", "04:25", "TR2070"),
-            _seg("SGN", "NRT", "09:25", "19:00", "VJ128"),
-        ],
-        same_ticket=False,  # self-transfer: clear immigration + recheck bags
+    desk_id = f"desk-{uuid4().hex[:8]}"
+    now = datetime.now(timezone.utc)
+    mandate = Mandate(
+        id=desk_id,
+        holder="Waypoint Demo Desk",
+        created_at=now,
+        budget_total=BUDGET_TOTAL,
+        authority_cap=AUTHORITY_CAP,
+        contingency_pct=CONTINGENCY_PCT,
+        currency="USD",
     )
-    dmk = Offer(
-        id="opt-dmk",
-        atlas_offer_id="atlas-dmk-001",
-        price=Decimal("480"),
-        total_minutes=1020,  # 17h
-        segments=[
-            _seg("SIN", "DMK", "05:40", "07:10", "FD356"),
-            _seg("DMK", "NRT", "13:10", "22:40", "XJ606"),
-        ],
-        same_ticket=False,  # landside transfer at Don Mueang
-    )
-    icn = Offer(
-        id="opt-icn",
-        atlas_offer_id="atlas-icn-001",
-        price=Decimal("458"),
-        total_minutes=780,  # 13h
-        segments=[
-            _seg("SIN", "ICN", "01:30", "09:00", "KE642"),
-            _seg("ICN", "NRT", "11:30", "14:30", "KE703"),
-        ],
-        same_ticket=True,  # single ticket, airside transit
-    )
-    return [sgn, dmk, icn]
 
+    def pos(
+        n: int,
+        trip_label: str,
+        origin: str,
+        dest: str,
+        depart: date,
+        pax: int,
+        cost_basis: Decimal,
+        mark_price: Decimal,
+    ) -> Position:
+        return Position(
+            id=f"{desk_id}-pos-{n}",
+            trip_label=trip_label,
+            origin=origin,
+            dest=dest,
+            depart_date=depart,
+            pax=pax,
+            status="held",
+            cost_basis=cost_basis,
+            mark_price=mark_price,
+            mark_at=now,
+            mark_stale=False,
+        )
 
-def slice2_verdicts() -> list[RuleVerdict]:
-    """Placeholder verdicts until the rules engine lands (Slice 3).
-
-    Honest + fail-closed: transit is `unknown` (nothing is auto-executable
-    yet); the passport check is free — expiry is already in the payload.
-    """
-    return [
-        RuleVerdict(
-            rule_name="transit_visa",
-            status="unknown",
-            reason="Rules engine lands in Slice 3 \u2014 fail-closed until then",
+    positions = [
+        pos(
+            1, "Regional sales run", "SIN", "NRT", date(2026, 9, 18), 2,
+            Decimal("445.00"), Decimal("462.00"),
         ),
-        RuleVerdict(
-            rule_name="passport_validity",
-            status="allowed",
-            reason="Passport valid to 2031-05-10 (> 6 months beyond travel)",
+        pos(
+            2, "Escalation demo — fare spike (injected)", "DAC", "LHR",
+            date(2026, 9, 25), 1, Decimal("820.00"), Decimal("1790.00"),
+        ),
+        pos(
+            3, "Transatlantic client visit", "JFK", "LIS", date(2026, 10, 2), 1,
+            Decimal("610.00"), Decimal("588.00"),
+        ),
+        pos(
+            4, "Team offsite leg", "BKK", "ICN", date(2026, 9, 29), 3,
+            Decimal("388.00"), Decimal("401.00"),
+        ),
+        pos(
+            5, "Conference return", "SYD", "SIN", date(2026, 10, 9), 2,
+            Decimal("705.00"), Decimal("742.00"),
+        ),
+        pos(
+            6, "Q4 planning trip", "GRU", "MIA", date(2026, 10, 16), 1,
+            Decimal("690.00"), Decimal("655.00"),
         ),
     ]
 
-
-# Advise-gate narration (ADR 0003) is Slice 4's real Qwen output — Slice 2
-# carries NO rationale rather than a canned story the real data contradicts.
-CANNED_DECISION_NOTE = (
-    "Slice 2 placeholder: cheapest candidate leads. Real ranking + "
-    "narration land with the Qwen judge in Slice 4."
-)
-
-
-def build_result(trip_id: str, step_count: int, chosen: Offer) -> RecoveryResult:
-    """Honest intermediate result (Slice 2).
-
-    Real search found a top candidate — but nothing is REJECTED (the rules
-    engine lands in Slice 3) and nothing is BOOKED (Slice 5). Guard #3:
-    never assert a PNR/ticket that wasn't issued, so order stays None and
-    the status is `pending`, not `recovered`.
-    """
-    iata, cities = load_iata_country(), load_iata_city()
-    return RecoveryResult(
-        trip_id=trip_id,
-        status="pending",
-        chosen=chosen,
-        rejected_cheapest=None,
-        order=None,
-        step_count=step_count,
-        rationale=None,
-        layovers=list(chosen.layovers(iata, cities)),
-    )
-
-
-def assessment_payload(
-    assessment: OfferAssessment,
-    iata: dict[str, str],
-    cities: dict[str, str],
-) -> dict:
-    """Serialize one assessment for the SSE `options` event."""
-    return {
-        "offer": assessment.offer.model_dump(mode="json"),
-        "layovers": [
-            layover.model_dump(mode="json")
-            for layover in assessment.offer.layovers(iata, cities)
-        ],
-        "verdicts": [v.model_dump(mode="json") for v in assessment.verdicts],
-        "executable": assessment.executable,
-    }
+    budgets = [
+        Budget(
+            desk_id=desk_id, period="2026-W38",
+            allocated=Decimal("6000.00"), contingency=Decimal("300.00"),
+        ),
+        Budget(
+            desk_id=desk_id, period="2026-W39",
+            allocated=Decimal("4000.00"), contingency=Decimal("200.00"),
+        ),
+        Budget(
+            desk_id=desk_id, period="2026-W40",
+            allocated=Decimal("2000.00"), contingency=Decimal("100.00"),
+        ),
+    ]
+    return mandate, positions, budgets

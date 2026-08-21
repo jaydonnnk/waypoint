@@ -12,8 +12,8 @@ from app.db.database import init_db
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Wire SQLite on startup (Slice 1). The recovery flow doesn't touch it
-    # yet; audit persistence lands in Slice 6.
+    # Wire the desk tables (mandate/positions/ledger/budgets) on startup —
+    # S1's first real DB writes. Demo data: drop-and-recreate guard inside.
     init_db()
     yield
 

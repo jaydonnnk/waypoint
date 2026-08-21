@@ -1,52 +1,49 @@
-"""RecoveryAgent — the orchestration loop.
+"""DeskAgent — the desk orchestration loop.
 
-Slice 2: the SEARCH step is real — AtlasClient hits the Atlas sandbox and
-the `options` event carries real itineraries. Rules verdicts, the judge
-decision, and the booking result stay canned (Slices 3-5), so the flow
-still completes end-to-end to Screen 3. The Gate 3 signature —
-`run(trip_id, emit) -> RecoveryResult` — is stable; the `emit` contract
-drives the SSE stream on Screen 2.
+S1 body is the minimal HONEST cycle: re-read the world from the store →
+emit meta (mandate + 20/20 search meter + comparison-mode disclosure) →
+paced step events → terminal result. The judgment + write path land in S3;
+nothing is ordered while sandbox ticketing is blocked (comparison mode,
+labeled on the wire).
+
+The tracer's stable shape is kept: `run(desk_id, emit) -> DeskResult`,
+the step budget (Guard: bounded loop), the paced step emit, and `_finish`
+for terminal-result emission incl. the graceful give-up path.
 """
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from decimal import Decimal
 from typing import Awaitable, Callable
 
-from app import fixture
-from app.atlas.client import AtlasClient, AtlasError, AtlasNoResults
-from app.data.loaders import load_iata_city, load_iata_country
-from app.models import OfferAssessment, RankedDecision, RecoveryResult
+from app.atlas.client import AtlasClient
+from app.db.store import DeskStore
+from app.models import DeskResult
 
 # emit takes a JSON-serializable dict event and returns an awaitable.
 Emit = Callable[[dict], Awaitable[None]]
 
-# The demo broken leg (Screen 1's cancelled Scoot SIN->NRT flight).
-DEMO_ORIGIN = "SIN"
-DEMO_DEST = "NRT"
-DEMO_DEP_DATE = date(2026, 9, 4)
-DEMO_PAX = 1
+# Search-budget meter: 20 searches per cycle (02-architecture.md §Flow).
+METER_MAX = 20
 
-# Bookable candidates must carry a live price (ADR: reference = comparison
-# only, never executable).
-_BOOKABLE_STATUS = ("current", "verified")
+# Honest day-4 fallback label — shown while ticketing is not activated.
+COMPARISON_MODE_LABEL = "comparison mode \u2014 ticketing not activated"
 
 
-class RecoveryAgent:
-    def __init__(self, step_budget: int = 12, atlas: AtlasClient | None = None):
-        # Guard #1 (guide §26): bounded loop. Slice 6 enforces give-up on exceed.
+class DeskAgent:
+    def __init__(
+        self,
+        step_budget: int = 12,
+        atlas: AtlasClient | None = None,
+        store: DeskStore | None = None,
+    ):
+        # Guard: bounded loop. Exceeding the budget gives up gracefully.
         self.step_budget = step_budget
-        # Injectable for tests; the default hits the real sandbox.
+        # Injectable for tests; defaults hit the real sandbox / real DB.
         self.atlas = atlas or AtlasClient()
+        self.store = store or DeskStore()
 
-    async def run(self, trip_id: str, emit: Emit) -> RecoveryResult:
-        await emit({
-            "type": "meta",
-            "trip_id": trip_id,
-            "step_budget": self.step_budget,
-        })
-
-        iata, cities = load_iata_country(), load_iata_city()
+    async def run(self, desk_id: str, emit: Emit) -> DeskResult:
         step = 0
 
         async def emit_step(text: str) -> None:
@@ -55,121 +52,63 @@ class RecoveryAgent:
             await asyncio.sleep(0.5)  # paced so the stream reads live
             await emit({"type": "step", "n": step, "text": text})
 
-        await emit_step(
-            f"Re-read trip state \u2014 {DEMO_ORIGIN}\u2192{DEMO_DEST} "
-            "(Scoot TR866) is cancelled"
-        )
-        await emit_step(
-            f"Searching Atlas sandbox {DEMO_ORIGIN}\u2192{DEMO_DEST} \u00b7 "
-            f"{DEMO_DEP_DATE.isoformat()} \u00b7 {DEMO_PAX} adult\u2026"
-        )
-
-        # --- REAL SEARCH (read path only — no verify/order/pay) -----------
+        # --- GUARD: re-read the world before anything else (never act on
+        # --- cached state).
         try:
-            # The CLI subprocess is synchronous; keep the event loop free.
-            offers = await asyncio.to_thread(
-                self.atlas.search, DEMO_ORIGIN, DEMO_DEST, DEMO_DEP_DATE, DEMO_PAX
+            mandate, positions, budgets, _ledger_tail = await asyncio.to_thread(
+                self.store.reload_desk, desk_id
             )
-        except AtlasNoResults as exc:
-            # route_not_supported / no_flight / sold_out -> clean give-up.
-            await emit_step(
-                f"Atlas found no flights ({exc.reason or 'no results'}) "
-                "\u2014 giving up cleanly"
-            )
-            return await self._finish(trip_id, emit, RecoveryResult(
-                trip_id=trip_id, status="no_legal_option", chosen=None,
-                rejected_cheapest=None, order=None, step_count=step,
-                rationale=None,
-            ))
-        except AtlasError as exc:
-            await emit_step(
-                f"Atlas search failed ({exc.code}) \u2014 giving up cleanly"
-            )
-            return await self._finish(trip_id, emit, RecoveryResult(
-                trip_id=trip_id, status="failed", chosen=None,
-                rejected_cheapest=None, order=None, step_count=step,
-                rationale=None,
+        except Exception:  # noqa: BLE001 — normalized code only, no raw message
+            await emit({"type": "error", "code": "DESK_STATE_INVALID"})
+            return await self._finish(desk_id, emit, DeskResult(
+                desk_id=desk_id, status="failed", pnl=Decimal("0"),
+                losses_admitted=0, step_count=step,
             ))
 
-        # --- Candidate filter: bookable + current/verified fares first ----
-        candidates = [
-            o for o in offers
-            if o.bookable and o.price_status in _BOOKABLE_STATUS
-        ]
-        comparison_only = False
-        if not candidates:
-            # Ticketing not activated yet (TICKETING_ACTIVATION_REQUIRED):
-            # the sandbox returns comparison-mode offers only. Surface them
-            # flagged as reference fares; Slice 5's verify promotes real
-            # candidates once ticketing clears.
-            candidates = offers
-            comparison_only = True
-        if not candidates:
-            await emit_step("No usable offers returned \u2014 giving up cleanly")
-            return await self._finish(trip_id, emit, RecoveryResult(
-                trip_id=trip_id, status="no_legal_option", chosen=None,
-                rejected_cheapest=None, order=None, step_count=step,
-                rationale=None,
-            ))
-
-        if comparison_only:
-            await emit_step(
-                f"Found {len(offers)} options \u2014 ticketing not activated "
-                f"yet, surfacing {len(candidates)} comparison fares"
-            )
-        else:
-            await emit_step(
-                f"Found {len(offers)} options \u2014 {len(candidates)} bookable "
-                "candidates at current fares"
-            )
-
-        # --- Advise gate: real offers x CANNED verdicts (rules = Slice 3) -
-        assessments = [
-            OfferAssessment(
-                offer=offer,
-                verdicts=fixture.slice2_verdicts(),
-                executable=False,  # nothing auto-executable before Slice 3
-            )
-            for offer in candidates
-        ]
-        await emit_step(
-            "Transit + passport rules canned until Slice 3 \u2014 fail-closed "
-            "placeholders"
-        )
+        # --- meta: the mandate card + full search meter + mode label.
         await emit({
-            "type": "options",
-            "assessments": [
-                fixture.assessment_payload(a, iata, cities) for a in assessments
+            "type": "meta",
+            "desk_id": desk_id,
+            "mandate": mandate.model_dump(mode="json"),
+            "meter": {"used": 0, "max": METER_MAX},
+            "mode": COMPARISON_MODE_LABEL,
+            "disclosures": [
+                "sandbox money only",
+                "cost bases seeded",
+                "volatility priors curated \u2014 no ML",
             ],
         })
 
-        # --- CANNED decision (Qwen judge = Slice 4): cheapest candidate ---
-        # Honest framing: this is the TOP CANDIDATE, not a vetted pick — no
-        # rules have run and nothing is booked yet.
-        await emit_step("Weighing candidates \u2014 rules + ranking canned until Slices 3-4\u2026")
-        chosen = candidates[0]  # offers arrive sorted cheapest-first
-        decision = RankedDecision(
-            chosen_offer_id=chosen.id,
-            rationale=fixture.CANNED_DECISION_NOTE,
-        )
-        await emit({
-            "type": "decision",
-            "chosen_offer_id": decision.chosen_offer_id,
-            "rationale": decision.rationale,
-        })
-
-        # --- No settlement yet (booking = Slice 5). Guard #3: never assert
-        # --- a ticket that wasn't issued -> status "pending", order None.
         await emit_step(
-            "Top candidate locked \u2014 rules, ranking & booking land in Slices 3-5"
+            f"Re-read the world \u2014 {len(positions)} positions, "
+            f"{len(budgets)} budget lines and the ledger loaded fresh "
+            "from the DB"
         )
-        result = fixture.build_result(trip_id, step_count=step, chosen=chosen)
-        return await self._finish(trip_id, emit, result)
+
+        # S1 stops after the re-read: the judgment + write path land in S3.
+        # Give-up path (kept from the tracer): if the step budget is already
+        # exhausted, close honestly instead of pretending work happened.
+        if step >= self.step_budget:
+            await emit_step("Step budget exhausted \u2014 giving up gracefully")
+            return await self._finish(desk_id, emit, DeskResult(
+                desk_id=desk_id, status="failed", pnl=Decimal("0"),
+                losses_admitted=0, step_count=step,
+            ))
+
+        await emit_step(
+            "Judgment + write path land in S3 \u2014 cycle closes in "
+            f"{COMPARISON_MODE_LABEL}"
+        )
+
+        return await self._finish(desk_id, emit, DeskResult(
+            desk_id=desk_id, status="closed", pnl=Decimal("0"),
+            losses_admitted=0, step_count=step, comparison_mode=True,
+        ))
 
     @staticmethod
     async def _finish(
-        trip_id: str, emit: Emit, result: RecoveryResult
-    ) -> RecoveryResult:
-        del trip_id
+        desk_id: str, emit: Emit, result: DeskResult
+    ) -> DeskResult:
+        del desk_id
         await emit({"type": "result", "result": result.model_dump(mode="json")})
         return result

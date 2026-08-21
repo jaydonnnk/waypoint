@@ -1,9 +1,9 @@
-"""Waypoint domain types — the Gate 3 contract.
+"""Waypoint domain types — the desk contract.
 
-These shapes ARE the frontend/API contract. Slice 1 fills them with
-hardcoded fixture data; Slices 2-5 fill them with real Atlas search /
-rules / judge / execute output WITHOUT changing the shapes, so the
-frontend never moves.
+These shapes ARE the frontend/API contract. S1 fills them with a seeded
+portfolio (disclosed); later slices fill them with real Atlas reprice /
+judgment / execute output WITHOUT changing the shapes, so the frontend
+never moves. Offer/Layover/Segment stay verbatim from the tracer.
 """
 from __future__ import annotations
 
@@ -13,25 +13,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-# 3-state verdict, not a bool. `unknown` is intentional and load-bearing:
-# fail-closed depends on it (see ADR 0002 / 0003).
-VerdictStatus = Literal["allowed", "blocked", "unknown"]
-
 PriceStatus = Literal["reference", "current", "verified"]
-# "pending" = Slice 2's honest intermediate state: real search found a top
-# candidate, but rules (Slice 3), ranking (Slice 4) and booking (Slice 5)
-# haven't run yet — nothing is rejected and nothing is booked.
-RecoveryStatus = Literal[
-    "recovered", "pending", "no_legal_option", "needs_override", "failed"
-]
 
-
-class Passenger(BaseModel):
-    name: str
-    passport_country: str  # ISO-2 nationality — the thing nobody else checks
-    passport_expiry: date
-    doc_number: str
-    issuing_country: str
+PositionStatus = Literal["held", "booked"]
+DeskStatus = Literal["closed", "escalated", "budget_exhausted", "failed"]
+DeskActionKind = Literal["book", "hold", "escalate"]
 
 
 class Segment(BaseModel):
@@ -94,48 +80,67 @@ class Offer(BaseModel):
         return out
 
 
-class RuleVerdict(BaseModel):
-    rule_name: str
-    status: VerdictStatus
-    reason: str
-    source: str | None = None  # per-cell provenance (ADR 0002)
-    last_checked: date | None = None
+class Mandate(BaseModel):
+    """The desk's mandate — DB `mandate` table is the source of truth.
+
+    Desk linkage: `id` IS the desk_id (one desk per mandate).
+    """
+
+    id: str
+    holder: str
+    created_at: datetime
+    budget_total: Decimal
+    authority_cap: Decimal
+    contingency_pct: float
+    currency: str
 
 
-class OfferAssessment(BaseModel):
-    offer: Offer
-    verdicts: list[RuleVerdict]
-    # True iff EVERY verdict.status == "allowed". The execute wall (ADR 0003)
-    # auto-books only executable offers; code re-checks this after any pick.
-    executable: bool
+class Position(BaseModel):
+    """One held/booked travel position on the desk blotter."""
+
+    id: str
+    trip_label: str
+    origin: str
+    dest: str
+    depart_date: date
+    pax: int
+    status: PositionStatus = "held"
+    cost_basis: Decimal
+    mark_price: Decimal
+    mark_at: datetime
+    mark_stale: bool = False
+    atlas_offer_id: str | None = None
+    atlas_order_no: str | None = None
+    ticket_asserted: bool = False
 
 
-class RankedDecision(BaseModel):
-    chosen_offer_id: str  # MUST be an executable offer; code re-checks
-    rationale: str  # narrates the rejected blocked/unknown options too
+class Budget(BaseModel):
+    """One period budget line. `id` is DB-assigned (0 until persisted)."""
+
+    id: int = 0
+    desk_id: str
+    period: str
+    allocated: Decimal
+    spent: Decimal = Decimal("0")
+    contingency: Decimal
 
 
-class Order(BaseModel):
-    order_no: str
-    pnr: str
-    ticket_number: str
-    original_fare: Decimal
-    new_fare: Decimal
-    fare_diff: Decimal
-    currency: str = "USD"
-    settled: bool
-    # Asserted via queryOrderDetails (a real issued ticket), not a 200 OK.
-    ticket_asserted: bool
+class DeskAction(BaseModel):
+    """Advise-gate pick for one position; the execute wall re-checks it."""
+
+    position_id: str
+    kind: DeskActionKind
+    rationale: str
 
 
-class RecoveryResult(BaseModel):
-    trip_id: str
-    status: RecoveryStatus
-    chosen: Offer | None
-    rejected_cheapest: Offer | None
-    order: Order | None
+class DeskResult(BaseModel):
+    """Terminal state of one desk cycle (the `result` SSE event payload)."""
+
+    desk_id: str
+    status: DeskStatus
+    pnl: Decimal
+    losses_admitted: int
     step_count: int
-    rationale: str | None
-    # Layovers of chosen + rejected offers, so Screen 3 reads country/city
-    # from the wire instead of a hardcoded map (added in Slice 2; additive).
-    layovers: list[Layover] = []
+    # Honest day-4 fallback flag: True while sandbox ticketing is blocked —
+    # decisions are logged and marked, nothing is ordered (labeled on screen).
+    comparison_mode: bool = True
