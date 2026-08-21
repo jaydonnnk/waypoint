@@ -1,22 +1,39 @@
 import type { Offer } from "./types";
 
-// Demo IATA -> country/city display names. Slice 2+ will surface the real
-// country from the backend's iata map; the tracer keeps a small local map.
+// ISO-2 -> DISPLAY names only. Slice 2+: the airport -> country mapping
+// itself lives in the backend (data/iata_country.csv) and rides on the
+// wire as Layover.country; this map just humanizes those codes.
 export const COUNTRY_NAMES: Record<string, string> = {
   SG: "Singapore",
+  JP: "Japan",
   VN: "Vietnam",
   TH: "Thailand",
   KR: "South Korea",
-  JP: "Japan",
   IN: "India",
-};
-
-export const CITY_NAMES: Record<string, string> = {
-  SGN: "Ho Chi Minh City",
-  DMK: "Bangkok",
-  ICN: "Seoul",
-  NRT: "Tokyo",
-  SIN: "Singapore",
+  TW: "Taiwan",
+  HK: "Hong Kong",
+  PH: "Philippines",
+  MY: "Malaysia",
+  ID: "Indonesia",
+  LK: "Sri Lanka",
+  NP: "Nepal",
+  BD: "Bangladesh",
+  MV: "Maldives",
+  MM: "Myanmar",
+  BN: "Brunei",
+  KH: "Cambodia",
+  CN: "China",
+  US: "United States",
+  GU: "Guam",
+  AU: "Australia",
+  NZ: "New Zealand",
+  AE: "UAE",
+  QA: "Qatar",
+  TR: "Türkiye",
+  NL: "Netherlands",
+  DE: "Germany",
+  GB: "United Kingdom",
+  FR: "France",
 };
 
 /** "960" minutes -> "16h". */
