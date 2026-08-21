@@ -48,9 +48,10 @@ Vertical slices over **9 days** (team of 2, ship **30 Aug 2026**). **S0 = day 1 
 **S4 — D6 — Reconciliation + allocation + escalation.**
 *Goal:* the fintech beats.
 *Files:* `backend/app/agent/loop.py`, `backend/app/api/routes.py` (escalation decision endpoint), `backend/app/models.py`.
-*Done:* sandbox payments auto-reconciled against the ledger; on `PRICE_CHANGED`: absorb-from-contingency vs re-quote, never a second order; realized savings autonomously fund a real **pre-order** `booking seat select` (booking stage; ledger-only fallback on `SEAT_UNAVAILABLE`); fare spike exceeding the authority cap → `escalate` with two priced options + recommendation → one human click → executes. Tests `test_pay_never_retried_on_failure`, `test_no_second_order_on_price_changed`, `test_alloc_funds_seat_select_only_from_realized_savings` pass.
+*Done:* sandbox payments auto-reconciled against the ledger; on `PRICE_CHANGED`: absorb-from-contingency vs re-quote, never a second order; seat alloc degraded to disclosed **ledger-only** (Branch B — seat module not activated on this sandbox, blocker code `TICKETING_ACTIVATION_REQUIRED`; no `seat list`/`seat select` ever attempted, honest disclosure on the wire and the blotter); fare spike exceeding the authority cap → `escalate` with two priced options + recommendation → one human click → executes; real writes behind the independent arm switch `WAYPOINT_LIVE_BOOKING` (armed only on exactly `"1"`, default OFF) AND the ticketing probe. Tests `test_pay_never_retried_on_failure`, `test_no_second_order_on_price_changed`, `test_alloc_degrades_to_ledger_only_when_seat_unavailable` pass.
 *Demo checkpoint:* beats 1:50–2:20 (allocation + reconciliation card) and 2:20–2:50 (escalation).
 *Protects:* proposition 05 (reconciliation / agentic commerce), Compliance & Safety (human-in-loop at the mandate edge), x2.
+*Status:* **done** — seat alloc cut to disclosed ledger-only (Branch B): seat proof skipped at Gate 0 — code `TICKETING_ACTIVATION_REQUIRED`; seat module skipped at activation. Real writes now behind independent arm switch `WAYPOINT_LIVE_BOOKING` (default OFF).
 
 **S5 — D7 — Frontend refit.**
 *Goal:* mandate → desk → close, one refit pass.

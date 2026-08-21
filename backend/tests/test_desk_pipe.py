@@ -328,9 +328,10 @@ def test_reprice_fan_out_is_meter_gated(tmp_db):
     assert result.status == "closed"
 
 
-def test_execute_wall_blocks_over_cap_and_emits_escalate(tmp_db):
+def test_execute_wall_blocks_over_cap_and_emits_escalate(tmp_db, monkeypatch):
     """The spike (mark 1790 > cap 1500) never reaches create_order; the
     escalate event carries two priced options + a recommendation."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", "1")
     mandate, positions, budgets = fixture.seeded_portfolio()
     DeskStore().seed_desk(mandate, positions, budgets)
     stub = WriteStubAtlas(offer_price=None, ticketing=True)
@@ -356,9 +357,12 @@ def test_execute_wall_blocks_over_cap_and_emits_escalate(tmp_db):
     assert result.status == "closed"
 
 
-def test_escalation_click_wakes_waiting_cycle_and_executes(tmp_db):
+def test_escalation_click_wakes_waiting_cycle_and_executes(
+    tmp_db, monkeypatch,
+):
     """The one human click ("A") wakes the awaiting cycle and the chosen
     option executes — re-checked through the wall (budget never waived)."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", "1")
     desk_id = seed_simple_desk(mark="1800.00", cost="1000.00", count=1)
     stub = WriteStubAtlas(offer_price="1800.00", ticketing=True)
     slots: dict[str, dict] = {}
@@ -393,8 +397,9 @@ def test_escalation_click_wakes_waiting_cycle_and_executes(tmp_db):
     assert result.comparison_mode is False
 
 
-def test_pay_never_retried_on_failure(tmp_db):
+def test_pay_never_retried_on_failure(tmp_db, monkeypatch):
     """A failed pay is called EXACTLY once; the position stays held."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", "1")
     desk_id = seed_simple_desk(mark="500.00", cost="400.00")
     stub = WriteStubAtlas(offer_price="500.00", ticketing=True)
     stub.pay_error = AtlasError("PAYMENT_FAILED")
@@ -414,9 +419,10 @@ def test_pay_never_retried_on_failure(tmp_db):
         assert row.ticket_asserted is False
 
 
-def test_no_second_order_on_price_changed(tmp_db):
+def test_no_second_order_on_price_changed(tmp_db, monkeypatch):
     """PRICE_CHANGED → absorb-or-requote reconcile; create_order exactly
     once — NEVER a second order."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", "1")
     desk_id = seed_simple_desk(mark="500.00", cost="400.00")
     stub = WriteStubAtlas(offer_price="500.00", ticketing=True)
     stub.verify_result = VerifyResult(
@@ -443,8 +449,9 @@ def test_no_second_order_on_price_changed(tmp_db):
         assert budget.contingency == Decimal("590.00")
 
 
-def test_ticket_asserted_before_success(tmp_db):
+def test_ticket_asserted_before_success(tmp_db, monkeypatch):
     """No TICKETED envelope → the position is NEVER marked booked."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", "1")
     desk_id = seed_simple_desk(mark="500.00", cost="400.00")
     stub = WriteStubAtlas(offer_price="500.00", ticketing=True)
     stub.ticketed = False
@@ -477,8 +484,11 @@ def test_agent_respects_step_budget_and_gives_up(tmp_db):
     assert any("Step budget exhausted" in t for t in texts)
 
 
-def test_comparison_mode_zero_write_calls_when_blocked(tmp_db):
-    """Ticketing blocked → identical cycle but NO write commands at all."""
+def test_comparison_mode_zero_write_calls_when_blocked(tmp_db, monkeypatch):
+    """Ticketing blocked → identical cycle but NO write commands at all.
+    The arm switch IS armed here, so this case exercises the ticketing
+    probe gate itself (not the switch short-circuit)."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", "1")
     mandate, positions, budgets = fixture.seeded_portfolio()
     DeskStore().seed_desk(mandate, positions, budgets)
     stub = WriteStubAtlas(offer_price="450.00", ticketing=False)
@@ -490,12 +500,78 @@ def test_comparison_mode_zero_write_calls_when_blocked(tmp_db):
     assert stub.pay_calls == 0
     assert result.comparison_mode is True
     assert result.status == "closed"
+    # Armed + probe reads unavailable → the wire names the PROBE gate.
+    meta = next(e for e in events if e["type"] == "meta")
+    assert meta["mode"] == "comparison mode \u2014 ticketing unavailable"
     # Decisions still land on the blotter, labeled comparison mode.
     with database.SessionLocal() as session:
         ledger = session.execute(
             select(LedgerRow).where(LedgerRow.desk_id == mandate.id)
         ).scalars().all()
     assert any("comparison mode" in (row.note or "") for row in ledger)
+
+
+def test_comparison_mode_when_switch_unarmed_despite_ticketing_live(
+    tmp_db, monkeypatch,
+):
+    """Slice 4 Step 1 — the arm switch is INDEPENDENT of the flapping
+    ticketing probe: WAYPOINT_LIVE_BOOKING unset + ticketing_live=True →
+    still ZERO write calls (verify/create_order/pay never invoked) and the
+    wire says WHICH gate blocks (live booking not armed)."""
+    # Default posture enforced: strip any outer-shell arm so the switch is
+    # genuinely UNARMED for this test.
+    monkeypatch.delenv("WAYPOINT_LIVE_BOOKING", raising=False)
+    mandate, positions, budgets = fixture.seeded_portfolio()
+    DeskStore().seed_desk(mandate, positions, budgets)
+    stub = WriteStubAtlas(offer_price="450.00", ticketing=True)
+    agent = make_agent(stub)
+    result, events = run_cycle(agent, mandate.id)
+
+    assert stub.verify_calls == 0
+    assert stub.create_calls == 0
+    assert stub.pay_calls == 0
+    assert result.comparison_mode is True
+    assert result.status == "closed"
+    # The meta event names the BLOCKING gate: the human switch, not the
+    # ticketing probe (which reads live here).
+    meta = next(e for e in events if e["type"] == "meta")
+    assert meta["mode"] == "comparison mode \u2014 live booking not armed"
+    assert any(
+        "live booking not armed" in d for d in meta["disclosures"]
+    )
+    # Decisions still land on the blotter, labeled comparison mode.
+    with database.SessionLocal() as session:
+        ledger = session.execute(
+            select(LedgerRow).where(LedgerRow.desk_id == mandate.id)
+        ).scalars().all()
+    assert any("comparison mode" in (row.note or "") for row in ledger)
+
+
+@pytest.mark.parametrize(
+    "value", ["true", "yes", " 1", "1 ", "0", "", "01"],
+)
+def test_arm_switch_strict_one_non_one_values_stay_unarmed(
+    tmp_db, monkeypatch, value,
+):
+    """Slice 4 — the arm switch is STRICT: armed ONLY when
+    WAYPOINT_LIVE_BOOKING reads exactly "1". Any other value (truthy
+    words, padded variants, empty) stays UNARMED even with
+    ticketing_live=True → ZERO write calls and comparison mode."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", value)
+    mandate, positions, budgets = fixture.seeded_portfolio()
+    DeskStore().seed_desk(mandate, positions, budgets)
+    stub = WriteStubAtlas(offer_price="450.00", ticketing=True)
+    agent = make_agent(stub)
+    result, events = run_cycle(agent, mandate.id)
+
+    assert stub.verify_calls == 0
+    assert stub.create_calls == 0
+    assert stub.pay_calls == 0
+    assert result.comparison_mode is True
+    assert result.status == "closed"
+    # The wire names the BLOCKING gate: the human switch, not the probe.
+    meta = next(e for e in events if e["type"] == "meta")
+    assert meta["mode"] == "comparison mode \u2014 live booking not armed"
 
 
 def test_escalation_decision_endpoint_wakes_the_slot(tmp_db):
@@ -538,10 +614,13 @@ def test_escalation_decision_endpoint_wakes_the_slot(tmp_db):
 # ==========================================================================
 
 
-def test_budget_invariant_blocks_verified_price_above_budget(tmp_db):
+def test_budget_invariant_blocks_verified_price_above_budget(
+    tmp_db, monkeypatch,
+):
     """Fix 1 — verify reports `increased` and the confirmed price exceeds
     budget_left → code-only BUDGET_EXCEEDED, create_order NEVER runs and the
     position stays held (budget is never waived, fail closed)."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", "1")
     desk_id = seed_simple_desk(mark="500.00", cost="400.00")
     stub = WriteStubAtlas(offer_price="500.00", ticketing=True)
     stub.verify_result = VerifyResult(
@@ -573,12 +652,15 @@ def test_budget_invariant_blocks_verified_price_above_budget(tmp_db):
     assert result.status == "closed"
 
 
-def test_authority_cap_invariant_blocks_verified_price_above_cap(tmp_db):
+def test_authority_cap_invariant_blocks_verified_price_above_cap(
+    tmp_db, monkeypatch,
+):
     """BK1 — mark is within the cap (so the mark-time wall does NOT escalate),
     but verify reports `increased` and the confirmed price exceeds the
     authority cap → code-only AUTHORITY_CAP_EXCEEDED, create_order NEVER runs,
     the position stays held. The cap is re-checked against the REAL verified
     price, not just the stale mark (no cap breach without a human click)."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", "1")
     # cap 1500, budget 12000; mark 500 is within cap, verified 1600 is over
     # cap but under budget — the budget guard alone would let it through.
     desk_id = seed_simple_desk(mark="500.00", cost="400.00")
@@ -610,10 +692,13 @@ def test_authority_cap_invariant_blocks_verified_price_above_cap(tmp_db):
     assert result.status == "closed"
 
 
-def test_budget_spent_persists_after_stubbed_live_booking(tmp_db):
+def test_budget_spent_persists_after_stubbed_live_booking(
+    tmp_db, monkeypatch,
+):
     """Fix 5 — the booked amount is persisted to budgets.spent in the settle
     transaction, so a second cycle re-reads the real spent instead of a
     guard that resets to zero."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", "1")
     desk_id = seed_simple_desk(mark="500.00", cost="400.00")
     stub = WriteStubAtlas(offer_price="500.00", ticketing=True)
     agent = make_agent(stub)
@@ -633,10 +718,11 @@ def test_budget_spent_persists_after_stubbed_live_booking(tmp_db):
         assert row.ticket_asserted is True
 
 
-def test_escalation_slot_removed_on_timeout(tmp_db):
+def test_escalation_slot_removed_on_timeout(tmp_db, monkeypatch):
     """Fix 8 — when the bounded escalation wait times out, the slot is
     removed from the registry (slot hygiene) so a late decision hits a gone
     slot, and the cycle gives up honestly."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", "1")
     desk_id = seed_simple_desk(mark="1800.00", cost="1000.00", count=1)
     stub = WriteStubAtlas(offer_price=None, ticketing=True)
     registry: dict[str, dict] = {}
@@ -684,3 +770,82 @@ def test_init_db_drops_empty_legacy_tables(tmp_db):
         conn.execute(text('INSERT INTO "decisions" (id) VALUES (1)'))
     database.init_db()
     assert inspect(database.engine).has_table("decisions")  # preserved
+
+
+# ==========================================================================
+# Slice 4 Step 4 — the seat-select alloc beat (Branch B: cut, ledger-only).
+# The seat module is NOT activated on this sandbox account (live proof
+# skipped on TICKETING_ACTIVATION_REQUIRED; Seat UAT "Skipped"), so the
+# loop never attempts seat_list / seat_select and the alloc degrades to a
+# disclosed ledger-only entry.
+# ==========================================================================
+
+
+class NoSeatStubAtlas(WriteStubAtlas):
+    """Write-path stub where the seat module is unavailable: any seat
+    call is a tripwire — the loop must NEVER attempt one."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.seat_list_calls = 0
+        self.seat_select_calls = 0
+
+    def seat_list(self, booking_id):
+        self.seat_list_calls += 1
+        raise AssertionError(
+            "seat_list must never be called — seat module not activated"
+        )
+
+    def seat_select(self, booking_id, seat_ref):
+        self.seat_select_calls += 1
+        raise AssertionError(
+            "seat_select must never be called — seat module not activated"
+        )
+
+
+def test_alloc_degrades_to_ledger_only_when_seat_unavailable(
+    tmp_db, monkeypatch,
+):
+    """Slice 4 Step 4 (Branch B) — seat selection is unavailable on this
+    sandbox account, so after a stubbed live book the alloc beat degrades
+    to the honest ledger-only path: NO seat_list / seat_select is ever
+    attempted (and nothing is retried), the alloc funds nothing beyond
+    realized savings (zero here), and BOTH the wire event and the ledger
+    row say seat selection is unavailable — ledger-only."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", "1")
+    desk_id = seed_simple_desk(mark="500.00", cost="400.00")
+    stub = NoSeatStubAtlas(offer_price="500.00", ticketing=True)
+    agent = make_agent(stub)
+    result, events = run_cycle(agent, desk_id)
+
+    # The write path ran to TICKETED exactly once (book, then the alloc).
+    assert stub.create_calls == 1 and stub.pay_calls == 1
+    # No real seat call attempted — the degrade is a cut, not a probe.
+    assert stub.seat_list_calls == 0
+    assert stub.seat_select_calls == 0
+    # Exactly ONE alloc event, degraded to ledger-only: zero amount
+    # (funded only from realized savings; none realized) and a plain
+    # disclosure saying seat selection is unavailable on this account.
+    allocs = [e for e in events if e["type"] == "alloc"]
+    assert len(allocs) == 1
+    alloc = allocs[0]
+    assert alloc["position_id"] == desk_id + "-pos-1"
+    assert alloc["amount"] == "0"
+    assert alloc["seat_ref"] == "ledger_only"
+    assert "seat selection unavailable" in alloc["disclosure"]
+    assert "ledger-only" in alloc["disclosure"]
+    # No error events — the degrade is an honest fallback, not a failure.
+    assert not [e for e in events if e["type"] == "error"]
+    assert result.status == "closed"
+    # The degrade lands on the blotter too: one alloc row, ledger_only
+    # ref, zero amount, note saying the seat module is not activated.
+    with database.SessionLocal() as session:
+        rows = session.execute(
+            select(LedgerRow).where(LedgerRow.desk_id == desk_id)
+        ).scalars().all()
+    alloc_rows = [r for r in rows if r.kind == "alloc"]
+    assert len(alloc_rows) == 1
+    assert alloc_rows[0].ref == "ledger_only"
+    assert alloc_rows[0].amount == Decimal("0")
+    assert "seat selection unavailable" in (alloc_rows[0].note or "")
+    assert "ledger-only" in (alloc_rows[0].note or "")

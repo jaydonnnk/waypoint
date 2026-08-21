@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Awaitable, Callable
@@ -33,8 +34,20 @@ Emit = Callable[[dict], Awaitable[None]]
 # Search-budget meter: 20 searches per cycle (02-architecture.md §Flow).
 METER_MAX = 20
 
-# Honest day-4 fallback label — shown while ticketing is not activated.
-COMPARISON_MODE_LABEL = "comparison mode \u2014 ticketing not activated"
+# Human-controlled live-booking switch (Slice 4 Step 1). Armed ONLY when
+# the env var reads exactly "1"; default (unset/anything else) is OFF, so
+# ordinary dev/demo runs ALWAYS stay in comparison mode — regardless of
+# what the flapping ticketing probe reports.
+LIVE_BOOKING_ENV = "WAYPOINT_LIVE_BOOKING"
+
+# Comparison-mode labels — the wire says WHICH of the two gates blocks:
+# the human switch (not armed) or the ticketing probe (unavailable).
+COMPARISON_NOT_ARMED_LABEL = (
+    "comparison mode \u2014 live booking not armed"
+)
+COMPARISON_TICKETING_LABEL = (
+    "comparison mode \u2014 ticketing unavailable"
+)
 
 # Bounded fan-out concurrency (small semaphore; meter is the hard stop).
 FANOUT_CONCURRENCY = 4
@@ -140,8 +153,23 @@ class DeskAgent:
         reset_probe = getattr(self.atlas, "reset_ticketing_cache", None)
         if reset_probe is not None:
             reset_probe()
-        comparison = await self._comparison_mode()
-        mode = COMPARISON_MODE_LABEL if comparison else "live ticketing"
+        # The human switch is read ONCE; BOTH the comparison decision and
+        # the blocking-gate label derive from that single read (no
+        # label-only TOCTOU between the gate and the wire label).
+        armed = self._live_booking_armed()
+        comparison = await self._comparison_mode(armed)
+        if comparison:
+            # Honest about WHICH of the two gates blocks the write path.
+            mode = (COMPARISON_NOT_ARMED_LABEL
+                    if not armed
+                    else COMPARISON_TICKETING_LABEL)
+            gate_disclosure = f"{mode} \u2014 no write commands run"
+        else:
+            mode = "live ticketing"
+            gate_disclosure = (
+                "live booking armed AND ticketing live \u2014 write "
+                "commands enabled"
+            )
 
         # --- meta: the mandate card + full search meter + mode label.
         await emit({
@@ -154,6 +182,7 @@ class DeskAgent:
                 "sandbox money only",
                 "cost bases seeded",
                 "volatility priors curated \u2014 no ML",
+                gate_disclosure,
             ],
         })
 
@@ -646,20 +675,28 @@ class DeskAgent:
                 position_id=pos.id, ref=ref.order_no,
                 note="booked \u2014 TICKETED asserted, sandbox money",
             ))
-            # Alloc beat — S4 SEAM: hardcoded ledger-only today; replace with
-            # a seat_list probe funded by realized savings when S4 lands.
+            # Alloc beat — S4 SEAM (Branch B: cut, ledger-only). The seat
+            # module is NOT activated on this sandbox account (Step 2's live
+            # proof skipped on TICKETING_ACTIVATION_REQUIRED; Seat UAT was
+            # marked "Skipped" at ATRIP activation), so no seat_list /
+            # seat_select is ever attempted and nothing is retried. The
+            # alloc degrades to a ledger-only entry funded solely from
+            # realized savings (none realized on this beat → zero).
             settle.append(LedgerInput(
                 kind="alloc", amount=Decimal("0"), position_id=pos.id,
                 ref="ledger_only",
-                note="seat service unavailable \u2014 alloc degraded to "
-                     "ledger-only",
+                note="seat selection unavailable \u2014 seat module not "
+                     "activated on this sandbox account; alloc degraded "
+                     "to ledger-only",
             ))
             await emit({
                 "type": "alloc",
                 "position_id": pos.id,
                 "amount": "0",
                 "seat_ref": "ledger_only",
-                "disclosure": "seat service unavailable \u2014 ledger-only",
+                "disclosure": "seat selection unavailable \u2014 seat "
+                              "module not activated on this sandbox "
+                              "account; ledger-only",
             })
             return budget_left, contingency_left
         except AtlasError as exc:
@@ -744,12 +781,27 @@ class DeskAgent:
             losses_admitted=0, step_count=step,
         ))
 
-    async def _comparison_mode(self) -> bool:
-        """The write-path gate. True while ticketing is blocked: decisions
-        are logged + marked but NO write commands run (labeled on the
-        wire). Fail-closed on any probe absence or error. The auth-status
-        probe is a blocking subprocess, so it runs off the event loop via
-        asyncio.to_thread (fix 2) — never inline on the loop."""
+    @staticmethod
+    def _live_booking_armed() -> bool:
+        """The human switch, read fresh per cycle (never cached): armed
+        ONLY when WAYPOINT_LIVE_BOOKING reads exactly "1". Unset or any
+        other value keeps the desk in comparison mode."""
+        return os.environ.get(LIVE_BOOKING_ENV, "") == "1"
+
+    async def _comparison_mode(self, armed: bool) -> bool:
+        """The write-path gate — two INDEPENDENT gates, fail-closed. Real
+        writes fire ONLY when BOTH hold: (1) the human switch
+        WAYPOINT_LIVE_BOOKING is armed ("1"), AND (2) ticketing_live()
+        currently reads true. Either gate blocking → decisions are logged
+        + marked but NO write commands run (labeled on the wire).
+        Fail-closed on any probe absence or error. The auth-status probe
+        is a blocking subprocess, so it runs off the event loop via
+        asyncio.to_thread (fix 2) — never inline on the loop; while the
+        switch is unarmed the probe is skipped entirely. `armed` is the
+        caller's single env read (run() derives the wire label from the
+        SAME value — no second read, no label-only TOCTOU)."""
+        if not armed:
+            return True
         probe = getattr(self.atlas, "ticketing_live", None)
         if probe is None:
             return True
