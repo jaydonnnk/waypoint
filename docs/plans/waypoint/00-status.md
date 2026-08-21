@@ -7,13 +7,19 @@
 
 ## Slices
 - [x] Slice 1 — tracer bullet: mocked end-to-end, 3 screens + SSE, hardcoded recovery (BUILT IN QODER; reviewed + proven 2026-08-20: 3/3 backend tests pass, `next build` clean)
-- [ ] Slice 2 — real Atlas sandbox search (read path), NormalizedOffer→Offer
+- [x] Slice 2 — real Atlas sandbox search (read path), NormalizedOffer→Offer (BUILT IN QODER; reviewed + honesty-corrected + proven 2026-08-20: 16/16 tests + live smoke, `next build` clean. Screen 3 shows an honest `status="pending"` state — no fabricated rejection/rationale/ticket until Slices 3-5.)
 - [ ] Slice 3 — rules engine: visa + passport rules, curated data, fail-closed + freshness
 - [ ] Slice 4 — Qwen judge (advise gate): rank + narrate over all offers
 - [ ] Slice 5 — execute gate: fork auto-approve, verify→order→pay→assert ticket [needs UAT ticketing]
 - [ ] Slice 6 — guards + audit: step budget, give-up, SQLite persistence
 - [ ] Slice 7 — triggers (webhook + injected) + demo polish
 Sequencing: slices 1–4 + 6 need NO ticketing — build now. Slice 5 blocks on UAT; stub booking until it clears.
+
+## Slice-2 findings (carry forward)
+- **Atlas transport = subprocess, not library import.** The skill's library entrypoint needs Python ≥3.12 but the backend runs 3.11, so `AtlasClient` subprocesses `atlas-flight ... --json`. Fine for stateless search. **WATCH for Slice 5:** booking is a stateful multi-step flow (search→verify→order→pay→query) + needs the auto-approve fork (ADR 0001). Before Slice 5, consider bumping the backend to Python 3.12 to enable the clean library seam (fork + session) rather than subprocess-per-step.
+- **Sandbox returns comparison-mode only** right now (all offers `reference`/`bookable=false`) because ticketing is pending. The loop degrades gracefully (surfaces reference fares, flagged). Bookable candidates appear automatically once UAT clears — no code change.
+- Confirmed Atlas datetime format = `YYYYMMDDHHMM` (docs' `YYYYMMSS` was a typo). Parser in `atlas/client.py` is multi-format tolerant.
+- `same_ticket` is derived from carrier-continuity (the public contract drops `separateBookings`) — SECONDARY hint only per [[0002]], never decisive.
 
 ## Locked decisions (from planning)
 - **Framing:** autonomous disruption-RECOVERY agent, positioned as a **rules-aware rebooking engine** ("checks the rules of your trip, not just the price"). Passport/transit-visa = the sharpest rule, NOT the whole idea. It must stay visible + load-bearing or the project collapses to the Level-1 "detect delay, suggest alts" floor that most teams submit.

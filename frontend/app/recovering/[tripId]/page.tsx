@@ -75,7 +75,9 @@ export default function RecoveringPage() {
     : null;
 
   function rowLabel(a: Assessment, index: number): string {
-    if (a.offer.id === chosenId) return "Waypoint pick";
+    // Slice 2: nothing is vetted/booked yet — the highlighted row is the
+    // TOP CANDIDATE, not a pick (rules Slice 3, judge Slice 4, booking 5).
+    if (a.offer.id === chosenId) return "Top candidate";
     if (a.offer.id === cheapestId) return "Cheapest";
     return `Option ${String.fromCharCode(65 + index)}`; // A, B, ...
   }

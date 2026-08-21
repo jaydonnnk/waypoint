@@ -1,39 +1,27 @@
-"""Hardcoded Slice-1 demo data (canned choreography).
+"""Demo data + canned choreography.
 
-Every number here mirrors the mockups and the sandbox gate-check figures.
-Slices 2-5 replace this module's ROLE (not the shapes): real Atlas search,
-real rules, real Qwen narration, real booking. Nothing downstream of the
-Gate 3 types changes.
+Slice 2: the SEARCH is real (Atlas sandbox), so this module's offers now
+serve as deterministic test/stub data only. Verdicts, the decision, and
+the booking result remain canned until Slices 3-5 replace them — nothing
+downstream of the Gate 3 types changes shape.
 """
 from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
 
+from app.data.loaders import load_iata_city, load_iata_country
 from app.models import (
     Offer,
     OfferAssessment,
-    Order,
     Passenger,
     RecoveryResult,
     RuleVerdict,
     Segment,
 )
 
-# Demo IATA -> ISO-2 map. Slice 3 replaces this with data/iata_country.csv.
-DEMO_IATA: dict[str, str] = {
-    "SIN": "SG",
-    "SGN": "VN",
-    "DMK": "TH",
-    "ICN": "KR",
-    "NRT": "JP",
-}
-
 # The sandbox-verified demo date for SIN -> NRT.
 _DEMO_DATE = "2026-09-04"
-
-# Original fare paid on the now-cancelled leg (drives the +$92 diff).
-ORIGINAL_FARE = Decimal("366")
 
 DEMO_PASSENGER = Passenger(
     name="TEST/TRAVELER",
@@ -61,7 +49,12 @@ DEMO_CANCELLED_LEG = _seg("SIN", "NRT", "01:00", "11:15", "TR866", status="cance
 
 
 def demo_offers() -> list[Offer]:
-    """The three reroute candidates (cheapest-trap, second-trap, legal pick)."""
+    """Deterministic reroute candidates for tests / stub clients.
+
+    Shape-identical to real Atlas offers (Slice 2 probe: 2-segment
+    connection itineraries, USD totals) but with stable ids + prices so
+    the pipe tests stay deterministic without live calls.
+    """
     sgn = Offer(
         id="opt-sgn",
         atlas_offer_id="atlas-sgn-001",
@@ -98,117 +91,66 @@ def demo_offers() -> list[Offer]:
     return [sgn, dmk, icn]
 
 
-def _passport_ok() -> RuleVerdict:
-    return RuleVerdict(
-        rule_name="passport_validity",
-        status="allowed",
-        reason="Passport valid to 2031-05-10 (> 6 months beyond travel)",
-    )
+def slice2_verdicts() -> list[RuleVerdict]:
+    """Placeholder verdicts until the rules engine lands (Slice 3).
 
-
-def demo_assessments() -> list[OfferAssessment]:
-    """Offers x the two live rules (transit-visa + passport validity).
-
-    Slice 3 computes these for real; Slice 1 hardcodes them. The two-rule
-    shape is mirrored now so the engine isn't read as a one-trick lookup.
+    Honest + fail-closed: transit is `unknown` (nothing is auto-executable
+    yet); the passport check is free — expiry is already in the payload.
     """
-    sgn, dmk, icn = demo_offers()
     return [
-        OfferAssessment(
-            offer=sgn,
-            verdicts=[
-                RuleVerdict(
-                    rule_name="transit_visa",
-                    status="blocked",
-                    reason="self-transfer needs Vietnam visa",
-                ),
-                _passport_ok(),
-            ],
-            executable=False,
+        RuleVerdict(
+            rule_name="transit_visa",
+            status="unknown",
+            reason="Rules engine lands in Slice 3 \u2014 fail-closed until then",
         ),
-        OfferAssessment(
-            offer=dmk,
-            verdicts=[
-                RuleVerdict(
-                    rule_name="transit_visa",
-                    status="blocked",
-                    reason="landside transfer needs Thai visa",
-                ),
-                _passport_ok(),
-            ],
-            executable=False,
-        ),
-        OfferAssessment(
-            offer=icn,
-            verdicts=[
-                RuleVerdict(
-                    rule_name="transit_visa",
-                    status="allowed",
-                    reason="airside transit OK for IN passport",
-                ),
-                _passport_ok(),
-            ],
-            executable=True,
+        RuleVerdict(
+            rule_name="passport_validity",
+            status="allowed",
+            reason="Passport valid to 2031-05-10 (> 6 months beyond travel)",
         ),
     ]
 
 
-# Canned agent steps. Six of them, so the budget reads "6 / 12 used".
-DEMO_STEPS: list[str] = [
-    "Re-read trip state \u2014 SIN\u2192NRT (Scoot TR866) is cancelled",
-    "Searched alternatives \u2014 19 options found (Atlas)",
-    "Filtered to 3 bookable candidates at current fares",
-    "Re-verified live availability & price (no stale offers)",
-    "Checking transit + passport rules for India \U0001F1EE\U0001F1F3 passport\u2026",
-    "Weighing price \u00d7 time \u00d7 visa \u00d7 layover\u2026",
-]
-
-# Advise-gate narration (ADR 0003): sees ALL options, narrates the rejections,
-# picks from the executable ones. Slice 4 replaces this with real Qwen output.
-DEMO_RATIONALE = (
-    "Cheapest is $236 via Ho Chi Minh (SGN), but that's a self-transfer: an "
-    "India passport must clear Vietnamese immigration and a visa is required, "
-    "so denial-at-gate risk is real \u2014 rejected. $480 via Bangkok (DMK) also "
-    "needs landside entry \u2014 rejected. Picked $458 via Seoul (ICN): airside "
-    "transit is legal on this passport and it's the fastest at 13h. Paying $92 "
-    "more to stay boardable."
+# Advise-gate narration (ADR 0003) is Slice 4's real Qwen output — Slice 2
+# carries NO rationale rather than a canned story the real data contradicts.
+CANNED_DECISION_NOTE = (
+    "Slice 2 placeholder: cheapest candidate leads. Real ranking + "
+    "narration land with the Qwen judge in Slice 4."
 )
 
 
-def build_result(trip_id: str, step_count: int) -> RecoveryResult:
-    """Assemble the final hardcoded RecoveryResult (status = recovered)."""
-    assessments = demo_assessments()
-    chosen = next(a.offer for a in assessments if a.executable)
-    rejected_cheapest = min((a.offer for a in assessments), key=lambda o: o.price)
+def build_result(trip_id: str, step_count: int, chosen: Offer) -> RecoveryResult:
+    """Honest intermediate result (Slice 2).
 
-    order = Order(
-        order_no="ATRIP-88412076",
-        pnr="WPX9K2",
-        ticket_number="999-2408117736",
-        original_fare=ORIGINAL_FARE,
-        new_fare=chosen.price,
-        fare_diff=chosen.price - ORIGINAL_FARE,
-        settled=True,
-        ticket_asserted=True,
-    )
+    Real search found a top candidate — but nothing is REJECTED (the rules
+    engine lands in Slice 3) and nothing is BOOKED (Slice 5). Guard #3:
+    never assert a PNR/ticket that wasn't issued, so order stays None and
+    the status is `pending`, not `recovered`.
+    """
+    iata, cities = load_iata_country(), load_iata_city()
     return RecoveryResult(
         trip_id=trip_id,
-        status="recovered",
+        status="pending",
         chosen=chosen,
-        rejected_cheapest=rejected_cheapest,
-        order=order,
+        rejected_cheapest=None,
+        order=None,
         step_count=step_count,
-        rationale=DEMO_RATIONALE,
+        rationale=None,
+        layovers=list(chosen.layovers(iata, cities)),
     )
 
 
-def assessment_payload(assessment: OfferAssessment) -> dict:
+def assessment_payload(
+    assessment: OfferAssessment,
+    iata: dict[str, str],
+    cities: dict[str, str],
+) -> dict:
     """Serialize one assessment for the SSE `options` event."""
     return {
         "offer": assessment.offer.model_dump(mode="json"),
         "layovers": [
             layover.model_dump(mode="json")
-            for layover in assessment.offer.layovers(DEMO_IATA)
+            for layover in assessment.offer.layovers(iata, cities)
         ],
         "verdicts": [v.model_dump(mode="json") for v in assessment.verdicts],
         "executable": assessment.executable,

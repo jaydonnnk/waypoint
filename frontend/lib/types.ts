@@ -22,6 +22,7 @@ export interface Segment {
 export interface Layover {
   airport: string;
   country: string;
+  city?: string; // display city carried on the wire (Slice 2+)
   hours: number;
   same_ticket: boolean;
 }
@@ -70,12 +71,22 @@ export interface Order {
 
 export interface RecoveryResult {
   trip_id: string;
-  status: "recovered" | "no_legal_option" | "needs_override" | "failed";
+  // "pending" = Slice 2's honest intermediate state: top candidate found,
+  // nothing rejected (no rules yet) and nothing booked (booking = Slice 5).
+  status:
+    | "recovered"
+    | "pending"
+    | "no_legal_option"
+    | "needs_override"
+    | "failed";
   chosen: Offer | null;
   rejected_cheapest: Offer | null;
   order: Order | null;
   step_count: number;
   rationale: string | null;
+  // Layovers of chosen + rejected offers — Screen 3 reads country/city
+  // from here instead of a hardcoded map (added in Slice 2).
+  layovers?: Layover[];
 }
 
 // The SSE event contract (backend/agent/loop.py).
