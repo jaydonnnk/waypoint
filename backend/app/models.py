@@ -144,3 +144,74 @@ class DeskResult(BaseModel):
     # Honest day-4 fallback flag: True while sandbox ticketing is blocked —
     # decisions are logged and marked, nothing is ordered (labeled on screen).
     comparison_mode: bool = True
+
+
+# --- Atlas write path (S2). Offer/Layover above stay verbatim. -------------
+
+PriceChange = Literal["unchanged", "decreased", "increased"]
+
+
+class VerifyResult(BaseModel):
+    """`offer verify --offer-id` outcome. `booking_id` provenance is the
+    verify response itself — it is the ONLY source for confirm-price /
+    order create (02-architecture §Flow step 6)."""
+
+    offer_id: str
+    booking_id: str
+    price_change: PriceChange
+    previous_price: Decimal
+    current_price: Decimal
+    currency: str
+    seat_supported: bool = False
+    baggage_supported: bool = False
+    # Opaque CLI-provided traveler IDs/types (passenger-input.md: carry,
+    # never invent). Empty until a live verify fills it.
+    travelers: list[dict] = []
+
+
+class OrderRef(BaseModel):
+    """`order create` outcome. `payment_confirmation_id` is single-use and
+    the ONLY legal input to `order pay`; `order_no` the only key for
+    `order status`."""
+
+    payment_confirmation_id: str
+    order_no: str
+
+
+class AuthStatus(BaseModel):
+    """`auth status` snapshot — drives the comparison-mode switch."""
+
+    code: str
+    authorized: bool = False
+    search_available: bool = False
+    ticketing_available: bool = False
+    ticketing_blocker: str | None = None
+
+
+class PaymentResult(BaseModel):
+    """`order pay` outcome — branch on `code`, never `message`.
+    `query_only` = the ONLY legal follow-up is `order status` (never
+    re-pay, never re-create)."""
+
+    code: str
+    order_no: str | None = None
+    ticketed: bool = False
+    pending_ticketing: bool = False  # TICKETING_PENDING = continuing
+    query_only: bool = False
+
+
+class OrderStatus(BaseModel):
+    """`order status` outcome. A position is "booked" ONLY when
+    `ticketed` (code == TICKETED) — never on an accepted response."""
+
+    code: str
+    order_no: str | None = None
+    ticketed: bool = False
+
+
+class SeatSelection(BaseModel):
+    """`booking seat select` outcome. `available=False` (SEAT_UNAVAILABLE)
+    means the alloc degrades to ledger-only; the main flow continues."""
+
+    available: bool
+    code: str

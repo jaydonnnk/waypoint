@@ -65,13 +65,18 @@ class DeskAgent:
                 losses_admitted=0, step_count=step,
             ))
 
+        # Comparison mode = decisions logged + marked, NO write commands.
+        # Fail-closed: any doubt about ticketing keeps the desk read-only.
+        comparison = self._comparison_mode()
+        mode = COMPARISON_MODE_LABEL if comparison else "live ticketing"
+
         # --- meta: the mandate card + full search meter + mode label.
         await emit({
             "type": "meta",
             "desk_id": desk_id,
             "mandate": mandate.model_dump(mode="json"),
             "meter": {"used": 0, "max": METER_MAX},
-            "mode": COMPARISON_MODE_LABEL,
+            "mode": mode,
             "disclosures": [
                 "sandbox money only",
                 "cost bases seeded",
@@ -97,13 +102,25 @@ class DeskAgent:
 
         await emit_step(
             "Judgment + write path land in S3 \u2014 cycle closes in "
-            f"{COMPARISON_MODE_LABEL}"
+            f"{mode}"
         )
 
         return await self._finish(desk_id, emit, DeskResult(
             desk_id=desk_id, status="closed", pnl=Decimal("0"),
-            losses_admitted=0, step_count=step, comparison_mode=True,
+            losses_admitted=0, step_count=step, comparison_mode=comparison,
         ))
+
+    def _comparison_mode(self) -> bool:
+        """The write-path gate. True while ticketing is blocked: decisions
+        are logged + marked but NO write commands run (labeled on the
+        wire). Fail-closed on any probe absence or error."""
+        probe = getattr(self.atlas, "ticketing_live", None)
+        if probe is None:
+            return True
+        try:
+            return not probe()
+        except Exception:  # noqa: BLE001 — normalized posture only
+            return True
 
     @staticmethod
     async def _finish(
