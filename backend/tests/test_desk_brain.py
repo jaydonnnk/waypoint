@@ -128,6 +128,28 @@ def test_stubbed_llm_response_parses_into_desk_actions():
     assert "deterministic fallback" not in actions[0].rationale
 
 
+def test_markdown_fenced_llm_response_still_parses(monkeypatch):
+    """MJ3 — Qwen commonly wraps the array in ```json fences (or a line of
+    prose). The outermost [...] is extracted so a VALID reply is used, not
+    silently dropped to the deterministic fallback (which would forfeit x2)."""
+    positions = [make_position("p-1")]
+    fenced = (
+        "Here is my recommendation:\n```json\n"
+        '[{"position_id": "p-1", "kind": "book", '
+        '"rationale": "mark past band, budget ample"}]'
+        "\n```\n"
+    )
+
+    async def fenced_transport(messages):
+        return fenced
+
+    brain = DeskBrain(transport=fenced_transport)
+    actions = judge_sync(brain, positions)
+    assert [a.position_id for a in actions] == ["p-1"]
+    assert actions[0].kind == "book"
+    assert "deterministic fallback" not in actions[0].rationale  # LLM used
+
+
 def test_llm_failure_degrades_to_identical_shape_fallback():
     """Transport failure → the prior-band fallback with the SAME shape."""
     positions = [make_position("p-1"), make_position("p-2", mark=Decimal("99.00"))]

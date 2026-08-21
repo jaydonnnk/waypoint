@@ -573,6 +573,43 @@ def test_budget_invariant_blocks_verified_price_above_budget(tmp_db):
     assert result.status == "closed"
 
 
+def test_authority_cap_invariant_blocks_verified_price_above_cap(tmp_db):
+    """BK1 — mark is within the cap (so the mark-time wall does NOT escalate),
+    but verify reports `increased` and the confirmed price exceeds the
+    authority cap → code-only AUTHORITY_CAP_EXCEEDED, create_order NEVER runs,
+    the position stays held. The cap is re-checked against the REAL verified
+    price, not just the stale mark (no cap breach without a human click)."""
+    # cap 1500, budget 12000; mark 500 is within cap, verified 1600 is over
+    # cap but under budget — the budget guard alone would let it through.
+    desk_id = seed_simple_desk(mark="500.00", cost="400.00")
+    stub = WriteStubAtlas(offer_price="500.00", ticketing=True)
+    stub.verify_result = VerifyResult(
+        offer_id="off-1", booking_id="bk-1", price_change="increased",
+        previous_price=Decimal("500.00"), current_price=Decimal("1600.00"),
+        currency="USD",
+    )
+    agent = make_agent(stub)
+    result, events = run_cycle(agent, desk_id)
+
+    assert stub.confirm_calls == 1   # confirm-price proceeded on `increased`
+    assert stub.create_calls == 0    # the cap invariant is fail-closed
+    assert stub.pay_calls == 0
+    errors = [e for e in events if e["type"] == "error"]
+    assert any(
+        e["code"] == "AUTHORITY_CAP_EXCEEDED"
+        and e["position_id"] == desk_id + "-pos-1"
+        for e in errors
+    )
+    assert all("message" not in e for e in errors)  # code-only on the wire
+    with database.SessionLocal() as session:
+        row = session.execute(
+            select(PositionRow).where(PositionRow.id == desk_id + "-pos-1")
+        ).scalar_one()
+        assert row.status == "held"
+        assert row.ticket_asserted is False
+    assert result.status == "closed"
+
+
 def test_budget_spent_persists_after_stubbed_live_booking(tmp_db):
     """Fix 5 — the booked amount is persisted to budgets.spent in the settle
     transaction, so a second cycle re-reads the real spent instead of a

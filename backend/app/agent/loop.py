@@ -250,6 +250,9 @@ class DeskAgent:
             amount = pos.mark_price
             over_cap = amount > mandate.authority_cap
             over_budget = amount > budget_left
+            # Cap waiver: only a human escalation "A" click waives the
+            # authority cap for THIS position; the normal path never does.
+            cap_waived = False
             if action.kind == "escalate" or over_cap or over_budget:
                 choice = await self._escalation_beat(
                     desk_id, emit, pos, amount, over_cap, over_budget,
@@ -284,6 +287,7 @@ class DeskAgent:
                         "position_id": pos.id,
                     })
                     continue
+                cap_waived = True  # human approved book-now over the cap
 
             if comparison:
                 # Comparison mode logs the decision and skips to settle.
@@ -297,6 +301,7 @@ class DeskAgent:
 
             budget_left, contingency_left = await self._write_position(
                 desk_id, emit, pos, budget_left, contingency_left, settle,
+                authority_cap=mandate.authority_cap, cap_waived=cap_waived,
             )
             if step >= self.step_budget:
                 return await self._give_up(desk_id, emit, step)
@@ -490,6 +495,8 @@ class DeskAgent:
         budget_left: Decimal,
         contingency_left: Decimal,
         settle: list[LedgerInput],
+        authority_cap: Decimal,
+        cap_waived: bool = False,
     ) -> tuple[Decimal, Decimal]:
         try:
             offer_id = pos.atlas_offer_id
@@ -534,6 +541,22 @@ class DeskAgent:
                 await emit({
                     "type": "error",
                     "code": "BUDGET_EXCEEDED",
+                    "position_id": pos.id,
+                })
+                return budget_left, contingency_left
+
+            # AUTHORITY-CAP INVARIANT (BK1): re-check the REAL verified price
+            # against the per-decision cap. The mark-time wall check is not
+            # enough — an intra-cycle rise can push a within-cap mark over the
+            # cap, which would otherwise book with no human click and breach
+            # the "zero authority-cap breaches" invariant. Skip ONLY when a
+            # human escalation click already waived the cap for this position;
+            # budget stays enforced above. Fail closed: code-only error,
+            # position stays held, nothing written.
+            if not cap_waived and verified.current_price > authority_cap:
+                await emit({
+                    "type": "error",
+                    "code": "AUTHORITY_CAP_EXCEEDED",
                     "position_id": pos.id,
                 })
                 return budget_left, contingency_left

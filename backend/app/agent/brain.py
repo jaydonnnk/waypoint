@@ -111,7 +111,9 @@ class DeskBrain:
             raw = await asyncio.wait_for(
                 self._complete(prompt), timeout=self._timeout
             )
-            actions = self._validate(json.loads(raw), positions)
+            actions = self._validate(
+                json.loads(self._strip_to_json(raw)), positions
+            )
             if actions is None:
                 return fallback
             return actions
@@ -262,6 +264,20 @@ class DeskBrain:
             )
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"]
+
+    @staticmethod
+    def _strip_to_json(raw: str) -> str:
+        """Tolerate a model that wraps the array in markdown fences or prose
+        (MJ3): extract the outermost [...] so valid Qwen output is not
+        silently dropped to the deterministic fallback. If no array is found,
+        return the text unchanged (json.loads then fails -> fallback, exactly
+        as before)."""
+        text = raw.strip()
+        start = text.find("[")
+        end = text.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            return text[start:end + 1]
+        return text
 
     @staticmethod
     def _validate(
