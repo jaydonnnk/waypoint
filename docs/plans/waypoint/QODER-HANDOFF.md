@@ -1,3 +1,4 @@
+> SUPERSEDED — see docs/plans/waypoint/00-status.md
 # Waypoint — Session Handoff for Qoder
 
 Waypoint's planning (software-factory Gates 1–4, all approved) was done in a separate tool (Claude Code). **Your job is to build the code, in Qoder, starting at Slice 1.** This file is the session signal that is NOT already written in the spec docs. Read it, then read the specs it points to.

@@ -1,3 +1,4 @@
+AMENDED 2026-08-21 — see 0004
 # 0001 — Fork the Atlas skill to auto-approve payment in sandbox only
 
 ## Status
@@ -18,3 +19,10 @@ We explicitly **ignore** the skill's own `SKILL.md` directive to "not ask conver
 - Safety is bounded: auto-approve is gated on `environment == sandbox`; production is untouched. This is stated openly in the demo (Compliance & Safety).
 - We carry a fork to maintain. Acceptable for a hackathon; upstreamable as a `--sandbox-auto-approve` flag later.
 - AI stays out of the payment step — it is deterministic execution, not an LLM decision (avoids the x0.5 penalty).
+
+## Amendment — 2026-08-21
+The auto-approve intent stands (sandbox only, never production, AI never in the payment decision), but the mechanism above is corrected on two points:
+
+(a) **Transport is subprocess, not a library.** The backend calls `atlas-flight … --json` as a subprocess. The skill's in-process library entrypoint requires Python ≥3.12 while the backend runs 3.11, so the "thin library API" sentence in the Decision does not apply. All write-path methods (`verify` / `confirm_price` / `create_order` / `pay` / `order_status` / `seat_select`) subprocess the CLI per call.
+
+(b) **No fork is required for transport.** Sandbox auto-approve is achieved by the backend calling the CLI directly — the checkpoints the skill imposes are conversational (agent-side), and a programmatic caller simply does not run them. The fork described in the Decision is therefore unnecessary for the write path; it is dropped unless a later need genuinely requires it.

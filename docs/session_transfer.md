@@ -9,7 +9,7 @@ Project: **Waypoint** — a rules-aware flight disruption-recovery agent for the
 ## Completed
 
 - **Idea validated.** Three rounds of reality-check (~25 ideas, most already served) + deep visa-data research. Waypoint survived because it sits on a structural blind spot: mainstream tools can't filter by the passenger's passport.
-- **Software-factory Gates 1–4 all APPROVED** (product, architecture, program design, slice plan). Docs in `docs/plans/waypoint/`.
+- **Software-factory Gates 1–4 all APPROVED** (product, architecture, program design, slice plan). Those visa-era docs are now **archived** in `docs/plans/waypoint/_archive-visa-pivot/` (superseded by the treasury spec package: current `docs/plans/waypoint/00-status.md` + `01–04`).
 - **Slice 1 (tracer bullet)** — built in Qoder, reviewed, committed. Next.js + FastAPI + SSE, 3 screens, hardcoded recovery. Proven end-to-end in browser.
 - **Slice 2 (real Atlas sandbox search, read path)** — built in Qoder, review caught real defects → honesty corrective → committed (`72fdc25` on branch `qoder/slice-2-atlas-search`). 17 tests + live smoke; `next build` clean.
 - **ADR 0002 revised** to the honest transit-visa model after research (see Pain Points below).
@@ -60,11 +60,11 @@ Project: **Waypoint** — a rules-aware flight disruption-recovery agent for the
 
 ## Files & Where Things Live
 
-- `docs/plans/waypoint/00-status.md` — living index: gate approvals, slice checklist, all locked decisions, findings. **Read first.**
-- `docs/plans/waypoint/01-product.md … 04-slices.md` — the four gate docs.
-- `docs/adr/0001…0003` — fork/auto-approve, visa curated-approximation (**revised**), advise/execute split.
+- `docs/plans/waypoint/00-status.md` — living index: gate approvals, slice checklist, all locked decisions, findings. **Read first.** (CURRENT = treasury concept; re-approved 2026-08-21, rewritten 2026-08-22.)
+- `docs/plans/waypoint/01-product.md … 04-slices.md` — the four gate docs. CURRENT versions describe the treasury concept; the visa-era Gate 1–4 docs they replaced are preserved in `docs/plans/waypoint/_archive-visa-pivot/` (banner-marked SUPERSEDED).
+- `docs/adr/0001…0004` — fork/auto-approve (**amended** 2026-08-21: subprocess transport, no fork needed), visa curated-approximation (**revised**), advise/execute split, and 0004 (two gates + curated priors applied to money).
 - `docs/external/atlas-integration.md` — Atlas CLI/auth/env, UAT state, sandbox findings.
-- `docs/plans/waypoint/QODER-HANDOFF.md` — the brief that onboards Qoder.
+- `docs/plans/waypoint/QODER-HANDOFF.md` — the brief that onboards Qoder (visa-era; now banner-marked SUPERSEDED — the current onboarding state lives in `00-status.md`).
 - `backend/` — FastAPI app (Slices 1–2 committed): `app/models.py` (Gate 3 contract), `app/atlas/client.py` (real search), `app/agent/loop.py` (the recovery loop), `app/fixture.py`, `app/db/`, `data/iata_*.csv`, `tests/`.
 - `frontend/` — Next.js app: the 3 screens + SSE client.
 
