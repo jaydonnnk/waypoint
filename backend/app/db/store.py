@@ -248,6 +248,61 @@ class DeskStore:
                 )
             session.commit()
 
+    def settle(
+        self,
+        desk_id: str,
+        entries: list[LedgerInput],
+        spend: Decimal = Decimal("0"),
+        contingency_used: Decimal = Decimal("0"),
+    ) -> None:
+        """The cycle's settle — ONE transaction for the blotter entries AND
+        the budget consumption (fix 5): waterfall `spend` onto budget lines'
+        `spent` (bounded by each line's remaining allocation) and
+        `contingency_used` onto their `contingency`. Persisting these here
+        (instead of only decrementing in-memory) means a second cycle re-reads
+        the real spent and the "budget is never waived" guard survives a
+        restart instead of resetting to zero."""
+        with database.SessionLocal() as session:
+            for entry in entries:
+                session.add(
+                    LedgerRow(
+                        desk_id=desk_id,
+                        kind=entry.kind,
+                        amount=entry.amount,
+                        position_id=entry.position_id,
+                        ref=entry.ref,
+                        note=entry.note,
+                    )
+                )
+            if spend > 0 or contingency_used > 0:
+                rows = (
+                    session.execute(
+                        select(BudgetRow)
+                        .where(BudgetRow.desk_id == desk_id)
+                        .order_by(BudgetRow.id)
+                    )
+                    .scalars()
+                    .all()
+                )
+                remaining_spend = spend
+                for row in rows:
+                    if remaining_spend <= 0:
+                        break
+                    headroom = row.allocated - row.spent
+                    applied = min(headroom, remaining_spend)
+                    if applied > 0:
+                        row.spent = row.spent + applied
+                        remaining_spend -= applied
+                remaining_contingency = contingency_used
+                for row in rows:
+                    if remaining_contingency <= 0:
+                        break
+                    applied = min(row.contingency, remaining_contingency)
+                    if applied > 0:
+                        row.contingency = row.contingency - applied
+                        remaining_contingency -= applied
+            session.commit()
+
     def mark_booked(
         self, position_id: str, order_no: str, ticket_asserted: bool
     ) -> None:

@@ -497,3 +497,46 @@ def test_ticketing_live_fail_closed_on_error(monkeypatch):
     monkeypatch.setattr(AtlasClient, "_run_json", boom)
 
     assert AtlasClient().ticketing_live() is False
+
+
+# --- transport wrapping (fix 6) --------------------------------------------
+
+
+@pytest.mark.parametrize("transport_exc", [
+    FileNotFoundError("atlas-flight"),
+    OSError("boom"),
+    PermissionError("denied"),
+    UnicodeDecodeError("utf-8", b"", 0, 1, "invalid"),
+])
+def test_transport_failures_wrap_to_bad_transport(monkeypatch, transport_exc):
+    """OSError / FileNotFoundError / UnicodeDecodeError from the subprocess
+    seam never escape as a raw non-AtlasError — they normalize to a typed
+    AtlasError("BAD_TRANSPORT") the loop's per-position handlers catch."""
+    def run_boom(*args, **kwargs):
+        raise transport_exc
+
+    monkeypatch.setattr("app.atlas.client.subprocess.run", run_boom)
+    # cli_path set so _cli() never consults shutil.which.
+    client = AtlasClient(cli_path="not-a-real-cli")
+
+    with pytest.raises(AtlasError) as excinfo:
+        client.auth_status()
+    assert excinfo.value.code == "BAD_TRANSPORT"
+
+
+def test_ticketing_cache_reset_per_cycle(monkeypatch):
+    """Fix 7 — reset_ticketing_cache forces a fresh probe next call, so a
+    mid-run activation takes effect on the next cycle (one probe per cycle)."""
+    stub = StubTransport([
+        _envelope("AUTHORIZED", {"ticketing_available": False}),
+        _envelope("AUTHORIZED", {"ticketing_available": True}),
+    ])
+    stub.install(monkeypatch)
+    client = AtlasClient()
+
+    assert client.ticketing_live() is False
+    assert client.ticketing_live() is False   # cached — still one probe
+    assert len(stub.calls) == 1
+    client.reset_ticketing_cache()            # the loop does this per run
+    assert client.ticketing_live() is True    # fresh probe sees activation
+    assert len(stub.calls) == 2

@@ -434,6 +434,13 @@ def test_no_second_order_on_price_changed(tmp_db):
     assert len(reconciles) == 1
     assert reconciles[0]["resolution"] == "absorb"  # 10 ≤ 600 contingency
     assert result.status == "closed"
+    # The absorbed delta is persisted, not just decremented in memory (fix 5):
+    # the budget line's contingency drops 600 -> 590 across a restart.
+    with database.SessionLocal() as session:
+        budget = session.execute(
+            select(BudgetRow).where(BudgetRow.desk_id == desk_id)
+        ).scalar_one()
+        assert budget.contingency == Decimal("590.00")
 
 
 def test_ticket_asserted_before_success(tmp_db):
@@ -493,7 +500,8 @@ def test_comparison_mode_zero_write_calls_when_blocked(tmp_db):
 
 def test_escalation_decision_endpoint_wakes_the_slot(tmp_db):
     """POST .../decision stores the choice and sets the asyncio.Event the
-    loop awaits; unknown escalations 404."""
+    loop awaits; a gone slot (never registered, or cleared after
+    timeout/completion — fix 8) answers 410, never a misleading 200."""
     state = routes.DeskState(desk_id="desk-x")
     slot = {"event": asyncio.Event(), "choice": None}
     state.escalations["esc-1"] = slot
@@ -507,10 +515,135 @@ def test_escalation_decision_endpoint_wakes_the_slot(tmp_db):
             assert resp.status_code == 200
             assert slot["choice"] == "A"
             assert slot["event"].is_set()
+            # A never-seen / cleared slot is GONE (slot hygiene).
             missing = client.post(
                 "/api/desk/desk-x/escalations/nope/decision",
                 json={"choice": "A"},
             )
-            assert missing.status_code == 404
+            assert missing.status_code == 410
+            # Simulate the loop clearing a consumed slot, then a late click:
+            routes._clear_escalation("desk-x", "esc-1")
+            assert "esc-1" not in state.escalations
+            late = client.post(
+                "/api/desk/desk-x/escalations/esc-1/decision",
+                json={"choice": "B"},
+            )
+            assert late.status_code == 410
     finally:
         routes.DESKS.pop("desk-x", None)
+
+
+# ==========================================================================
+# Review-round hardening (3-way review fixes)
+# ==========================================================================
+
+
+def test_budget_invariant_blocks_verified_price_above_budget(tmp_db):
+    """Fix 1 — verify reports `increased` and the confirmed price exceeds
+    budget_left → code-only BUDGET_EXCEEDED, create_order NEVER runs and the
+    position stays held (budget is never waived, fail closed)."""
+    desk_id = seed_simple_desk(mark="500.00", cost="400.00")
+    stub = WriteStubAtlas(offer_price="500.00", ticketing=True)
+    stub.verify_result = VerifyResult(
+        offer_id="off-1", booking_id="bk-1", price_change="increased",
+        previous_price=Decimal("500.00"), current_price=Decimal("20000.00"),
+        currency="USD",
+    )
+    agent = make_agent(stub)
+    result, events = run_cycle(agent, desk_id)
+
+    assert stub.confirm_calls == 1   # confirm-price proceeded on `increased`
+    assert stub.create_calls == 0    # the budget invariant is fail-closed
+    assert stub.pay_calls == 0
+    errors = [e for e in events if e["type"] == "error"]
+    assert any(
+        e["code"] == "BUDGET_EXCEEDED"
+        and e["position_id"] == desk_id + "-pos-1"
+        for e in errors
+    )
+    # Error events stay code-only — no raw message text on the wire.
+    assert all("message" not in e for e in errors)
+    # The position was never booked.
+    with database.SessionLocal() as session:
+        row = session.execute(
+            select(PositionRow).where(PositionRow.id == desk_id + "-pos-1")
+        ).scalar_one()
+        assert row.status == "held"
+        assert row.ticket_asserted is False
+    assert result.status == "closed"
+
+
+def test_budget_spent_persists_after_stubbed_live_booking(tmp_db):
+    """Fix 5 — the booked amount is persisted to budgets.spent in the settle
+    transaction, so a second cycle re-reads the real spent instead of a
+    guard that resets to zero."""
+    desk_id = seed_simple_desk(mark="500.00", cost="400.00")
+    stub = WriteStubAtlas(offer_price="500.00", ticketing=True)
+    agent = make_agent(stub)
+    result, events = run_cycle(agent, desk_id)
+
+    assert stub.create_calls == 1 and stub.pay_calls == 1
+    assert result.status == "closed"
+    with database.SessionLocal() as session:
+        budget = session.execute(
+            select(BudgetRow).where(BudgetRow.desk_id == desk_id)
+        ).scalar_one()
+        assert budget.spent == Decimal("500.00")  # consumption persisted
+        row = session.execute(
+            select(PositionRow).where(PositionRow.id == desk_id + "-pos-1")
+        ).scalar_one()
+        assert row.status == "booked"
+        assert row.ticket_asserted is True
+
+
+def test_escalation_slot_removed_on_timeout(tmp_db):
+    """Fix 8 — when the bounded escalation wait times out, the slot is
+    removed from the registry (slot hygiene) so a late decision hits a gone
+    slot, and the cycle gives up honestly."""
+    desk_id = seed_simple_desk(mark="1800.00", cost="1000.00", count=1)
+    stub = WriteStubAtlas(offer_price=None, ticketing=True)
+    registry: dict[str, dict] = {}
+    cleared: list[str] = []
+
+    def slot_factory(desk_id_arg, esc_id):
+        slot = {"event": asyncio.Event(), "choice": None}
+        registry[esc_id] = slot
+        return slot
+
+    def clear_hook(desk_id_arg, esc_id):
+        registry.pop(esc_id, None)
+        cleared.append(esc_id)
+
+    agent = make_agent(
+        stub, escalation_slot=slot_factory, escalation_clear=clear_hook,
+        escalation_wait=0.05,
+    )
+    result, events = run_cycle(agent, desk_id)
+
+    assert result.status == "escalated"  # nobody clicked → give-up path
+    assert cleared and registry == {}    # the slot was removed on timeout
+    assert stub.create_calls == 0        # nothing executed on a guess
+
+
+def test_init_db_drops_empty_legacy_tables(tmp_db):
+    """Fix 9 — init_db's all-empty guard also counts + drops the legacy visa
+    orphan tables, but a single legacy row vetoes the whole drop."""
+    from sqlalchemy import inspect, text
+
+    with database.engine.begin() as conn:
+        conn.execute(text('CREATE TABLE "orders" (id INTEGER PRIMARY KEY)'))
+        conn.execute(text('CREATE TABLE "trips" (id INTEGER PRIMARY KEY)'))
+    database.init_db()
+    inspector = inspect(database.engine)
+    assert not inspector.has_table("orders")   # legacy orphan dropped
+    assert not inspector.has_table("trips")    # legacy orphan dropped
+    assert inspector.has_table("mandate")      # desk tables recreated
+
+    # No-data-loss guard: any legacy row anywhere vetoes the drop.
+    with database.engine.begin() as conn:
+        conn.execute(
+            text('CREATE TABLE "decisions" (id INTEGER PRIMARY KEY)')
+        )
+        conn.execute(text('INSERT INTO "decisions" (id) VALUES (1)'))
+    database.init_db()
+    assert inspect(database.engine).has_table("decisions")  # preserved

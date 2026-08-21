@@ -72,6 +72,15 @@ def _register_escalation(desk_id: str, esc_id: str) -> dict | None:
     return slot
 
 
+def _clear_escalation(desk_id: str, esc_id: str) -> None:
+    """Slot hygiene (fix 8): drop the escalation once the loop's bounded
+    wait timed out or the click landed. A late POST then sees a gone slot
+    and gets a 410 instead of a misleading 200."""
+    state = DESKS.get(desk_id)
+    if state is not None:
+        state.escalations.pop(esc_id, None)
+
+
 def _report_meter(desk_id: str, used: int) -> None:
     """Mirror the cycle's live meter onto DeskState for the snapshot."""
     state = DESKS.get(desk_id)
@@ -83,6 +92,7 @@ AGENT = DeskAgent(
     step_budget=12,
     store=STORE,
     escalation_slot=_register_escalation,
+    escalation_clear=_clear_escalation,
     meter_report=_report_meter,
 )
 
@@ -102,9 +112,11 @@ async def _run_desk(state: DeskState) -> None:
             state.result = result
             state.done = True
             state.cond.notify_all()
-    except Exception as exc:  # noqa: BLE001 — surface failures on the stream
+    except Exception:  # noqa: BLE001 — surface failures on the stream
+        # Code-only error event (fix 3): the raw exception detail stays
+        # server-side and never rides the wire.
         async with state.cond:
-            state.events.append({"type": "error", "message": str(exc)})
+            state.events.append({"type": "error", "code": "DESK_CYCLE_FAILED"})
             state.done = True
             state.cond.notify_all()
 
@@ -200,13 +212,16 @@ async def escalation_decision(
 ) -> dict:
     """The one human click: approve option A or B for a pending escalation.
 
-    S1 stores the choice and signals the asyncio.Event that S3's execute
-    wall awaits; unknown escalations 404 (nothing executes on a guess).
+    Stores the choice and signals the asyncio.Event that the execute wall
+    awaits. A slot that is absent — never registered, or already timed
+    out / consumed (fix 8 slot hygiene) — answers 410 Gone; nothing
+    executes on a guess, and a late click never reads as a 200. The desk
+    itself being unknown still 404s via `_get_state`.
     """
     state = _get_state(desk_id)
     escalation = state.escalations.get(esc_id)
     if escalation is None:
-        raise HTTPException(status_code=404, detail="unknown escalation")
+        raise HTTPException(status_code=410, detail="escalation gone")
     escalation["choice"] = decision.choice
     escalation["event"].set()
     return {"desk_id": desk_id, "esc_id": esc_id, "choice": decision.choice}

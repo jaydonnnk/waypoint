@@ -46,6 +46,10 @@ DEFAULT_ESCALATION_WAIT = 300.0
 # "choice": None} registered on the desk state, or None when no human is
 # reachable (fail closed — nothing executes on a guess).
 EscalationSlot = Callable[[str, str], "dict | None"]
+# Slot hygiene: (desk_id, esc_id) -> None removes the slot once the wait
+# timed out or the click landed (a late POST then gets a 410, never a
+# misleading 200).
+EscalationClear = Callable[[str, str], None]
 # Meter mirror for GET /api/desk/{id} snapshots: (desk_id, used) -> None.
 MeterReport = Callable[[str, int], None]
 
@@ -79,6 +83,7 @@ class DeskAgent:
         brain: DeskBrain | None = None,
         store: DeskStore | None = None,
         escalation_slot: EscalationSlot | None = None,
+        escalation_clear: EscalationClear | None = None,
         meter_report: MeterReport | None = None,
         escalation_wait: float = DEFAULT_ESCALATION_WAIT,
         pace: float = 0.5,
@@ -92,6 +97,8 @@ class DeskAgent:
         # The one human click seam (routes.py registers the asyncio.Event
         # on the DeskState escalations hook); None in bare tests.
         self.escalation_slot = escalation_slot
+        # Removes a used/expired escalation slot (slot hygiene); None-safe.
+        self.escalation_clear = escalation_clear
         self.meter_report = meter_report
         self.escalation_wait = escalation_wait
         # Paced step emit so the stream reads live (0 in tests).
@@ -128,7 +135,12 @@ class DeskAgent:
 
         # Comparison mode = decisions logged + marked, NO write commands.
         # Fail-closed: any doubt about ticketing keeps the desk read-only.
-        comparison = self._comparison_mode()
+        # Per-cycle cache reset (fix 7): a mid-run ticketing activation
+        # takes effect next cycle, and the probe runs at most once here.
+        reset_probe = getattr(self.atlas, "reset_ticketing_cache", None)
+        if reset_probe is not None:
+            reset_probe()
+        comparison = await self._comparison_mode()
         mode = COMPARISON_MODE_LABEL if comparison else "live ticketing"
 
         # --- meta: the mandate card + full search meter + mode label.
@@ -213,6 +225,11 @@ class DeskAgent:
             return await self._give_up(desk_id, emit, step)
 
         # --- EXECUTE WALL + write path, strictly sequential per position.
+        # Capture the starting remainders so the settle step can persist
+        # exactly what the write path consumed (fix 5): spent = budget
+        # delta, contingency delta = absorbed PRICE_CHANGED amounts.
+        budget_start = budget_left
+        contingency_start = contingency_left
         status = "closed"
         pos_by_id = {p.id: p for p in positions}
         for action in actions:
@@ -284,10 +301,15 @@ class DeskAgent:
             if step >= self.step_budget:
                 return await self._give_up(desk_id, emit, step)
 
-        # --- settle: one ledger transaction for the cycle's entries.
+        # --- settle: one ledger transaction for the cycle's entries, plus
+        # --- persisted budget consumption (fix 5) so the guard survives a
+        # --- restart instead of resetting on the next cycle.
         if settle:
+            spend_total = budget_start - budget_left
+            contingency_used_total = contingency_start - contingency_left
             await asyncio.to_thread(
-                self.store.append_ledger, desk_id, settle
+                self.store.settle,
+                desk_id, settle, spend_total, contingency_used_total,
             )
         await emit_step(
             f"Settled {len(settle)} ledger entries in one transaction; "
@@ -442,8 +464,17 @@ class DeskAgent:
                 slot["event"].wait(), timeout=self.escalation_wait
             )
         except asyncio.TimeoutError:
+            self._clear_escalation(desk_id, esc_id)  # slot hygiene (fix 8)
             return None  # bounded wait expired → give-up path
-        return slot.get("choice")
+        choice = slot.get("choice")
+        self._clear_escalation(desk_id, esc_id)  # slot hygiene (fix 8)
+        return choice
+
+    def _clear_escalation(self, desk_id: str, esc_id: str) -> None:
+        """Remove the escalation slot once the wait timed out or the click
+        landed — a late POST then gets a 410, never a misleading 200."""
+        if self.escalation_clear is not None:
+            self.escalation_clear(desk_id, esc_id)
 
     # ------------------------------------------------------------------
     # Write path (LIVE mode only) — strictly sequential per position.
@@ -488,6 +519,21 @@ class DeskAgent:
             except AtlasError as exc:
                 await emit({
                     "type": "error", "code": exc.code,
+                    "position_id": pos.id,
+                })
+                return budget_left, contingency_left
+
+            # BUDGET INVARIANT (fix 1): the execute wall re-checks the REAL
+            # verified price against budget_left RIGHT BEFORE the write.
+            # verify may report `increased` (and confirm_price may proceed),
+            # so the mark-based wall check is not enough — the desk must
+            # never book above the remaining budget. Budget is NEVER waived
+            # (an escalated "A" click waives only the authority cap). Fail
+            # closed: code-only error, position stays held, nothing written.
+            if verified.current_price > budget_left:
+                await emit({
+                    "type": "error",
+                    "code": "BUDGET_EXCEEDED",
                     "position_id": pos.id,
                 })
                 return budget_left, contingency_left
@@ -577,7 +623,8 @@ class DeskAgent:
                 position_id=pos.id, ref=ref.order_no,
                 note="booked \u2014 TICKETED asserted, sandbox money",
             ))
-            # Alloc beat: seat service unavailable → ledger-only entry.
+            # Alloc beat — S4 SEAM: hardcoded ledger-only today; replace with
+            # a seat_list probe funded by realized savings when S4 lands.
             settle.append(LedgerInput(
                 kind="alloc", amount=Decimal("0"), position_id=pos.id,
                 ref="ledger_only",
@@ -674,15 +721,17 @@ class DeskAgent:
             losses_admitted=0, step_count=step,
         ))
 
-    def _comparison_mode(self) -> bool:
+    async def _comparison_mode(self) -> bool:
         """The write-path gate. True while ticketing is blocked: decisions
         are logged + marked but NO write commands run (labeled on the
-        wire). Fail-closed on any probe absence or error."""
+        wire). Fail-closed on any probe absence or error. The auth-status
+        probe is a blocking subprocess, so it runs off the event loop via
+        asyncio.to_thread (fix 2) — never inline on the loop."""
         probe = getattr(self.atlas, "ticketing_live", None)
         if probe is None:
             return True
         try:
-            return not probe()
+            return not await asyncio.to_thread(probe)
         except Exception:  # noqa: BLE001 — normalized posture only
             return True
 

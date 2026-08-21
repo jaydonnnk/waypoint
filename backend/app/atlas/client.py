@@ -192,7 +192,8 @@ class AtlasClient:
         # Injectable for tests; defaults to `atlas-flight` on PATH.
         self._cli_path = cli_path
         # Comparison-mode switch cache: ONE auth-status subprocess per
-        # process/cycle (ticketing_live); None = not probed yet.
+        # cycle (ticketing_live), reset at the start of each DeskAgent.run;
+        # None = not probed yet this cycle.
         self._ticketing_cache: bool | None = None
 
     def _cli(self) -> str:
@@ -223,6 +224,12 @@ class AtlasClient:
             )
         except subprocess.TimeoutExpired as exc:
             raise AtlasError("TIMEOUT", f"atlas-flight {' '.join(args[:2])} timed out") from exc
+        except (OSError, UnicodeDecodeError) as exc:
+            # Transport failure (fix 6): missing binary / OS error /
+            # undecodable stdout. Normalized to a typed AtlasError so the
+            # loop's per-position handlers catch a code instead of a raw
+            # non-AtlasError escaping. Internal cause stays server-side.
+            raise AtlasError("BAD_TRANSPORT", "atlas-flight transport failure") from exc
         return self._parse_stdout(proc.stdout)
 
     def _run_read_only(self, args: list[str], timeout: float | None = None) -> dict:
@@ -312,15 +319,22 @@ class AtlasClient:
         )
 
     def ticketing_live(self) -> bool:
-        """Cached write-path gate: ONE auth-status subprocess per
-        process/cycle. Fail-closed — any error keeps the desk in
-        comparison mode (nothing ordered)."""
+        """Cached write-path gate: ONE auth-status subprocess per cycle
+        (the loop resets the cache at the start of every run — fix 7).
+        Fail-closed — any error keeps the desk in comparison mode
+        (nothing ordered)."""
         if self._ticketing_cache is None:
             try:
                 self._ticketing_cache = self.auth_status().ticketing_available
             except (AtlasError, OSError):
                 self._ticketing_cache = False
         return self._ticketing_cache
+
+    def reset_ticketing_cache(self) -> None:
+        """Per-cycle reset hook (fix 7): DeskAgent.run calls this before the
+        comparison-mode probe so a mid-run ticketing activation takes effect
+        next cycle, and at most ONE probe subprocess runs per cycle."""
+        self._ticketing_cache = None
 
     # ------------------------------------------------------------------
     # Write path (S2). The contract enumerates FAILURE codes; a step

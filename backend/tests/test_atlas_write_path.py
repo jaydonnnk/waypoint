@@ -19,7 +19,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from app.atlas.client import AtlasClient
+from app.atlas.client import AtlasClient, AtlasError
 
 pytestmark = [
     pytest.mark.live,
@@ -123,6 +123,108 @@ def test_live_write_path_tickets():
     result = client.pay(ref.payment_confirmation_id)  # ID from THAT create
 
     # The outcome assertion: TICKETED from `order status`, nothing else.
+    status, ticket_asserted = client.poll_until_ticketed(
+        ref.order_no, deadline=90.0
+    )
+
+    assert counts == {"create": 1, "pay": 1}, "writes must run exactly once"
+    assert result.order_no in (ref.order_no, None)
+    assert ticket_asserted is True, f"never ticketed: code={status.code}"
+    assert status.code == "TICKETED"
+
+
+def test_live_seat_select_pre_order():
+    """Seats are booking-stage, pre-order: seat_list(booking_id) after
+    verify, then seat_select BEFORE `order create` (which carries
+    --seat-policy continue-without-seat). Degrade discipline: an EMPTY
+    list or SEAT_UNAVAILABLE never blocks the main flow — the alloc just
+    lands ledger-only (the loop's disclosed degrade), and codes/counts are
+    the only things surfaced. Same double gate + skip checks as the
+    write-path proof; skips cleanly today (ticketing blocked)."""
+    client = AtlasClient()
+
+    # Gate 0: identical auth/ticketing skip checks as the write proof.
+    auth = client.auth_status()
+    if not auth.authorized:
+        pytest.skip(f"Atlas not authorized: {auth.code}")
+    if not auth.ticketing_available:
+        pytest.skip(
+            "seat proof blocked — ticketing unavailable"
+            f" (code={auth.code}, blocker={auth.ticketing_blocker or 'none'})"
+        )
+
+    # One search on the UAT route (~3 weeks out keeps it bookable).
+    depart = date.today() + timedelta(days=21)
+    offers = client.search(ORIGIN, DESTINATION, depart, 1)
+    current_bookable = [
+        o for o in offers
+        if o.bookable and o.price_status in ("current", "verified")
+    ]
+    candidates = current_bookable or [o for o in offers if o.bookable]
+    if not candidates:
+        pytest.skip(
+            f"no bookable offer on {ORIGIN}->{DESTINATION}"
+            f" (offers={len(offers)})"
+        )
+    offer = candidates[0]
+
+    verify = client.verify(offer.atlas_offer_id)
+    if verify.price_change == "increased":
+        client.confirm_price(verify.booking_id)  # conditional step ONLY
+
+    # --- seat list BEFORE any order (booking-stage, booking_id-bound).
+    degraded = False
+    try:
+        seats = client.seat_list(verify.booking_id)
+    except AtlasError as exc:
+        if exc.code == "SEAT_UNAVAILABLE":
+            seats, degraded = [], True  # typed degrade, code-branched
+        else:
+            raise
+    if degraded or not seats:
+        # The degrade is the alloc: ledger-only, main flow never blocked.
+        # (The loop records the disclosed "ledger-only" note.) Nothing
+        # further to prove here — the order proof lives above.
+        assert seats == []
+        return
+
+    # Seats exist: select exactly ONE id from the LATEST list response,
+    # bound to the first verify-returned traveler (carry, never invent).
+    seat = seats[0]
+    traveler_id = (verify.travelers or [{}])[0].get("traveler_id", "")
+    segment_id = str(seat.get("segment_id", ""))
+    seat_id = str(seat.get("seat_id", ""))
+    if not (traveler_id and segment_id and seat_id):
+        pytest.skip("seat option lacks traveler/segment/seat ids")
+
+    selection = client.seat_select(
+        verify.booking_id, traveler_id, segment_id, seat_id
+    )
+    if not selection.available:
+        # SEAT_UNAVAILABLE on select → same ledger-only degrade; continue.
+        assert selection.code == "SEAT_UNAVAILABLE"
+        return
+
+    # Seat selected BEFORE the order: create carries the seat policy.
+    counts = {"create": 0, "pay": 0}
+    real_create, real_pay = client.create_order, client.pay
+
+    def counted_create(*args, **kwargs):
+        counts["create"] += 1
+        return real_create(*args, **kwargs)
+
+    def counted_pay(*args, **kwargs):
+        counts["pay"] += 1
+        return real_pay(*args, **kwargs)
+
+    client.create_order, client.pay = counted_create, counted_pay
+
+    ref = client.create_order(
+        verify.booking_id,
+        _build_pax_json(verify),
+        seat_policy="continue-without-seat",
+    )
+    result = client.pay(ref.payment_confirmation_id)  # ID from THAT create
     status, ticket_asserted = client.poll_until_ticketed(
         ref.order_no, deadline=90.0
     )
