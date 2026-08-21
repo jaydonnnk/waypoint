@@ -34,7 +34,6 @@ CLOSE_WAIT_SECONDS = 60.0
 # One store + one agent for the process. AGENT must stay a module-level
 # attribute so tests can monkeypatch it (stub-client DI).
 STORE = DeskStore()
-AGENT = DeskAgent(step_budget=12, store=STORE)
 
 
 @dataclass
@@ -60,6 +59,32 @@ class DeskState:
 
 # In-memory desk registry, keyed by desk_id.
 DESKS: dict[str, DeskState] = {}
+
+
+def _register_escalation(desk_id: str, esc_id: str) -> dict | None:
+    """Execute-wall hook: register the asyncio.Event the loop awaits on
+    the desk's escalations map. None (unknown desk) = fail closed."""
+    state = DESKS.get(desk_id)
+    if state is None:
+        return None
+    slot = {"event": asyncio.Event(), "choice": None}
+    state.escalations[esc_id] = slot
+    return slot
+
+
+def _report_meter(desk_id: str, used: int) -> None:
+    """Mirror the cycle's live meter onto DeskState for the snapshot."""
+    state = DESKS.get(desk_id)
+    if state is not None:
+        state.meter_used = used
+
+
+AGENT = DeskAgent(
+    step_budget=12,
+    store=STORE,
+    escalation_slot=_register_escalation,
+    meter_report=_report_meter,
+)
 
 
 async def _emit(state: DeskState, event: dict) -> None:
