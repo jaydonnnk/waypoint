@@ -299,6 +299,19 @@ body {
   border-color: #cfe3cf; background: #f1f7f1; color: var(--good);
 }
 .close-room { color: var(--mut); font-size: 12px; margin-top: 18px; }
+/* S7 risk-officer slot — filled only with what /close actually returned. */
+.close-room.filled { border-top: 1px dashed var(--line); padding-top: 12px; }
+.close-room.filled .auditor-k {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.8px;
+  text-transform: uppercase; color: var(--mut);
+}
+.close-room.filled .auditor-line {
+  font-family: var(--display); font-size: 15px; font-style: italic;
+  color: var(--ink); margin: 6px 0 0;
+}
+.close-room.filled .auditor-src {
+  font-size: 11.5px; color: var(--warn); font-style: italic; margin-top: 5px;
+}
 
 /* ---- base table (kept) ---- */
 table {

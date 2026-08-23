@@ -30,8 +30,17 @@ import httpx
 from app.models import DeskAction, Position
 
 # DashScope OpenAI-compatible endpoint (no SDK dependency).
-DASHSCOPE_URL = (
-    "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+#
+# Some Model Studio API keys are workspace-scoped (a "sk-ws-..." key tied to
+# a dedicated workspace inference domain) and are REJECTED by the generic
+# dashscope.aliyuncs.com host with invalid_api_key -- confirmed against the
+# real key issued for this project. DASHSCOPE_BASE_URL lets ops override the
+# host without a code change (e.g. a future generic pay-as-you-go key); the
+# default below is this project's confirmed-working workspace domain.
+DASHSCOPE_URL = os.environ.get(
+    "DASHSCOPE_BASE_URL",
+    "https://ws-332gxo4yax9lutfc.ap-southeast-1.maas.aliyuncs.com"
+    "/compatible-mode/v1/chat/completions",
 )
 DEFAULT_MODEL = "qwen-plus"
 JUDGE_TIMEOUT_SECONDS = 15.0

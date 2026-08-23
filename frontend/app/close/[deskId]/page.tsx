@@ -189,6 +189,7 @@ export default function ClosePage() {
 
   // ---------- 200: branch on result.status -----------------------------------
   const result: DeskResult = outcome.result;
+  const report = outcome.report;
   const copy = STATUS_COPY[result.status] ?? STATUS_COPY.failed;
   const pnl = Number(result.pnl);
   const pnlCls = pnl > 0 ? "pos" : pnl < 0 ? "neg" : "";
@@ -219,6 +220,14 @@ export default function ClosePage() {
             <div className="cs-k">steps used</div>
             <div className="cs-v">{result.step_count}</div>
           </div>
+          {/* S7: breach count is computed in code server-side; render exactly
+              what came back, nothing if the field is absent. */}
+          {typeof report?.policy_breaches === "number" ? (
+            <div className="close-stat">
+              <div className="cs-k">policy-cap breaches</div>
+              <div className="cs-v">{report.policy_breaches}</div>
+            </div>
+          ) : null}
         </div>
 
         {/* Mode line — unconditional: honesty register shows WHICH mode ran. */}
@@ -235,8 +244,26 @@ export default function ClosePage() {
           </div>
         )}
 
-        {/* Room for one more line later (S7 risk-officer verdict). */}
-        <div className="close-room" aria-hidden="true" />
+        {/* S7 risk-officer verdict slot: render the auditor line exactly as
+            returned — labeled as a second-pass heuristic challenge, never an
+            authority. Nothing renders if the line is absent. */}
+        {typeof report?.auditor_line === "string" && report.auditor_line ? (
+          <div className="close-room filled">
+            <div className="auditor-k">
+              second-pass risk officer review — a heuristic challenge, not an
+              authority
+            </div>
+            <p className="auditor-line">{report.auditor_line}</p>
+            {report.auditor_source === "deterministic-fallback" ? (
+              <div className="auditor-src">
+                disclosure: this line came from the deterministic fallback — no
+                auditor agent ran
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="close-room" aria-hidden="true" />
+        )}
       </div>
 
       <Link className="cta ghost" href="/">

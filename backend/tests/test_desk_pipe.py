@@ -63,7 +63,22 @@ def stub_agent(monkeypatch):
     return stub
 
 
-def test_seed_persists_mandate_positions_budgets(tmp_db, stub_agent):
+@pytest.fixture()
+def stub_auditor(monkeypatch):
+    """Hermetic close: the /close handler's risk auditor is stubbed so NO
+    test can ever perform a real Qwen call — even in a developer shell
+    that exports DASHSCOPE_API_KEY. Same monkeypatch pattern as
+    stub_agent; every test that hits /close takes this fixture.
+    (StubAuditor is defined in the S7 section below; resolved at test
+    time, after the module is fully loaded.)"""
+    stub = StubAuditor()
+    monkeypatch.setattr(routes, "AUDITOR", stub)
+    return stub
+
+
+def test_seed_persists_mandate_positions_budgets(
+    tmp_db, stub_agent, stub_auditor,
+):
     """POST /api/desk/seed lands the first real DB writes — and the seed is
     re-readable via a DIRECT session on the throwaway file."""
     with TestClient(app) as client:
@@ -74,7 +89,9 @@ def test_seed_persists_mandate_positions_budgets(tmp_db, stub_agent):
         # Join the background cycle before the client context closes.
         final = client.get(f"/api/desk/{desk_id}/close")
         assert final.status_code == 200
-        assert final.json()["status"] == "closed"
+        # S7: /close returns the CloseReport wrapper — the DeskResult now
+        # rides under the "result" key.
+        assert final.json()["result"]["status"] == "closed"
 
     with database.SessionLocal() as session:
         # Mandate persisted with its full field set (incl. holder/timestamp).
@@ -171,7 +188,7 @@ from uuid import uuid4
 
 from app import fixture
 from app.atlas.client import AtlasError, AtlasQueryOnly
-from app.db.store import DeskStore
+from app.db.store import DeskStore, LedgerInput
 from app.models import (
     Budget,
     Mandate,
@@ -1004,3 +1021,168 @@ def test_give_up_after_live_booking_persists_trade_row_and_spend(
     assert trade_rows[0].ref == "ord-1"
     assert budget.spent == Decimal("500.00")  # spend persisted on give-up
     assert row.status == "booked" and row.ticket_asserted is True
+
+
+# ==========================================================================
+# Slice 7 — weekly close: CloseReport wrapper, code-derived breach count,
+# auditor degrade, one-flag scenario injection. Auditor stubbed via the
+# module-level AUDITOR seam (same monkeypatch pattern as AGENT) — NO
+# network, NO real Qwen.
+# ==========================================================================
+
+
+class StubAuditor:
+    """Deterministic stand-in for RiskAuditor (returns a fixed line)."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def read(self, mandate, positions, ledger_tail, policy_breaches):
+        self.calls += 1
+        return (
+            "Held JFK\u2192LIS through a \u2212$22.00 mark \u2014 was the "
+            "timing deliberate?",
+            "agent",
+        )
+
+
+class RaisingAuditor:
+    """Auditor failure simulation — the close must degrade, never 500."""
+
+    async def read(self, mandate, positions, ledger_tail, policy_breaches):
+        raise RuntimeError("auditor unavailable (stub)")
+
+
+def test_close_returns_close_report_with_zero_breaches(
+    tmp_db, stub_agent, stub_auditor,
+):
+    """S7 — /close returns the CloseReport wrapper: the bare DeskResult
+    under "result", the code-computed breach count (0 on the scripted
+    run — the execute wall never lets an unwaived over-cap trade settle)
+    and the auditor line + source."""
+    with TestClient(app) as client:
+        desk_id = client.post("/api/desk/seed").json()["desk_id"]
+        final = client.get(f"/api/desk/{desk_id}/close")
+    assert final.status_code == 200
+    body = final.json()
+    # Exactly the frozen wire contract — nothing more, nothing less.
+    assert set(body) == {
+        "result", "policy_breaches", "auditor_line", "auditor_source",
+    }
+    assert body["result"]["desk_id"] == desk_id
+    assert body["result"]["status"] == "closed"
+    assert body["policy_breaches"] == 0
+    assert body["auditor_line"]
+    assert body["auditor_source"] == "agent"
+    assert stub_auditor.calls == 1  # exactly one close-time read
+
+
+def test_close_auditor_failure_degrades_and_never_500s(
+    tmp_db, stub_agent, monkeypatch,
+):
+    """A raising auditor degrades to the deterministic fallback line with
+    source "deterministic-fallback" — the close still answers 200."""
+    monkeypatch.setattr(routes, "AUDITOR", RaisingAuditor())
+    with TestClient(app) as client:
+        desk_id = client.post("/api/desk/seed").json()["desk_id"]
+        final = client.get(f"/api/desk/{desk_id}/close")
+    assert final.status_code == 200
+    body = final.json()
+    assert body["auditor_source"] == "deterministic-fallback"
+    assert body["auditor_line"]  # the deterministic one-liner still lands
+    assert body["policy_breaches"] == 0
+
+
+def test_policy_breach_count_scans_the_blotter_not_hardcoded(tmp_db):
+    """The breach count is code-derived: 0 on a clean blotter, 1 once an
+    over-cap trade row without a human-waiver marker is synthesized, and
+    the marker (the one human click) authorizes an over-cap trade."""
+    desk_id = seed_simple_desk()
+    store = DeskStore()
+    mandate, positions, _, ledger = store.reload_desk(desk_id)
+    assert routes.count_policy_breaches(mandate.authority_cap, ledger) == 0
+
+    # Synthesize an over-cap trade row — the count must move to 1.
+    store.append_ledger(desk_id, [LedgerInput(
+        kind="trade", amount=Decimal("1600.00"),
+        position_id=positions[0].id, ref="ord-9",
+        note="booked \u2014 TICKETED asserted, sandbox money",
+    )])
+    _, _, _, ledger = store.reload_desk(desk_id)
+    assert routes.count_policy_breaches(mandate.authority_cap, ledger) == 1
+
+    # A human-waiver marker authorizes the over-cap trade (no new breach).
+    store.append_ledger(desk_id, [LedgerInput(
+        kind="trade", amount=Decimal("1700.00"),
+        position_id=positions[0].id, ref="ord-10",
+        note="human waiver \u2014 escalation approved by the one click",
+    )])
+    _, _, _, ledger = store.reload_desk(desk_id)
+    assert routes.count_policy_breaches(mandate.authority_cap, ledger) == 1
+
+    # Non-trade kinds and within-cap trades never count.
+    store.append_ledger(desk_id, [
+        LedgerInput(kind="loss", amount=Decimal("9999.00")),
+        LedgerInput(kind="trade", amount=Decimal("100.00")),
+    ])
+    _, _, _, ledger = store.reload_desk(desk_id)
+    assert routes.count_policy_breaches(mandate.authority_cap, ledger) == 1
+
+
+def test_injection_flag_disarms_spike_and_losses_fixture_level():
+    """S7 DECISION 1 — inject_scenario=False: pos-2's mark is in-band
+    under the cap near cost with a plain label; pos-3/6 marks sit at or
+    above cost. Default True keeps the scripted scenario byte-identical."""
+    mandate, positions, _ = fixture.seeded_portfolio(inject_scenario=False)
+    spike = next(p for p in positions if p.origin == "DAC")
+    assert spike.mark_price <= mandate.authority_cap
+    assert spike.mark_price >= spike.cost_basis  # near cost, in-band
+    assert "(injected)" not in spike.trip_label
+    losers = [
+        p for p in positions
+        if (p.origin, p.dest) in {("JFK", "LIS"), ("GRU", "MIA")}
+    ]
+    assert len(losers) == 2
+    assert all(p.mark_price >= p.cost_basis for p in losers)
+    # The default stays armed and byte-identical to the scripted seed.
+    _, armed, _ = fixture.seeded_portfolio()
+    spike_on = next(p for p in armed if p.origin == "DAC")
+    assert spike_on.mark_price == Decimal("1790.00")
+    assert "(injected)" in spike_on.trip_label
+
+
+def test_injection_env_flag_flows_through_the_seed_endpoint(
+    tmp_db, stub_agent, stub_auditor, monkeypatch,
+):
+    """WAYPOINT_INJECT_SCENARIO="0" disarms the scenario end-to-end: the
+    seeded DB carries no spike (mark \u2264 cap) and no "(injected)" label."""
+    monkeypatch.setenv("WAYPOINT_INJECT_SCENARIO", "0")
+    with TestClient(app) as client:
+        desk_id = client.post("/api/desk/seed").json()["desk_id"]
+        client.get(f"/api/desk/{desk_id}/close")  # join the cycle
+    with database.SessionLocal() as session:
+        positions = session.execute(
+            select(PositionRow).where(PositionRow.desk_id == desk_id)
+        ).scalars().all()
+    assert all("(injected)" not in p.trip_label for p in positions)
+    dac = next(p for p in positions if p.origin == "DAC")
+    assert dac.mark_price <= Decimal("1500.00")
+
+
+@pytest.mark.parametrize("value", ["false", " 0", ""])
+def test_injection_env_flag_strict_only_exact_zero_disarms(
+    tmp_db, stub_agent, stub_auditor, monkeypatch, value,
+):
+    """Strict parse (WAYPOINT_LIVE_BOOKING precedent, inverted default):
+    only EXACTLY "0" disarms — any other value stays armed."""
+    monkeypatch.setenv("WAYPOINT_INJECT_SCENARIO", value)
+    with TestClient(app) as client:
+        desk_id = client.post("/api/desk/seed").json()["desk_id"]
+        client.get(f"/api/desk/{desk_id}/close")  # join the cycle
+    with database.SessionLocal() as session:
+        positions = session.execute(
+            select(PositionRow).where(PositionRow.desk_id == desk_id)
+        ).scalars().all()
+    dac = next(p for p in positions if p.origin == "DAC")
+    assert dac.mark_price == Decimal("1790.00")  # still armed
+    assert "(injected)" in dac.trip_label

@@ -3,7 +3,7 @@
 - POST /api/desk/seed                                       -> seeds mandate + portfolio, starts the desk cycle, returns desk_id
 - GET  /api/desk/{desk_id}/stream                           -> SSE of the agent's live cycle (drives Screen 2)
 - GET  /api/desk/{desk_id}                                  -> desk state snapshot: positions/ledger/budgets + search meter
-- GET  /api/desk/{desk_id}/close                            -> the final DeskResult (drives Screen 3)
+- GET  /api/desk/{desk_id}/close                            -> the CloseReport: wrapped DeskResult + code-computed breach count + auditor line (drives Screen 3)
 - POST /api/desk/{desk_id}/escalations/{esc_id}/decision    -> the one human click (approve option A/B)
 
 Desk state is held in-memory per desk (single-process dev server); the DB
@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -23,13 +25,42 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import fixture
+from app.agent.auditor import SOURCE_FALLBACK, RiskAuditor, fallback_challenge
 from app.agent.loop import METER_MAX, DeskAgent
 from app.db.store import DeskStore
-from app.models import DeskResult
+from app.models import CloseReport, DeskResult
 
 router = APIRouter(prefix="/api", tags=["waypoint"])
 
 CLOSE_WAIT_SECONDS = 60.0
+
+# Outer belt over the auditor's own bounded wait — narration must never
+# turn a finished close into a 500 or a long hang.
+AUDITOR_WAIT_SECONDS = 8.0
+
+# One-flag scenario injection (S7, DECISION 1). Strict parse, INVERTED
+# default vs WAYPOINT_LIVE_BOOKING: armed unless the env reads EXACTLY
+# "0" — unset or any other value keeps the scripted loss+spike scenario
+# ON (the demo default).
+INJECT_SCENARIO_ENV = "WAYPOINT_INJECT_SCENARIO"
+
+# HUMAN_WAIVER_MARKER — honesty register (S7 review ruling):
+# A blotter trade row carrying this marker in its note is treated as
+# authorized by the one human escalation click — an over-cap trade WITH
+# it is no breach. The honest state of this hook today:
+#
+# 1. FORWARD-COMPAT ONLY. The write path (loop.py, frozen since S6) does
+#    NOT yet emit this marker in any ledger note, so the exclusion branch
+#    below never fires today. It exists so a future slice can light it up.
+# 2. KNOWN-FRAGILE INTERIM HOOK. Substring-matching a free-text note
+#    violates the discipline this codebase enforces everywhere else
+#    (atlas/client.py: branch on structured code, NEVER on message text).
+#    Rewording a note someday would silently break the breach count.
+# 3. FOR THE FUTURE LIVE-BOOKING SLICE: the correct fix is a STRUCTURED
+#    waiver field on the ledger row (a real column/flag), and
+#    count_policy_breaches must branch on THAT — never on note text. Do
+#    NOT "complete" the note-prefix/substring approach later.
+HUMAN_WAIVER_MARKER = "human waiver"
 
 # One store + one agent for the process. AGENT must stay a module-level
 # attribute so tests can monkeypatch it (stub-client DI).
@@ -96,6 +127,46 @@ AGENT = DeskAgent(
     meter_report=_report_meter,
 )
 
+# The S7 risk auditor — routes-layer placement (DECISION 4): it runs ONCE
+# at close time on the settled blotter, never inside the cycle loop, so
+# DeskAgent gets no new param. Module-level so tests can monkeypatch it
+# (same pattern as AGENT).
+AUDITOR = RiskAuditor()
+
+
+def count_policy_breaches(
+    authority_cap: Decimal, ledger_tail: list[dict]
+) -> int:
+    """Deterministic authority-cap breach count — PURE code (ADR 0003/0004;
+    never an LLM verdict). Scans the blotter's `trade` rows: any executed
+    amount above the mandate's authority cap WITHOUT a human-waiver marker
+    is a breach.
+
+    Honesty register:
+    - Window: `ledger_tail` is the NEWEST LEDGER_TAIL_LIMIT (50) rows from
+      `DeskStore.reload_desk` — an over-cap trade row pushed out of that
+      window would not be counted. Unreachable for a one-cycle demo
+      blotter, but stated explicitly rather than implied.
+    - The waiver exemption (HUMAN_WAIVER_MARKER substring on the note) is
+      FORWARD-COMPAT ONLY today: loop.py (frozen since S6) never emits the
+      marker, and substring-matching free text is a known-fragile interim
+      hook — the future live-booking slice must replace it with a
+      structured waiver field on the ledger row (see the constant's note).
+    - In comparison mode (the demo default) nothing books over cap, so the
+      count is structurally 0 — but it is genuinely scanned off the
+      blotter data here, never hardcoded."""
+    breaches = 0
+    for row in ledger_tail:
+        if row.get("kind") != "trade":
+            continue
+        amount = row.get("amount")
+        if amount is None or amount <= authority_cap:
+            continue
+        if HUMAN_WAIVER_MARKER in (row.get("note") or ""):
+            continue  # forward-compat hook — see HUMAN_WAIVER_MARKER note
+        breaches += 1
+    return breaches
+
 
 async def _emit(state: DeskState, event: dict) -> None:
     """Append one event to the desk's buffer and wake any waiting stream."""
@@ -132,15 +203,25 @@ class EscalationDecision(BaseModel):
     choice: Literal["A", "B"]
 
 
+def _inject_scenario_armed() -> bool:
+    """Strict env parse (WAYPOINT_LIVE_BOOKING precedent, inverted default):
+    the scripted loss+spike scenario is armed UNLESS the value reads
+    exactly "0" — unset or anything else stays armed (demo default)."""
+    return os.environ.get(INJECT_SCENARIO_ENV) != "0"
+
+
 @router.post("/desk/seed")
 async def seed_desk() -> dict:
     """Seed the mandate + portfolio (disclosed seeds) and kick off the cycle.
 
     The desk_id IS the mandate id (one desk per mandate). Persistence lands
     via DeskStore BEFORE the agent task starts, so the cycle's first
-    re-read-the-world always finds its data.
+    re-read of the world always finds its data. The loss+spike scenario
+    injection is one-flag (WAYPOINT_INJECT_SCENARIO; "0" disarms).
     """
-    mandate, positions, budgets = fixture.seeded_portfolio()
+    mandate, positions, budgets = fixture.seeded_portfolio(
+        inject_scenario=_inject_scenario_armed()
+    )
     desk_id = await asyncio.to_thread(
         STORE.seed_desk, mandate, positions, budgets
     )
@@ -191,8 +272,12 @@ async def desk_snapshot(desk_id: str) -> dict:
 
 
 @router.get("/desk/{desk_id}/close")
-async def close(desk_id: str) -> DeskResult:
-    """Await completion (bounded) and return the final DeskResult."""
+async def close(desk_id: str) -> CloseReport:
+    """Await completion (bounded), then return the S7 weekly-close report:
+    the bare DeskResult wrapped with the code-computed policy-breach count
+    and the risk auditor's one-line challenge. 504/500/404 semantics are
+    unchanged; the auditor is narration only — its failure degrades to a
+    deterministic line and NEVER turns a close into an error."""
     state = _get_state(desk_id)
     try:
         async with state.cond:
@@ -203,7 +288,28 @@ async def close(desk_id: str) -> DeskResult:
         raise HTTPException(status_code=504, detail="desk cycle did not finish in time")
     if state.result is None:
         raise HTTPException(status_code=500, detail="desk cycle failed")
-    return state.result
+    # Re-read the settled blotter fresh (ONE transaction) for the audit.
+    mandate, positions, _budgets, ledger_tail = await asyncio.to_thread(
+        STORE.reload_desk, desk_id
+    )
+    policy_breaches = count_policy_breaches(mandate.authority_cap, ledger_tail)
+    # The auditor owns narration only. Bounded twice over (its own ~6s
+    # timeout plus this outer wait) and wrapped so any exception/timeout
+    # degrades to the deterministic challenge — never a 500.
+    try:
+        line, source = await asyncio.wait_for(
+            AUDITOR.read(mandate, positions, ledger_tail, policy_breaches),
+            timeout=AUDITOR_WAIT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001 — degrade, never crash the close
+        line = fallback_challenge(positions, policy_breaches)
+        source = SOURCE_FALLBACK
+    return CloseReport(
+        result=state.result,
+        policy_breaches=policy_breaches,
+        auditor_line=line,
+        auditor_source=source,
+    )
 
 
 @router.post("/desk/{desk_id}/escalations/{esc_id}/decision")

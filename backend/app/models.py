@@ -146,6 +146,23 @@ class DeskResult(BaseModel):
     comparison_mode: bool = True
 
 
+class CloseReport(BaseModel):
+    """Weekly-close payload returned ONLY by GET /api/desk/{desk_id}/close.
+
+    Wraps the bare DeskResult — which stays the `result` SSE event payload,
+    byte-identical — with the close-only extras (S7). Split per ADR
+    0003/0004: `policy_breaches` is deterministic code scanning the blotter
+    (never an LLM); `auditor_line` is the risk auditor's narration over
+    already-classified data — a second-pass heuristic challenge, never an
+    oracle or authority. `auditor_source`: "agent" | "deterministic-fallback".
+    """
+
+    result: DeskResult
+    policy_breaches: int
+    auditor_line: str
+    auditor_source: str
+
+
 # --- Atlas write path (S2). Offer/Layover above stay verbatim. -------------
 
 PriceChange = Literal["unchanged", "decreased", "increased"]

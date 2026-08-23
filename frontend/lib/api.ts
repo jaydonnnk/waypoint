@@ -1,4 +1,4 @@
-import type { DeskResult, DeskSnapshot } from "./types";
+import type { CloseReport, DeskResult, DeskSnapshot } from "./types";
 
 // The backend origin. Overridable via NEXT_PUBLIC_API_URL.
 export const API_URL =
@@ -31,11 +31,12 @@ export async function getDeskSnapshot(deskId: string): Promise<DeskSnapshot> {
 }
 
 /** Outcome of GET /api/desk/{desk_id}/close. Branch on `kind`, NEVER on an
- * HTTP code alone: 200 carries DeskResult for every logical outcome
+ * HTTP code alone: 200 carries a CloseReport (DeskResult + the breach count
+ * + auditor line) for every logical outcome
  * (closed / escalated / budget_exhausted / failed); 504 = still running;
  * 500 = the cycle CRASHED (no result exists). */
 export type CloseOutcome =
-  | { kind: "result"; result: DeskResult }
+  | { kind: "result"; result: DeskResult; report: CloseReport }
   | { kind: "still_running" }
   | { kind: "crashed" }
   | { kind: "not_found" } // 404 — unknown desk_id; retrying is futile
@@ -54,8 +55,9 @@ export async function getDeskClose(deskId: string): Promise<CloseOutcome> {
   if (!res.ok) {
     return { kind: "unreachable", detail: `unexpected response (${res.status})` };
   }
-  const result = (await res.json()) as DeskResult;
-  return { kind: "result", result };
+  // S7: the 200 body is a CloseReport wrapper around DeskResult.
+  const report = (await res.json()) as CloseReport;
+  return { kind: "result", result: report.result, report };
 }
 
 export type DecisionOutcome =

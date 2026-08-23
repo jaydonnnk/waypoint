@@ -57,16 +57,39 @@ AUTHORITY_CAP = Decimal("1500.00")
 CONTINGENCY_PCT = 0.05
 
 
-def seeded_portfolio() -> tuple[Mandate, list[Position], list[Budget]]:
+def seeded_portfolio(
+    inject_scenario: bool = True,
+) -> tuple[Mandate, list[Position], list[Budget]]:
     """Deterministic demo portfolio: 6 positions with seeded cost bases.
 
-    Position 2 (DAC→LHR) is the injected escalation-spike position: its
-    cost basis sits well below the current mark, and the mark is above the
-    authority cap — the S3 escalation beat arms on it. Everything else is
-    plain deterministic data (no randomness beyond the unique desk id).
+    One-flag scenario injection (S7, DECISION 1 — default ON):
+
+    - inject_scenario=True (default, byte-identical to the pre-S7 seed):
+      position 2 (DAC→LHR) is the injected escalation-spike position —
+      its cost basis sits well below the current mark, and the mark is
+      above the authority cap, so the S3 escalation beat arms on it;
+      positions 3 (JFK→LIS) and 6 (GRU→MIA) carry mark-below-cost
+      unrealized losses.
+    - inject_scenario=False (clean baseline for rehearsal): same six
+      routes, but pos-2's mark sits in-band under the cap near cost with
+      a plain trip label (no "(injected)"), and pos-3/6 marks sit at or
+      above cost — no spike, no scripted losses.
+
+    Everything else is plain deterministic data (no randomness beyond the
+    unique desk id).
     """
     desk_id = f"desk-{uuid4().hex[:8]}"
     now = datetime.now(timezone.utc)
+    if inject_scenario:
+        spike_label = "Escalation demo — fare spike (injected)"
+        spike_mark = Decimal("1790.00")   # over the 1500 cap — arms the beat
+        lis_mark = Decimal("588.00")      # −22 vs cost — unrealized loss
+        mia_mark = Decimal("655.00")      # −35 vs cost — unrealized loss
+    else:
+        spike_label = "London client meeting"
+        spike_mark = Decimal("845.00")    # in-band, near cost, under the cap
+        lis_mark = Decimal("623.00")      # >= cost — no injected loss
+        mia_mark = Decimal("702.00")      # >= cost — no injected loss
     mandate = Mandate(
         id=desk_id,
         holder="Waypoint Demo Desk",
@@ -107,12 +130,12 @@ def seeded_portfolio() -> tuple[Mandate, list[Position], list[Budget]]:
             Decimal("445.00"), Decimal("462.00"),
         ),
         pos(
-            2, "Escalation demo — fare spike (injected)", "DAC", "LHR",
-            date(2026, 9, 25), 1, Decimal("820.00"), Decimal("1790.00"),
+            2, spike_label, "DAC", "LHR",
+            date(2026, 9, 25), 1, Decimal("820.00"), spike_mark,
         ),
         pos(
             3, "Transatlantic client visit", "JFK", "LIS", date(2026, 10, 2), 1,
-            Decimal("610.00"), Decimal("588.00"),
+            Decimal("610.00"), lis_mark,
         ),
         pos(
             4, "Team offsite leg", "BKK", "ICN", date(2026, 9, 29), 3,
@@ -124,7 +147,7 @@ def seeded_portfolio() -> tuple[Mandate, list[Position], list[Budget]]:
         ),
         pos(
             6, "Q4 planning trip", "GRU", "MIA", date(2026, 10, 16), 1,
-            Decimal("690.00"), Decimal("655.00"),
+            Decimal("690.00"), mia_mark,
         ),
     ]
 

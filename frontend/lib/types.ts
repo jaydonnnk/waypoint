@@ -49,6 +49,17 @@ export interface DeskResult {
   comparison_mode: boolean;
 }
 
+// GET /api/desk/{desk_id}/close 200 body (S7). A wrapper around DeskResult:
+// the breach count is deterministic code, the auditor line is narration only.
+// The SSE `result` event still carries the bare DeskResult — this shape is
+// close-specific.
+export interface CloseReport {
+  result: DeskResult;
+  policy_breaches: number;
+  auditor_line: string;
+  auditor_source: "agent" | "deterministic-fallback";
+}
+
 // The two priced escalation options — always exactly [A, B] on the wire.
 export interface EscalationOption {
   key: "A" | "B";
