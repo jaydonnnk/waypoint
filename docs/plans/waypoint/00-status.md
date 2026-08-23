@@ -23,7 +23,7 @@ History (do NOT build from): `docs/plans/waypoint/_archive-visa-pivot/` — the 
 - [x] S3 — D5 — Desk brain (the judgment layer): hold/book judgment, curated volatility priors, mark-to-market, admitted-loss log.
 - [x] S4 — D6 — Reconciliation + allocation + escalation: auto-reconcile sandbox payments, `PRICE_CHANGED` absorb-vs-re-quote, pre-order seat alloc from realized savings (ledger-only fallback), one-click escalation.
 - [x] S5 — D7 — Frontend refit: mandate → desk → close, one SSE stream, replay-safe.
-- [ ] S6 — D8a — Hardening: error-code routing, give-up paths, no-retry discipline, meter enforcement.
+- [x] S6 — D8a — Hardening: error-code routing, give-up paths, no-retry discipline, meter enforcement. Verify-and-fill done: all 4 `DeskStatus` values genuinely reachable and honest (`budget_exhausted` now emitted via a post-settle check), every give-up path flushes settle through the one-transaction `store.settle` and carries real P&L/losses so the books tie out, meter proven to hard-stop at 20 by test; suite re-baselined at 82 passed / 3 deselected (live) / 0 failed — see `S6-HANDOFF.md`.
 - [ ] S7 — D8b — Risk officer + demo choreography: close endpoint, auditor line, injected scenarios, cold-open replay.
 - [ ] S8 — D9 — Demo rehearsal + video: rehearse to time, record, exercise every fallback.
 

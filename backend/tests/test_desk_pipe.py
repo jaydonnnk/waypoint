@@ -266,12 +266,14 @@ class WriteStubAtlas:
         return self.order_status(signal.order_no or "ord-1")
 
 
-def seed_simple_desk(mark="500.00", cost="480.00", count=1):
-    """Seed a minimal desk straight into the throwaway DB."""
+def seed_simple_desk(mark="500.00", cost="480.00", count=1, budget="12000.00"):
+    """Seed a minimal desk straight into the throwaway DB. `budget` is
+    threaded into BOTH Mandate.budget_total and Budget.allocated; the
+    default keeps existing callers byte-identical."""
     desk_id = f"desk-{uuid4().hex[:8]}"
     mandate = Mandate(
         id=desk_id, holder="t", created_at=S3_NOW,
-        budget_total=Decimal("12000.00"),
+        budget_total=Decimal(budget),
         authority_cap=Decimal("1500.00"),
         contingency_pct=0.05, currency="USD",
     )
@@ -286,7 +288,7 @@ def seed_simple_desk(mark="500.00", cost="480.00", count=1):
     ]
     budgets = [Budget(
         desk_id=desk_id, period="2026-W38",
-        allocated=Decimal("12000.00"), contingency=Decimal("600.00"),
+        allocated=Decimal(budget), contingency=Decimal("600.00"),
     )]
     DeskStore().seed_desk(mandate, positions, budgets)
     return desk_id
@@ -325,7 +327,52 @@ def test_reprice_fan_out_is_meter_gated(tmp_db):
     assert len(stale) == 2
     for event in stale:
         assert "uncertainty disclosed" in event["disclosure"]
+    # The meter-exhausted leftovers name the METER as the reason.
+    assert any(
+        "search meter exhausted at 20" in e["disclosure"] for e in stale
+    )
     assert result.status == "closed"
+
+
+def test_budget_exhausted_emits_status_and_disclosed_reason(
+    tmp_db, monkeypatch,
+):
+    """GAP 1 — remaining budget below the cheapest held mark → the cycle
+    closes `budget_exhausted` (strict `<`), names the budget remainder
+    and the cheapest mark in a disclosed step, keeps REAL pnl, and never
+    touches the write path (this is a label after settle)."""
+    monkeypatch.delenv("WAYPOINT_LIVE_BOOKING", raising=False)
+    desk_id = seed_simple_desk(mark="500.00", cost="400.00", budget="400.00")
+    stub = WriteStubAtlas(offer_price=None)  # marks stay stale-held
+    agent = make_agent(stub)
+    result, events = run_cycle(agent, desk_id)
+
+    assert result.status == "budget_exhausted"  # 400 < cheapest mark 500
+    texts = [e.get("text", "") for e in events if e["type"] == "step"]
+    assert any(
+        "Budget exhausted" in t and "400.00" in t and "500.00" in t
+        and "never waived" in t
+        for t in texts
+    )
+    assert result.pnl == Decimal("100.00")  # real mark-vs-cost, not zero
+    assert stub.verify_calls == stub.create_calls == stub.pay_calls == 0
+
+
+def test_budget_exactly_affordable_still_closes_not_budget_exhausted(
+    tmp_db, monkeypatch,
+):
+    """GAP 1 boundary — the check is STRICT `<`: budget EQUAL to the
+    cheapest held mark is exactly affordable, so the cycle closes
+    `closed`, never `budget_exhausted`."""
+    monkeypatch.delenv("WAYPOINT_LIVE_BOOKING", raising=False)
+    desk_id = seed_simple_desk(mark="500.00", cost="400.00", budget="500.00")
+    stub = WriteStubAtlas(offer_price=None)  # marks stay stale-held at 500
+    agent = make_agent(stub)
+    result, events = run_cycle(agent, desk_id)
+
+    assert result.status == "closed"  # 500 is NOT < 500
+    texts = [e.get("text", "") for e in events if e["type"] == "step"]
+    assert not any("Budget exhausted" in t for t in texts)
 
 
 def test_execute_wall_blocks_over_cap_and_emits_escalate(tmp_db, monkeypatch):
@@ -471,8 +518,9 @@ def test_ticket_asserted_before_success(tmp_db, monkeypatch):
     assert result.status == "closed"
 
 
-def test_agent_respects_step_budget_and_gives_up(tmp_db):
+def test_agent_respects_step_budget_and_gives_up(tmp_db, monkeypatch):
     """Forced budget exhaustion → graceful give-up emitting why."""
+    monkeypatch.delenv("WAYPOINT_LIVE_BOOKING", raising=False)
     mandate, positions, budgets = fixture.seeded_portfolio()
     DeskStore().seed_desk(mandate, positions, budgets)
     stub = WriteStubAtlas(offer_price=None, ticketing=False)
@@ -482,6 +530,13 @@ def test_agent_respects_step_budget_and_gives_up(tmp_db):
     assert result.status == "failed"
     texts = [e.get("text", "") for e in events if e["type"] == "step"]
     assert any("Step budget exhausted" in t for t in texts)
+    # The give-up carries REAL portfolio math, not zeros.
+    expected_pnl = sum(
+        (p.mark_price - p.cost_basis for p in positions), Decimal("0")
+    )
+    assert result.pnl == expected_pnl
+    # Honest mode flag — not the DeskResult model default artifact.
+    assert result.comparison_mode is True
 
 
 def test_comparison_mode_zero_write_calls_when_blocked(tmp_db, monkeypatch):
@@ -746,6 +801,14 @@ def test_escalation_slot_removed_on_timeout(tmp_db, monkeypatch):
     assert result.status == "escalated"  # nobody clicked → give-up path
     assert cleared and registry == {}    # the slot was removed on timeout
     assert stub.create_calls == 0        # nothing executed on a guess
+    # The give-up reason is disclosed on the wire: the escalate event
+    # carries a non-empty reason string.
+    escalates = [e for e in events if e["type"] == "escalate"]
+    assert escalates and escalates[0]["reason"]
+    # The NEW escalated give-up step text rode the wire (S6: the
+    # escalated exit discloses its own step line, not silence).
+    texts = [e.get("text", "") for e in events if e["type"] == "step"]
+    assert any("Escalation wait expired" in t for t in texts)
 
 
 def test_init_db_drops_empty_legacy_tables(tmp_db):
@@ -849,3 +912,95 @@ def test_alloc_degrades_to_ledger_only_when_seat_unavailable(
     assert alloc_rows[0].amount == Decimal("0")
     assert "seat selection unavailable" in (alloc_rows[0].note or "")
     assert "ledger-only" in (alloc_rows[0].note or "")
+
+
+# ==========================================================================
+# Slice 6 (GAP 2b) — ledger tie-out on give-up paths: NO result-vs-DB
+# disagreement. Whatever the cycle already put on the settle list is
+# flushed in the same one-transaction settle call before the give-up
+# result, so the blotter and the wire always agree.
+# ==========================================================================
+
+
+def test_give_up_persists_admitted_loss_row_in_comparison_mode(
+    tmp_db, monkeypatch,
+):
+    """GAP 2b(a) — comparison mode: an admitted loss lands a ledger row
+    BEFORE the step-budget gate fires, and the give-up flush persists it.
+    The wire's losses_admitted matches the persisted loss-row count.
+
+    Inducing the loss (same pattern as the brain contract): a held
+    position whose mark moved against the desk past the curated band
+    floor (AAA→BBB is mid_haul, floor −3%; −4% here). step_budget=3 puts
+    the gate right after the judgment step — after the loss loop, before
+    the execute wall."""
+    monkeypatch.delenv("WAYPOINT_LIVE_BOOKING", raising=False)
+    desk_id = seed_simple_desk(mark="480.00", cost="500.00")
+    stub = WriteStubAtlas(offer_price=None)  # marks stay put → loss holds
+    agent = make_agent(stub, step_budget=3)
+    result, events = run_cycle(agent, desk_id)
+
+    assert result.status == "failed"
+    texts = [e.get("text", "") for e in events if e["type"] == "step"]
+    assert any("Step budget exhausted" in t for t in texts)
+    # The loss was admitted on the wire...
+    losses = [e for e in events if e["type"] == "loss"]
+    assert len(losses) == 1
+    # ...and persisted to the blotter by the give-up flush.
+    with database.SessionLocal() as session:
+        rows = session.execute(
+            select(LedgerRow).where(LedgerRow.desk_id == desk_id)
+        ).scalars().all()
+    loss_rows = [r for r in rows if r.kind == "loss"]
+    assert len(loss_rows) == 1
+    assert loss_rows[0].amount == Decimal("-20.00")
+    # No result-vs-DB disagreement on the give-up path.
+    assert result.losses_admitted == len(loss_rows)
+
+
+def test_give_up_after_live_booking_persists_trade_row_and_spend(
+    tmp_db, monkeypatch,
+):
+    """GAP 2b(b) — LIVE mode: the gate right after `_write_position`
+    fires after a successful booking. The give-up flush persists the
+    booked trade row AND the budget consumption in one transaction, and
+    the result carries the real pnl (no Atlas calls in the give-up).
+
+    Step count: reload (1), reprice (2), judgment (3) — the write path
+    itself emits no step until a booking lands; the booked-position
+    disclosure step (4) is what makes the post-write gate reachable, so
+    step_budget=4 lets the booking complete and trips that gate (the
+    judgment gate at step 3 does not fire since 3 < 4)."""
+    monkeypatch.setenv("WAYPOINT_LIVE_BOOKING", "1")
+    desk_id = seed_simple_desk(mark="500.00", cost="400.00")
+    stub = WriteStubAtlas(offer_price="500.00", ticketing=True)
+    agent = make_agent(stub, step_budget=4)
+    result, events = run_cycle(agent, desk_id)
+
+    # The booking fully executed before the gate fired.
+    assert stub.create_calls == 1 and stub.pay_calls == 1
+    assert result.status == "failed"
+    texts = [e.get("text", "") for e in events if e["type"] == "step"]
+    assert any("Step budget exhausted" in t for t in texts)
+    # Real pnl on the wire — mark vs seeded cost, not zero.
+    assert result.pnl == Decimal("100.00")
+    # Non-vacuous mode plumbing: the model default is True, so only a
+    # live-mode give-up proves the flag is genuinely passed through.
+    assert result.comparison_mode is False
+    # The blotter and the budget line agree with the executed booking.
+    with database.SessionLocal() as session:
+        rows = session.execute(
+            select(LedgerRow).where(LedgerRow.desk_id == desk_id)
+        ).scalars().all()
+        budget = session.execute(
+            select(BudgetRow).where(BudgetRow.desk_id == desk_id)
+        ).scalar_one()
+        row = session.execute(
+            select(PositionRow).where(PositionRow.id == desk_id + "-pos-1")
+        ).scalar_one()
+    trade_rows = [r for r in rows if r.kind == "trade"]
+    assert len(trade_rows) == 1
+    assert trade_rows[0].amount == Decimal("500.00")  # the verified price
+    assert trade_rows[0].ref == "ord-1"
+    assert budget.spent == Decimal("500.00")  # spend persisted on give-up
+    assert row.status == "booked" and row.ticket_asserted is True

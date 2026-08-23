@@ -192,15 +192,36 @@ class DeskAgent:
             "from the DB"
         )
 
-        # Give-up path (kept from the tracer): if the step budget is
-        # exhausted, close honestly instead of pretending work happened.
-        if step >= self.step_budget:
-            return await self._give_up(desk_id, emit, step)
-
         # --- deterministic desk math (CODE owns this, never the LLM).
+        # Computed BEFORE the first give-up gate: pure math on the
+        # just-loaded data (no emits, no Atlas calls), so every give-up
+        # path — including this one — sees the REAL remainders instead
+        # of an inert zero sentinel.
         spent = sum((b.spent for b in budgets), Decimal("0"))
         budget_left = mandate.budget_total - spent
         contingency_left = sum((b.contingency for b in budgets), Decimal("0"))
+
+        # Capture the starting remainders RIGHT HERE, before ANY give-up
+        # gate, so every give-up / settle path persists exactly what the
+        # write path consumed (fix 5): spent = budget delta, contingency
+        # delta = absorbed PRICE_CHANGED amounts. Nothing between the
+        # reload above and the write path mutates either remainder.
+        budget_start = budget_left
+        contingency_start = contingency_left
+
+        # Give-up path (kept from the tracer): if the step budget is
+        # exhausted, close honestly instead of pretending work happened.
+        if step >= self.step_budget:
+            return await self._give_up(
+                desk_id, emit, step,
+                status="failed",
+                text="Step budget exhausted \u2014 giving up gracefully",
+                positions=positions, losses_admitted=0,
+                comparison_mode=comparison, settle=[],
+                budget_start=budget_start, budget_left=budget_left,
+                contingency_start=contingency_start,
+                contingency_left=contingency_left,
+            )
 
         held = [p for p in positions if p.status == "held"]
         meter_used = await self._reprice_fan_out(desk_id, emit, held)
@@ -210,7 +231,16 @@ class DeskAgent:
             "uncertainty"
         )
         if step >= self.step_budget:
-            return await self._give_up(desk_id, emit, step)
+            return await self._give_up(
+                desk_id, emit, step,
+                status="failed",
+                text="Step budget exhausted \u2014 giving up gracefully",
+                positions=positions, losses_admitted=0,
+                comparison_mode=comparison, settle=[],
+                budget_start=budget_start, budget_left=budget_left,
+                contingency_start=contingency_start,
+                contingency_left=contingency_left,
+            )
 
         # --- admitted losses: the brain supplies the note; the LOOP logs
         # --- the loss via the ledger (kind="loss").
@@ -251,14 +281,20 @@ class DeskAgent:
             "re-checks every one in code"
         )
         if step >= self.step_budget:
-            return await self._give_up(desk_id, emit, step)
+            return await self._give_up(
+                desk_id, emit, step,
+                status="failed",
+                text="Step budget exhausted \u2014 giving up gracefully",
+                positions=positions, losses_admitted=losses_admitted,
+                comparison_mode=comparison, settle=settle,
+                budget_start=budget_start, budget_left=budget_left,
+                contingency_start=contingency_start,
+                contingency_left=contingency_left,
+            )
 
         # --- EXECUTE WALL + write path, strictly sequential per position.
-        # Capture the starting remainders so the settle step can persist
-        # exactly what the write path consumed (fix 5): spent = budget
-        # delta, contingency delta = absorbed PRICE_CHANGED amounts.
-        budget_start = budget_left
-        contingency_start = contingency_left
+        # (budget_start / contingency_start were captured right after the
+        # desk math so every give-up / settle path sees the same base.)
         status = "closed"
         pos_by_id = {p.id: p for p in positions}
         for action in actions:
@@ -297,14 +333,22 @@ class DeskAgent:
                     ))
                     continue
                 if choice is None:
-                    # Bounded wait expired (or no human reachable): give up
-                    # honestly on the whole cycle.
-                    return await self._finish(desk_id, emit, DeskResult(
-                        desk_id=desk_id, status="escalated",
-                        pnl=self._pnl(positions),
-                        losses_admitted=losses_admitted, step_count=step,
-                        comparison_mode=comparison,
-                    ))
+                    # Bounded wait expired (or no human reachable): give
+                    # up honestly on the whole cycle — flushing whatever
+                    # already sits on the settle list (admitted losses
+                    # persist here too; nothing executes on a guess).
+                    return await self._give_up(
+                        desk_id, emit, step,
+                        status="escalated",
+                        text="Escalation wait expired \u2014 giving up "
+                             "without executing; nothing runs on a guess",
+                        positions=positions,
+                        losses_admitted=losses_admitted,
+                        comparison_mode=comparison, settle=settle,
+                        budget_start=budget_start, budget_left=budget_left,
+                        contingency_start=contingency_start,
+                        contingency_left=contingency_left,
+                    )
                 if choice != "A":
                     continue  # the click said hold — nothing executes
                 # The chosen option re-enters the wall: the click waives
@@ -328,12 +372,33 @@ class DeskAgent:
                 ))
                 continue
 
+            budget_before = budget_left
             budget_left, contingency_left = await self._write_position(
                 desk_id, emit, pos, budget_left, contingency_left, settle,
                 authority_cap=mandate.authority_cap, cap_waived=cap_waived,
             )
+            if pos.status == "booked":
+                # Disclose the booking as a COUNTED step (S6): a booked
+                # position is real progress the step budget must see —
+                # this is what keeps the give-up gate below reachable.
+                # The price shown is the budget delta = the real verified
+                # price the write path consumed.
+                await emit_step(
+                    f"Booked {pos.id} at {budget_before - budget_left} "
+                    "\u2014 TICKETED asserted, sandbox money"
+                )
             if step >= self.step_budget:
-                return await self._give_up(desk_id, emit, step)
+                return await self._give_up(
+                    desk_id, emit, step,
+                    status="failed",
+                    text="Step budget exhausted \u2014 giving up "
+                         "gracefully",
+                    positions=positions, losses_admitted=losses_admitted,
+                    comparison_mode=comparison, settle=settle,
+                    budget_start=budget_start, budget_left=budget_left,
+                    contingency_start=contingency_start,
+                    contingency_left=contingency_left,
+                )
 
         # --- settle: one ledger transaction for the cycle's entries, plus
         # --- persisted budget consumption (fix 5) so the guard survives a
@@ -349,6 +414,23 @@ class DeskAgent:
             f"Settled {len(settle)} ledger entries in one transaction; "
             f"P&L computed in code \u2014 cycle closes in {mode}"
         )
+
+        # Budget-exhaustion label (GAP 1): AFTER settle, if the remaining
+        # budget cannot cover even the cheapest still-held position, the
+        # cycle says so instead of closing "closed". Label only — this is
+        # NOT a write blocker (the per-booking guard owns that) and it
+        # uses last-known in-memory marks: zero Atlas calls here. Strict
+        # `<` — exactly-affordable still closes normally.
+        held_left = [p for p in positions if p.status == "held"]
+        if held_left and budget_left < min(p.mark_price for p in held_left):
+            cheapest_mark = min(p.mark_price for p in held_left)
+            status = "budget_exhausted"
+            await emit_step(
+                f"Budget exhausted \u2014 remaining budget {budget_left} "
+                f"is below the cheapest held mark {cheapest_mark} "
+                "(last-known marks, uncertainty disclosed; budget is "
+                "never waived)"
+            )
 
         return await self._finish(desk_id, emit, DeskResult(
             desk_id=desk_id, status=status, pnl=self._pnl(positions),
@@ -769,16 +851,42 @@ class DeskAgent:
         )
 
     async def _give_up(
-        self, desk_id: str, emit: Emit, step: int
+        self,
+        desk_id: str,
+        emit: Emit,
+        step: int,
+        *,
+        status: str,
+        text: str,
+        positions: list[Position],
+        losses_admitted: int,
+        comparison_mode: bool,
+        settle: list[LedgerInput],
+        budget_start: Decimal,
+        budget_left: Decimal,
+        contingency_start: Decimal,
+        contingency_left: Decimal,
     ) -> DeskResult:
-        """Step budget exceeded → graceful give-up (S1 shape kept)."""
-        await emit({
-            "type": "step", "n": step + 1,
-            "text": "Step budget exhausted \u2014 giving up gracefully",
-        })
+        """Bounded give-up — honest on EVERY exit path (S1 shape kept).
+
+        Emits the disclosed step line, then flushes whatever the cycle
+        already put on the settle list through the SAME one-transaction
+        settle call as the normal close (no Atlas calls here), and
+        finishes with REAL desk math: pnl from marks vs seeded cost
+        bases, the true admitted-loss count, and the true mode flag —
+        never the model default for comparison_mode."""
+        await emit({"type": "step", "n": step + 1, "text": text})
+        if settle:
+            await asyncio.to_thread(
+                self.store.settle,
+                desk_id, settle,
+                budget_start - budget_left,
+                contingency_start - contingency_left,
+            )
         return await self._finish(desk_id, emit, DeskResult(
-            desk_id=desk_id, status="failed", pnl=Decimal("0"),
-            losses_admitted=0, step_count=step,
+            desk_id=desk_id, status=status, pnl=self._pnl(positions),
+            losses_admitted=losses_admitted, step_count=step,
+            comparison_mode=comparison_mode,
         ))
 
     @staticmethod
