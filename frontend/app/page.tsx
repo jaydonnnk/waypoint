@@ -1,61 +1,95 @@
 "use client";
 
-// Screen 1 — Trip disrupted (mockup 01).
-// Static demo choreography in Slice 1: the passenger + cancelled leg render
-// from fixed constants. It becomes data-driven (POST /api/trips) when the
-// real webhook trigger lands in Slice 7.
+// Screen 1 — the mandate (confirm-and-go).
+// The mandate is seeded SERVER-SIDE; this card is display copy only — the
+// real mandate (holder, budget, authority cap) arrives via the stream's
+// `meta` event on Screen 2. Nothing here fabricates API numbers.
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { reportDisruption } from "@/lib/api";
+import { seedDesk } from "@/lib/api";
 
-export default function TripDisruptedPage() {
+export default function MandatePage() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function recover() {
+  async function openDesk() {
     setBusy(true);
     setError(null);
     try {
-      const tripId = await reportDisruption();
-      router.push(`/recovering/${tripId}`);
+      const deskId = await seedDesk();
+      router.push(`/desk/${deskId}`);
     } catch (err) {
       setBusy(false);
       setError(
-        err instanceof Error ? err.message : "Could not reach the Waypoint backend"
+        err instanceof Error
+          ? `${err.message} — the desk backend may not be running`
+          : "Could not reach the desk backend"
       );
     }
   }
 
   return (
     <main className="wrap">
-      <div className="brand">WAYPOINT</div>
-      <div className="sub">Your trip · SIN → NRT · departing today</div>
-
-      <div className="pax">
-        ✈ Traveler: <b>TEST/TRAVELER</b> · Passport: <b>India 🇮🇳</b>
+      <div className="brand">
+        WAYPOINT<span className="tick">.</span>
       </div>
+      <div className="sub">the travel treasury desk</div>
 
-      <div className="leg dead">
-        <div className="route">SIN → NRT</div>
-        <div className="meta">Scoot TR866 · 01:00 → 11:15 · nonstop</div>
-        <span className="badge dead">CANCELLED</span>
-      </div>
+      <div className="mandate-intro">
+        <h1>
+          Corporate travel, run like a <em>trading desk</em>.
+        </h1>
+        <p>
+          A mandate seeds the desk: a budget, an authority cap, and a book of
+          held travel positions. The agent marks them to market, judges
+          hold-vs-book, executes behind a code wall, and admits losses —
+          honestly, in the open.
+        </p>
 
-      <div className="leg">
-        <div className="route">NRT → hotel · airport transfer booked</div>
-        <div className="meta">Downstream plans depend on landing 11:15</div>
-        <span className="badge ok">AT RISK</span>
-      </div>
+        <div className="card">
+          <ul className="mandate-points">
+            <li>
+              <span className="pt-k">mandate</span>
+              <span>
+                seeded on the server — holder, budget and authority cap appear
+                on the desk the moment the stream opens
+              </span>
+            </li>
+            <li>
+              <span className="pt-k">search meter</span>
+              <span>
+                bounded spend: every live query is metered, and the meter is
+                always on screen
+              </span>
+            </li>
+            <li>
+              <span className="pt-k">one human click</span>
+              <span>
+                anything over the authority cap escalates to two priced
+                options and a recommendation
+              </span>
+            </li>
+            <li>
+              <span className="pt-k">honesty</span>
+              <span>
+                every disclosure rides in-frame — comparison mode, stale
+                marks, ledger-only allocations, all labeled
+              </span>
+            </li>
+          </ul>
+        </div>
 
-      <button className="cta" onClick={recover} disabled={busy}>
-        {busy ? "Contacting Waypoint…" : "Recover my trip →"}
-      </button>
-      {error && <div className="status err">{error}</div>}
-      <div className="note">
-        Waypoint reads your passport before it rebooks. No gate surprises.
+        <button className="cta" onClick={openDesk} disabled={busy}>
+          {busy ? "Seeding the mandate…" : "Open the desk →"}
+        </button>
+        {error && <div className="status err">{error}</div>}
+        <div className="note">
+          Opening the desk seeds the mandate and starts the cycle server-side;
+          you watch it live on one SSE stream.
+        </div>
       </div>
     </main>
   );

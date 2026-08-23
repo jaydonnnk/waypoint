@@ -18,11 +18,11 @@ The treasury concept is the locked direction. Gates were re-approved for it on 2
 History (do NOT build from): `docs/plans/waypoint/_archive-visa-pivot/` — the superseded visa-pivot Gate 1–4 docs, each banner-marked SUPERSEDED. `05-direction-y-consolidation.md` and `06-idea-pivot-transfer.md` record the pivot journey.
 
 ## Slices (S1–S8, per 04-slices.md)
-- [ ] S1 — D2 — Data foundation + desk SSE route: mandate/positions/ledger/budgets tables + seeded portfolio + `POST /api/desk/seed` + SSE `meta`.
-- [ ] S2 — D3–D4 — CRITICAL PATH: Atlas write-path proof: one real sandbox booking end to end (verify → [confirm-price only on increase] → create → pay → status `TICKETED` + pre-order seat list/select); hard day-4 gate → honest comparison mode fallback.
-- [ ] S3 — D5 — Desk brain (the judgment layer): hold/book judgment, curated volatility priors, mark-to-market, admitted-loss log.
-- [ ] S4 — D6 — Reconciliation + allocation + escalation: auto-reconcile sandbox payments, `PRICE_CHANGED` absorb-vs-re-quote, pre-order seat alloc from realized savings (ledger-only fallback), one-click escalation.
-- [ ] S5 — D7 — Frontend refit: mandate → desk → close, one SSE stream, replay-safe.
+- [x] S1 — D2 — Data foundation + desk SSE route: mandate/positions/ledger/budgets tables + seeded portfolio + `POST /api/desk/seed` + SSE `meta`.
+- [x] S2 — D3–D4 — CRITICAL PATH: Atlas write-path proof — **DAY-4 GATE FALLEN BACK, not the live proof.** The real E2E booking (verify → create → pay → `TICKETED`) has never once succeeded (search-step `INTERNAL_ERROR`/9999 outage, re-confirmed 2026-08-23 — see session record); desk runs in the written, honest comparison-mode fallback the slice itself specifies. Downstream slices (S3–S5) built and demo identically on this fallback per the sequencing note below — nothing is blocked — but the live write path remains unproven.
+- [x] S3 — D5 — Desk brain (the judgment layer): hold/book judgment, curated volatility priors, mark-to-market, admitted-loss log.
+- [x] S4 — D6 — Reconciliation + allocation + escalation: auto-reconcile sandbox payments, `PRICE_CHANGED` absorb-vs-re-quote, pre-order seat alloc from realized savings (ledger-only fallback), one-click escalation.
+- [x] S5 — D7 — Frontend refit: mandate → desk → close, one SSE stream, replay-safe.
 - [ ] S6 — D8a — Hardening: error-code routing, give-up paths, no-retry discipline, meter enforcement.
 - [ ] S7 — D8b — Risk officer + demo choreography: close endpoint, auditor line, injected scenarios, cold-open replay.
 - [ ] S8 — D9 — Demo rehearsal + video: rehearse to time, record, exercise every fallback.

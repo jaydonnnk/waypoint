@@ -1,99 +1,142 @@
-// Frontend mirror of the backend Gate 3 domain types (app/models.py).
-// Decimals serialize as strings; prices render directly (e.g. "$458").
+// Frontend mirror of the desk contract (backend/app/models.py + the SSE
+// catalog in backend/app/agent/loop.py). Decimals arrive as JSON strings
+// and may be negative; render them, never compute with them client-side.
 
-export interface Passenger {
-  name: string;
-  passport_country: string;
-  passport_expiry: string;
-  doc_number: string;
-  issuing_country: string;
-}
-
-export interface Segment {
-  dep_airport: string;
-  arr_airport: string;
-  dep_time: string;
-  arr_time: string;
-  flight_number: string;
-  direction: string;
-  status: "active" | "cancelled";
-}
-
-export interface Layover {
-  airport: string;
-  country: string;
-  city?: string; // display city carried on the wire (Slice 2+)
-  hours: number;
-  same_ticket: boolean;
-}
-
-export interface Offer {
+export interface Mandate {
   id: string;
-  atlas_offer_id: string;
-  price: string; // Decimal -> string
+  holder: string;
+  created_at: string;
+  budget_total: string;
+  authority_cap: string;
+  contingency_pct: number;
   currency: string;
-  total_minutes: number;
-  segments: Segment[];
-  price_status: "reference" | "current" | "verified";
-  bookable: boolean;
-  same_ticket: boolean;
 }
 
-export type VerdictStatus = "allowed" | "blocked" | "unknown";
-
-export interface RuleVerdict {
-  rule_name: string;
-  status: VerdictStatus;
-  reason: string;
-  source: string | null;
-  last_checked: string | null;
-}
-
-// One row of Screen 2's table (an OfferAssessment + precomputed layovers).
-export interface Assessment {
-  offer: Offer;
-  layovers: Layover[];
-  verdicts: RuleVerdict[];
-  executable: boolean;
-}
-
-export interface Order {
-  order_no: string;
-  pnr: string;
-  ticket_number: string;
-  original_fare: string;
-  new_fare: string;
-  fare_diff: string;
-  currency: string;
-  settled: boolean;
+export interface Position {
+  id: string;
+  trip_label: string;
+  origin: string;
+  dest: string;
+  depart_date: string;
+  pax: number;
+  status: "held" | "booked";
+  cost_basis: string;
+  mark_price: string;
+  mark_at: string;
+  mark_stale: boolean;
+  atlas_offer_id: string | null;
+  atlas_order_no: string | null;
   ticket_asserted: boolean;
 }
 
-export interface RecoveryResult {
-  trip_id: string;
-  // "pending" = Slice 2's honest intermediate state: top candidate found,
-  // nothing rejected (no rules yet) and nothing booked (booking = Slice 5).
-  status:
-    | "recovered"
-    | "pending"
-    | "no_legal_option"
-    | "needs_override"
-    | "failed";
-  chosen: Offer | null;
-  rejected_cheapest: Offer | null;
-  order: Order | null;
-  step_count: number;
-  rationale: string | null;
-  // Layovers of chosen + rejected offers — Screen 3 reads country/city
-  // from here instead of a hardcoded map (added in Slice 2).
-  layovers?: Layover[];
+export interface Budget {
+  id: number;
+  desk_id: string;
+  period: string;
+  allocated: string;
+  spent: string;
+  contingency: string;
 }
 
-// The SSE event contract (backend/agent/loop.py).
+export type DeskStatus = "closed" | "escalated" | "budget_exhausted" | "failed";
+
+export interface DeskResult {
+  desk_id: string;
+  status: DeskStatus;
+  pnl: string;
+  losses_admitted: number;
+  step_count: number;
+  comparison_mode: boolean;
+}
+
+// The two priced escalation options — always exactly [A, B] on the wire.
+export interface EscalationOption {
+  key: "A" | "B";
+  label: string;
+  price: string;
+}
+
+export interface LedgerEntry {
+  id: number;
+  ts: string;
+  kind: string;
+  amount: string;
+  position_id: string | null;
+  ref: string | null;
+  note: string | null;
+}
+
+// GET /api/desk/{desk_id} snapshot.
+export interface DeskSnapshot {
+  desk_id: string;
+  mandate: Mandate;
+  positions: Position[];
+  ledger: LedgerEntry[];
+  budgets: Budget[];
+  meter: { used: number; max: number };
+  done: boolean;
+}
+
+// The SSE event contract (backend/app/agent/loop.py) — 10 types, exact
+// field names. There is no book event; booking surfaces as trade kind
+// "book" plus the terminal result.
 export type StreamEvent =
-  | { type: "meta"; trip_id: string; step_budget: number }
+  | {
+      type: "meta";
+      desk_id: string;
+      mandate: Mandate;
+      meter: { used: number; max: number };
+      mode: string;
+      disclosures: string[];
+    }
   | { type: "step"; n: number; text: string }
-  | { type: "options"; assessments: Assessment[] }
-  | { type: "decision"; chosen_offer_id: string; rationale: string }
-  | { type: "result"; result: RecoveryResult }
-  | { type: "error"; message: string };
+  | {
+      type: "loss";
+      position_id: string;
+      amount: string;
+      note: string;
+      disclosure: string;
+    }
+  | {
+      type: "trade";
+      position_id: string;
+      kind: "book" | "hold" | "escalate";
+      rationale: string;
+    }
+  | {
+      type: "mark";
+      position_id: string;
+      old: string;
+      new: string;
+      search_ref: string | null;
+      meter_used: number;
+      // Present only on the stale path (search_ref null, stale true);
+      // the success path omits both.
+      stale?: boolean;
+      disclosure?: string;
+    }
+  | {
+      type: "escalate";
+      esc_id: string;
+      position_id: string;
+      reason: string;
+      options: EscalationOption[];
+      recommendation: "A" | "B";
+      disclosures: string[];
+    }
+  | {
+      type: "reconcile";
+      position_id: string;
+      delta: string;
+      resolution: "absorb" | "requote";
+      disclosure: string;
+    }
+  | {
+      type: "alloc";
+      position_id: string;
+      amount: string;
+      seat_ref: string;
+      disclosure: string;
+    }
+  | { type: "error"; code: string; position_id?: string }
+  | { type: "result"; result: DeskResult };

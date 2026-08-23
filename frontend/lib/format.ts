@@ -1,47 +1,65 @@
-import type { Offer } from "./types";
+// Generic display helpers. All money arrives as Decimal strings (may be
+// negative); timestamps arrive as Python str(datetime) — "YYYY-MM-DD HH:MM:SS.ffffff"
+// (space separator), so parsing is defensive throughout.
 
-// ISO-2 -> DISPLAY names only. Slice 2+: the airport -> country mapping
-// itself lives in the backend (data/iata_country.csv) and rides on the
-// wire as Layover.country; this map just humanizes those codes.
-export const COUNTRY_NAMES: Record<string, string> = {
-  SG: "Singapore",
-  JP: "Japan",
-  VN: "Vietnam",
-  TH: "Thailand",
-  KR: "South Korea",
-  IN: "India",
-  TW: "Taiwan",
-  HK: "Hong Kong",
-  PH: "Philippines",
-  MY: "Malaysia",
-  ID: "Indonesia",
-  LK: "Sri Lanka",
-  NP: "Nepal",
-  BD: "Bangladesh",
-  MV: "Maldives",
-  MM: "Myanmar",
-  BN: "Brunei",
-  KH: "Cambodia",
-  CN: "China",
-  US: "United States",
-  GU: "Guam",
-  AU: "Australia",
-  NZ: "New Zealand",
-  AE: "UAE",
-  QA: "Qatar",
-  TR: "Türkiye",
-  NL: "Netherlands",
-  DE: "Germany",
-  GB: "United Kingdom",
-  FR: "France",
+/** Currency-code -> display symbol, falling back to the raw code. */
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  SGD: "S$",
+  JPY: "¥",
 };
 
-/** "960" minutes -> "16h". */
-export function formatHours(totalMinutes: number): string {
-  return `${Math.round(totalMinutes / 60)}h`;
+/** "1840.00" -> "$1,840.00" · "-62.5" -> "−$62.50". Unknown/absent
+ * currency renders without a symbol; non-numeric input is returned
+ * verbatim — the screens never fabricate a number. */
+export function money(value: string, currency?: string): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value;
+  const symbol = currency
+    ? CURRENCY_SYMBOLS[currency.toUpperCase()] ?? `${currency} `
+    : "";
+  const abs = Math.abs(n).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return n < 0 ? `−${symbol}${abs}` : `${symbol}${abs}`;
 }
 
-/** The connecting airport for a (single-connection) offer. */
-export function viaAirport(offer: Offer): string {
-  return offer.segments.length > 1 ? offer.segments[0].arr_airport : "nonstop";
+/** P&L variant: keeps the sign explicit ("+$1,840.00" / "−$62.50"). */
+export function signedMoney(value: string, currency?: string): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value;
+  if (n > 0) return `+${money(value, currency)}`;
+  return money(value, currency);
+}
+
+/** Parse a Python str(datetime) / ISO timestamp defensively; null on junk. */
+function parseStamp(value: string): Date | null {
+  if (!value) return null;
+  // "2026-08-23 14:05:01.123456" -> "2026-08-23T14:05:01.123456".
+  const iso = value.trim().replace(" ", "T");
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** "2026-08-23 14:05:01.123456" -> "Aug 23 · 14:05:01". Raw string as fallback. */
+export function formatStamp(value: string): string {
+  const d = parseStamp(value);
+  if (!d) return value;
+  const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const time = d.toLocaleTimeString("en-US", { hour12: false });
+  return `${date} · ${time}`;
+}
+
+/** Date-only slice of a timestamp ("2026-08-24" or a full stamp). */
+export function formatDay(value: string): string {
+  const d = parseStamp(value);
+  if (!d) return value;
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }

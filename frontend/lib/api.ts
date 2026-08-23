@@ -1,29 +1,92 @@
-import type { RecoveryResult } from "./types";
+import type { DeskResult, DeskSnapshot } from "./types";
 
 // The backend origin. Overridable via NEXT_PUBLIC_API_URL.
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-/** POST /api/disruptions -> seeds the trip, starts recovery, returns trip_id. */
-export async function reportDisruption(): Promise<string> {
-  const res = await fetch(`${API_URL}/api/disruptions`, { method: "POST" });
+/** POST /api/desk/seed -> seeds the mandate + portfolio, starts the cycle
+ * server-side, returns the desk_id. */
+export async function seedDesk(): Promise<string> {
+  const res = await fetch(`${API_URL}/api/desk/seed`, { method: "POST" });
   if (!res.ok) {
-    throw new Error(`POST /api/disruptions failed (${res.status})`);
+    throw new Error(`POST /api/desk/seed failed (${res.status})`);
   }
   const body = await res.json();
-  return body.trip_id as string;
+  return body.desk_id as string;
 }
 
-/** The SSE endpoint URL for a trip's live step stream. */
-export function tripStreamUrl(tripId: string): string {
-  return `${API_URL}/api/trips/${tripId}/stream`;
+/** The SSE endpoint URL for a desk's live stream. The server buffers and
+ * replays EVERY event from event 0 on each connect/reconnect. */
+export function deskStreamUrl(deskId: string): string {
+  return `${API_URL}/api/desk/${deskId}/stream`;
 }
 
-/** GET /api/trips/{id}/recovery -> the final RecoveryResult. */
-export async function getRecovery(tripId: string): Promise<RecoveryResult> {
-  const res = await fetch(`${API_URL}/api/trips/${tripId}/recovery`);
+/** GET /api/desk/{desk_id} -> snapshot (positions, ledger, budgets, meter). */
+export async function getDeskSnapshot(deskId: string): Promise<DeskSnapshot> {
+  const res = await fetch(`${API_URL}/api/desk/${deskId}`);
   if (!res.ok) {
-    throw new Error(`GET /api/trips/${tripId}/recovery failed (${res.status})`);
+    throw new Error(`GET /api/desk/${deskId} failed (${res.status})`);
   }
-  return (await res.json()) as RecoveryResult;
+  return (await res.json()) as DeskSnapshot;
+}
+
+/** Outcome of GET /api/desk/{desk_id}/close. Branch on `kind`, NEVER on an
+ * HTTP code alone: 200 carries DeskResult for every logical outcome
+ * (closed / escalated / budget_exhausted / failed); 504 = still running;
+ * 500 = the cycle CRASHED (no result exists). */
+export type CloseOutcome =
+  | { kind: "result"; result: DeskResult }
+  | { kind: "still_running" }
+  | { kind: "crashed" }
+  | { kind: "not_found" } // 404 — unknown desk_id; retrying is futile
+  | { kind: "unreachable"; detail: string };
+
+export async function getDeskClose(deskId: string): Promise<CloseOutcome> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/api/desk/${deskId}/close`);
+  } catch {
+    return { kind: "unreachable", detail: "the desk backend is not reachable" };
+  }
+  if (res.status === 504) return { kind: "still_running" };
+  if (res.status === 500) return { kind: "crashed" };
+  if (res.status === 404) return { kind: "not_found" };
+  if (!res.ok) {
+    return { kind: "unreachable", detail: `unexpected response (${res.status})` };
+  }
+  const result = (await res.json()) as DeskResult;
+  return { kind: "result", result };
+}
+
+export type DecisionOutcome =
+  | { kind: "accepted"; choice: "A" | "B" }
+  | { kind: "gone" } // 410 — the slot was consumed/expired; the desk moved on
+  | { kind: "failed"; detail: string };
+
+/** POST /api/desk/{desk_id}/escalations/{esc_id}/decision — the one human
+ * click. Only meaningful in live-ticketing mode (comparison mode never
+ * registers a slot, so the POST there is guaranteed 410). */
+export async function postEscalationDecision(
+  deskId: string,
+  escId: string,
+  choice: "A" | "B"
+): Promise<DecisionOutcome> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${API_URL}/api/desk/${deskId}/escalations/${escId}/decision`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ choice }),
+      }
+    );
+  } catch {
+    return { kind: "failed", detail: "the desk backend is not reachable" };
+  }
+  if (res.status === 410) return { kind: "gone" };
+  if (!res.ok) {
+    return { kind: "failed", detail: `unexpected response (${res.status})` };
+  }
+  return { kind: "accepted", choice };
 }
