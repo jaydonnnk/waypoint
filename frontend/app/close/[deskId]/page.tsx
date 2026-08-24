@@ -58,6 +58,10 @@ export default function ClosePage() {
 
   const [phase, setPhase] = useState<Phase>({ kind: "waiting" });
   const [attempt, setAttempt] = useState(0);
+  // "See the full record" panel — same pattern as the run page: pure local
+  // UI state, collapsed on every page load, toggling only flips a boolean
+  // and `hidden` keeps the content mounted.
+  const [recordOpen, setRecordOpen] = useState(false);
   // DeskResult carries no currency; read it from the mandate snapshot
   // (existing endpoint). Stays undefined if the snapshot is unreachable —
   // amounts then render without a symbol rather than a guessed one.
@@ -65,10 +69,15 @@ export default function ClosePage() {
   // Step 6: the bar's spent-vs-budget ratio. DeskResult carries neither
   // figure, so both come from the SAME snapshot call above (real endpoint
   // numbers, never invented). Stays null if the snapshot is unreachable or
-  // the figures don't parse — the bar then simply doesn't render.
-  const [figures, setFigures] = useState<{ spent: number; budget: number } | null>(
-    null
-  );
+  // the figures don't parse — the bar then simply doesn't render. The
+  // `phase` tag records WHICH phase fired the fetch: only figures fetched
+  // for the post-outcome snapshot may drive the dry-run ("Would have…")
+  // wording — a waiting-phase snapshot could predate the final buys.
+  const [figures, setFigures] = useState<{
+    spent: number;
+    budget: number;
+    phase: Phase["kind"];
+  } | null>(null);
 
   const load = useCallback(() => {
     setPhase({ kind: "waiting" });
@@ -83,17 +92,22 @@ export default function ClosePage() {
 
   useEffect(() => {
     let cancelled = false;
+    const fetchedIn = phase.kind; // which phase fired THIS snapshot fetch
     getDeskSnapshot(deskId)
       .then((snap) => {
         if (cancelled) return;
         setCurrency(snap.mandate.currency);
+        // Strict summation (mirrors the desk page's extractBudgetFigures):
+        // any unparseable figure makes the WHOLE sum non-finite and the
+        // figures stay null — never coerce garbage to 0, which could wrongly
+        // flip the page into the dry-run "Would have…" wording.
         const budget = Number(snap.mandate.budget_total);
         const spent = snap.budgets.reduce(
-          (sum, b) => sum + (Number(b.spent) || 0),
+          (sum, b) => sum + Number(b.spent),
           0
         );
         if (Number.isFinite(budget) && budget > 0 && Number.isFinite(spent)) {
-          setFigures({ spent, budget });
+          setFigures({ spent, budget, phase: fetchedIn });
         }
       })
       .catch(() => {
@@ -141,7 +155,22 @@ export default function ClosePage() {
       const result: DeskResult = phase.outcome.result;
       const pnlNum = Number(result.pnl);
       if (!Number.isFinite(pnlNum)) return;
-      const label = pnlNum >= 0 ? "Saved " : "Over by ";
+      // Dry-run distinction (bug 5b): when the snapshot's REAL spend across
+      // every budget is zero, nothing was actually bought — the figure is
+      // what the decisions WOULD have saved. Only figures fetched for the
+      // POST-OUTCOME snapshot qualify — a waiting-phase snapshot could
+      // predate the final buys and flash the wrong wording. No figures (or
+      // waiting-phase figures) falls back to the plain wording, never a
+      // guess. Identical to the JSX condition below.
+      const nothingSpent =
+        figures !== null && figures.phase === "outcome" && figures.spent === 0;
+      const label = nothingSpent
+        ? pnlNum >= 0
+          ? "Would have saved "
+          : "Would have been over by "
+        : pnlNum >= 0
+          ? "Saved "
+          : "Over by ";
       const magnitude = Math.abs(pnlNum);
       // Identical to the JSX render — the tween only ever counts TOWARD it.
       const finalText = `${label}${money(result.pnl, currency).replace("−", "")}`;
@@ -348,12 +377,25 @@ export default function ClosePage() {
   const copy = STATUS_COPY[result.status] ?? STATUS_COPY.failed;
   const pnl = Number(result.pnl);
   const pnlCls = pnl > 0 ? "pos" : pnl < 0 ? "neg" : "";
-  // Hero figure: "Saved X" or "Over by X" — the bound pnl, magnitude-only
-  // sign handling on the negative side (same display-only trick as Screen 2).
-  const hero =
-    pnl >= 0
-      ? `Saved ${money(result.pnl, currency)}`
-      : `Over by ${money(result.pnl, currency).replace("−", "")}`;
+  // Bug 5b: same REAL condition as the count-up tween — snapshot spend
+  // across every budget is 0, so nothing was actually bought, AND the
+  // figures came from the post-outcome snapshot (waiting-phase figures
+  // could predate the final buys — keep the plain wording, never guess).
+  // The figure itself is unchanged (result.pnl); only the words around it
+  // change.
+  const nothingSpent =
+    figures !== null && figures.phase === "outcome" && figures.spent === 0;
+  // Hero figure: "Saved X" / "Would have saved X" / "Over by X" — the bound
+  // pnl, magnitude-only sign handling on the negative side (same
+  // display-only trick as Screen 2).
+  const heroLabel = nothingSpent
+    ? pnl >= 0
+      ? "Would have saved "
+      : "Would have been over by "
+    : pnl >= 0
+      ? "Saved "
+      : "Over by ";
+  const hero = `${heroLabel}${money(result.pnl, currency).replace("−", "")}`;
 
   return (
     <main className="wrap" ref={scopeRef}>
@@ -369,6 +411,16 @@ export default function ClosePage() {
           <div ref={heroRef} className={`big num ${pnlCls}`}>
             {hero}
           </div>
+          {/* bug 5b: when real spend across every budget is zero (per the
+              post-outcome snapshot), say what the figure really is —
+              nothing was bought. Pnl-aware copy: saved vs. cost extra.
+              The figure above is unchanged. */}
+          {nothingSpent && (
+            <div className="hero-note">
+              Nothing was bought in this run — this is what the decisions
+              would have {pnl >= 0 ? "saved" : "cost extra"}.
+            </div>
+          )}
         </div>
 
         {/* step 6: spent-vs-budget, scaleX fill — rendered ONLY when both
@@ -392,7 +444,7 @@ export default function ClosePage() {
         <div className="record close-record">
           <div className="close-stats">
             <div className="close-stat">
-              <div className="cs-k">trips that cost more</div>
+              <div className="cs-k">trips worth less than held</div>
               <div className="cs-v num">{result.losses_admitted}</div>
             </div>
             <div className="close-stat">
@@ -424,24 +476,53 @@ export default function ClosePage() {
           </div>
         )}
 
-        {/* S7 risk-officer verdict slot: render the auditor line exactly as
-            returned — labeled as a second opinion, never an authority.
+        {/* S7 risk-officer verdict slot (bug 5a): the plain-language label
+            stays on the happy path; the VERBATIM auditor line and its
+            fallback disclosure moved into the collapsed "full record" panel
+            below — raw reviewer jargon belongs in the record, not here.
             Nothing renders if the line is absent. */}
         {typeof report?.auditor_line === "string" && report.auditor_line ? (
           <div className="close-room filled">
             <div className="auditor-k">
               a second opinion — a check on the work, not the boss
             </div>
-            <p className="auditor-line">{report.auditor_line}</p>
-            {report.auditor_source === "deterministic-fallback" ? (
-              <div className="auditor-src">
-                This line came from the automatic fallback — no reviewer ran.
-              </div>
-            ) : null}
           </div>
         ) : (
           <div className="close-room" aria-hidden="true" />
         )}
+
+        {/* Bug 5a: the full record — collapsed by default, mirroring the run
+            page's step-3 panel exactly: same toggle copy, same aria-expanded
+            / aria-controls / hidden pattern (a native <button> carries the
+            keyboard semantics; no gsap reveal — the run page toggles via
+            `hidden` too). The auditor line renders VERBATIM inside — never
+            rewritten — with its fallback disclosure beside it. The panel is
+            omitted entirely when there is no auditor line to hold. */}
+        {typeof report?.auditor_line === "string" && report.auditor_line ? (
+          <div className="record">
+            <button
+              type="button"
+              className="record-toggle"
+              aria-expanded={recordOpen}
+              aria-controls="close-full-record"
+              onClick={() => setRecordOpen((o) => !o)}
+            >
+              {recordOpen ? "Hide the full record ↑" : "See the full record →"}
+            </button>
+            <div id="close-full-record" className="fineprint" hidden={!recordOpen}>
+              <div className="sec fineprint-k">The full record</div>
+              <div className="close-room filled">
+                <div className="auditor-k">the reviewer's line — as written</div>
+                <p className="auditor-line">{report.auditor_line}</p>
+                {report.auditor_source === "deterministic-fallback" ? (
+                  <div className="auditor-src">
+                    This line came from the automatic fallback — no reviewer ran.
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="close-actions">

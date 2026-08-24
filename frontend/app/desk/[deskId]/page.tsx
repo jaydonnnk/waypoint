@@ -25,12 +25,13 @@ import type { ReactNode } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 
-import { deskStreamUrl, postEscalationDecision } from "@/lib/api";
+import { deskStreamUrl, getDeskSnapshot, postEscalationDecision } from "@/lib/api";
 import { money } from "@/lib/format";
 import type {
   DeskResult,
   EscalationOption,
   Mandate,
+  Position,
   StreamEvent,
 } from "@/lib/types";
 
@@ -190,7 +191,7 @@ function tripTitle(event: StreamEvent): string {
     case "alloc":
       return "Came in under the quote";
     case "loss":
-      return "Price went up — we didn't pay it";
+      return "Worth less than we're holding it at";
     case "reconcile":
       return "Price changed — handled";
     case "error":
@@ -202,10 +203,54 @@ function tripTitle(event: StreamEvent): string {
   }
 }
 
-/** Two-letter avatar monogram from a trip id — never invents names. */
-function tripInitials(id: string): string {
-  const clean = id.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-  return clean.slice(0, 2) || "··";
+/** Two-letter avatar monogram from the MERGED trip identity — never
+    invents names (the data holds no passenger names). Priority:
+    1. route initials when origin+dest exist (SIN→NRT -> "SN");
+    2. trip-label initials ("Regional sales run" -> "RS");
+    3. the position's trailing number (pos-5 -> "5").
+    Before the snapshot arrives (or when it fails) the position is
+    undefined, so every card lands on fallback 3 — never the old "DE". */
+function tripInitials(snap: Position | undefined, id: string | null): string {
+  if (snap) {
+    if (snap.origin && snap.dest) {
+      return (snap.origin[0] + snap.dest[0]).toUpperCase();
+    }
+    // Same optional-chain/trim defense as tripIdentity — a missing or
+    // blank trip_label degrades to the fallbacks below, never throws.
+    const label = snap.trip_label?.trim();
+    if (label) {
+      const initials = label
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((w) => w[0])
+        .join("")
+        .toUpperCase();
+      if (initials) return initials;
+    }
+  }
+  if (id) {
+    const m = id.match(/pos-?(\d+)/i);
+    if (m) return m[1];
+  }
+  return "··";
+}
+
+/** Plain-language trip line built ONLY from snapshot parts that exist —
+    e.g. "Regional sales run · SIN → NRT · 2 people" ("1 person" when
+    pax is 1). Missing parts are skipped, never guessed. With no snapshot
+    (or an unknown position id) it degrades to the "Trip N" fallback. */
+function tripIdentity(snap: Position | undefined, id: string | null): string {
+  const parts: string[] = [];
+  if (snap) {
+    const label = snap.trip_label?.trim();
+    if (label) parts.push(label);
+    if (snap.origin && snap.dest) parts.push(`${snap.origin} → ${snap.dest}`);
+    if (typeof snap.pax === "number" && snap.pax >= 1) {
+      parts.push(snap.pax === 1 ? "1 person" : `${snap.pax} people`);
+    }
+  }
+  return parts.length > 0 ? parts.join(" · ") : friendlyTrip(id);
 }
 
 /** Friendly main-view label from a raw position id ("…-pos-1" -> "Trip 1").
@@ -270,6 +315,23 @@ function plainToast(k: string): { title: string; body: string } {
   }
 }
 
+/** Real spent-vs-budget figures from the snapshot's budgets[] — the same
+    summing the summary page does: budget = allocated summed across every
+    period, spent = spent summed the same way. Returns null when there are
+    no budgets or any figure isn't a finite number — the bar then renders
+    honestly empty and shows no note, never a guessed figure. */
+function extractBudgetFigures(
+  budgets: { allocated: string; spent: string }[] | undefined
+): { spent: number; budget: number } | null {
+  if (!budgets || budgets.length === 0) return null;
+  const budget = budgets.reduce((sum, b) => sum + Number(b.allocated), 0);
+  const spent = budgets.reduce((sum, b) => sum + Number(b.spent), 0);
+  if (!Number.isFinite(budget) || budget <= 0 || !Number.isFinite(spent)) {
+    return null;
+  }
+  return { spent, budget };
+}
+
 export default function DeskPage() {
   const params = useParams<{ deskId: string }>();
   const deskId = params.deskId;
@@ -331,6 +393,81 @@ export default function DeskPage() {
 
     return () => source.close(); // StrictMode: second mount rebuilds via replay
   }, [deskId]);
+
+  // ---------- snapshot positions (real trip identity) ----------------------
+  // The SSE stream only carries position ids, so cards would otherwise read
+  // "Trip N". The desk snapshot holds the real identity (trip_label, route,
+  // pax). Kept in SEPARATE state keyed by position id — it is desk-level
+  // data, so the replay wipe (dispatch({kind:"wipe"})) never touches it.
+  // Fetched once on mount, and again once the terminal result lands so
+  // late-changing fields are current. Failures are swallowed silently:
+  // the render simply falls back to "Trip N" and never invents anything.
+  const [positions, setPositions] = useState<Record<string, Position>>({});
+  // The budget bar's spent-vs-budget figures, summed from the SAME
+  // snapshot's budgets[] (pattern mirrored from the summary page). Kept in
+  // this separate, wipe-surviving state — never in the SSE reducer — so it
+  // refetches on mount and after the terminal result, exactly like the
+  // positions above. Stays null when the snapshot is unreachable or the
+  // figures don't parse: the bar then renders empty with no note.
+  const [budgetFigures, setBudgetFigures] = useState<{
+    spent: number;
+    budget: number;
+  } | null>(null);
+  // Shared request-sequence guard for BOTH snapshot fetches below: each
+  // fetch stamps a monotonically increasing seq before awaiting, and a
+  // late response is dropped unless it is still the newest — an out-of-order
+  // mount fetch can never overwrite the post-result fetch's data.
+  const snapSeq = useRef(0);
+
+  useEffect(() => {
+    // Fresh desk — drop the previous desk's snapshot state up front so the
+    // budget bar/note and trip identities never leak across desks while the
+    // new snapshot loads. (filledFiguresRef is declared further down with
+    // the bar tween; effect bodies run after render, so it's initialized.)
+    setPositions({});
+    setBudgetFigures(null);
+    filledFiguresRef.current = null;
+    let cancel = false;
+    const seq = ++snapSeq.current;
+    getDeskSnapshot(deskId)
+      .then((snap) => {
+        if (cancel || seq !== snapSeq.current) return;
+        setPositions((prev) => ({
+          ...prev,
+          ...Object.fromEntries(snap.positions.map((p) => [p.id, p])),
+        }));
+        setBudgetFigures(extractBudgetFigures(snap.budgets));
+      })
+      .catch(() => {
+        // silent — cards keep the "Trip N" fallback, the bar stays empty
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [deskId]);
+
+  // Post-result refetch: watches the reducer's `result` (set by the
+  // terminal result event); the reducer/result handling itself is untouched.
+  useEffect(() => {
+    if (!screen.result) return;
+    let cancel = false;
+    const seq = ++snapSeq.current;
+    getDeskSnapshot(deskId)
+      .then((snap) => {
+        if (cancel || seq !== snapSeq.current) return;
+        setPositions((prev) => ({
+          ...prev,
+          ...Object.fromEntries(snap.positions.map((p) => [p.id, p])),
+        }));
+        setBudgetFigures(extractBudgetFigures(snap.budgets));
+      })
+      .catch(() => {
+        // silent — the on-mount copy (or "Trip N") stays on screen
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [deskId, screen.result]);
 
   // Toast auto-hide (re-keyed by event index so replays re-animate it).
   const [toastShown, setToastShown] = useState(false);
@@ -445,6 +582,69 @@ export default function DeskPage() {
     { scope: scopeRef, dependencies: [screen.result, currency] }
   );
 
+  // Budget-bar fill — scaleX only, mirrored from the summary page. Base CSS
+  // keeps the fill COLLAPSED (scaleX 0) before any JS, so it can never
+  // flash full-width or overstate spend. When real figures arrive the fill
+  // tweens to the real ratio; a zero ratio is SET (never tweened — a
+  // 0 -> 0 tween could leave the element unstyled), so a zero-spend desk
+  // always shows an honestly empty bar.
+  const barFillRef = useRef<HTMLDivElement>(null);
+  const filledFiguresRef = useRef<{ spent: number; budget: number } | null>(
+    null
+  );
+  useGSAP(
+    () => {
+      const fillEl = barFillRef.current;
+      if (!fillEl) return;
+      if (!budgetFigures) {
+        // No real figures (snapshot missing/failed) — stay collapsed.
+        gsap.set(fillEl, { scaleX: 0, transformOrigin: "left center" });
+        filledFiguresRef.current = null;
+        return;
+      }
+      const ratio = Math.min(
+        1,
+        Math.max(0, budgetFigures.spent / budgetFigures.budget)
+      );
+      const already = filledFiguresRef.current;
+      if (already && already.spent === budgetFigures.spent && already.budget === budgetFigures.budget) {
+        // Same figures re-running — just force the settled state.
+        gsap.set(fillEl, { scaleX: ratio, transformOrigin: "left center" });
+        return;
+      }
+      filledFiguresRef.current = budgetFigures;
+      gsap.matchMedia().add(
+        { reduceMotion: "(prefers-reduced-motion: reduce)" },
+        (ctx) => {
+          if (ctx.conditions?.reduceMotion || ratio === 0) {
+            // Zero ratio or reduced motion: SET collapsed/exact — the fill
+            // can never overstate spend.
+            gsap.set(fillEl, { scaleX: ratio, transformOrigin: "left center" });
+          } else {
+            gsap.fromTo(
+              fillEl,
+              { scaleX: 0, transformOrigin: "left center" },
+              {
+                scaleX: ratio,
+                transformOrigin: "left center",
+                duration: 0.7,
+                ease: "power2.out",
+                // belt-and-braces: land EXACTLY on the real ratio
+                onComplete: () => {
+                  gsap.set(fillEl, {
+                    scaleX: ratio,
+                    transformOrigin: "left center",
+                  });
+                },
+              }
+            );
+          }
+        }
+      );
+    },
+    { scope: scopeRef, dependencies: [budgetFigures] }
+  );
+
   async function decide(escId: string, choice: "A" | "B") {
     setDecisions((d) => ({ ...d, [escId]: { state: "busy" } }));
     const outcome = await postEscalationDecision(deskId, escId, choice);
@@ -485,6 +685,9 @@ export default function DeskPage() {
     if (event.type === "escalate") return null; // surfaces as THE DECISION card
     const pos =
       "position_id" in event && event.position_id ? event.position_id : null;
+    // Real trip identity from the snapshot — undefined before it arrives or
+    // when the id isn't in it, in which case both helpers degrade cleanly.
+    const snapPos = pos ? positions[pos] : undefined;
     const blocked = event.type === "loss" || event.type === "error";
     const avatarCls = `avatar a${(ix % 4) + 2}`;
 
@@ -520,7 +723,7 @@ export default function DeskPage() {
         extra = <div className="saved">saved {money(event.amount, currency)}</div>;
         break;
       case "loss":
-        badge = <span className="badge no">Price went up</span>;
+        badge = <span className="badge no">Dropped in value</span>;
         amount = (
           <div className="fare num">
             {money(event.amount, currency).replace("−", "")}
@@ -541,11 +744,11 @@ export default function DeskPage() {
 
     return (
       <div key={ix} data-ix={ix} className={blocked ? "trip blocked" : "trip"}>
-        <div className={avatarCls}>{tripInitials(pos ?? "—")}</div>
+        <div className={avatarCls}>{tripInitials(snapPos, pos)}</div>
         <div className="info">
           <div className="name">{tripTitle(event)}</div>
           <div className="leg">
-            {friendlyTrip(pos)}
+            {tripIdentity(snapPos, pos)}
             {" · "}
             {event.type === "trade"
               ? event.kind === "book"
@@ -560,10 +763,10 @@ export default function DeskPage() {
                 : event.type === "alloc"
                   ? "paid less than the quote"
                   : event.type === "loss"
-                    ? `Price went up by ${money(
-                        event.amount,
-                        currency
-                      ).replace("−", "")} — we didn't guess or overspend`
+                    ? `Now ${money(event.amount, currency).replace(
+                        "−",
+                        ""
+                      )} below what we're holding it at — we're saying so, not hiding it`
                     : event.type === "reconcile"
                       ? "we handled it before booking anything"
                       : "the details are in the full record below"}
@@ -594,7 +797,7 @@ export default function DeskPage() {
             {ixEl}
             <div className="b-main">
               <div className="b-head">
-                <span className="chip loss">cost more</span>
+                <span className="chip loss">worth less than held</span>
                 {posEl}
                 <span className="num">{money(event.amount, currency)}</span>
               </div>
@@ -801,7 +1004,9 @@ export default function DeskPage() {
     return (
       <div key={ix} className="decide">
         <div className="cap">● One thing needs you</div>
-        <div className="decide-name">{friendlyTrip(event.position_id)}</div>
+        <div className="decide-name">
+          {tripIdentity(positions[event.position_id], event.position_id)}
+        </div>
         <p className="reason">
           {recOpt
             ? `This trip now costs ${money(recOpt.price, currency)}`
@@ -954,14 +1159,23 @@ export default function DeskPage() {
             <div className="big num">{settled ? "" : "Booking…"}</div>
           )}
         </div>
-        {/* step 6 honesty: the stream carries no settled-spend figure, so
-            the fill is NEVER animated here — an invented percentage would
-            be a lie. The track stays honestly empty and the note points to
-            the summary page, where real spent-vs-budget figures exist. */}
-        <div className="bar" />
-        <div className="bar-note">
-          The spent-vs-left bar shows up on the summary page.
+        {/* Spent-vs-budget, real figures only: both numbers are summed
+            from the snapshot's budgets[] (same pattern as the summary
+            page). The fill starts collapsed in base CSS and gsap settles
+            it at the real ratio (a 0 ratio stays honestly empty). With no
+            figures the bar renders empty and the note is dropped entirely
+            — never a guess. */}
+        <div className="bar">
+          <div ref={barFillRef} className="fill" />
         </div>
+        {budgetFigures && (
+          <div className="bar-note num">
+            spent {money(String(budgetFigures.spent), currency)} of{" "}
+            {money(String(budgetFigures.budget), currency)} ·{" "}
+            {money(String(budgetFigures.budget - budgetFigures.spent), currency)}{" "}
+            left
+          </div>
+        )}
 
         <div className="statusline">
           <span className="s">
@@ -973,11 +1187,16 @@ export default function DeskPage() {
             <b>{openEscRows.length}</b> need{openEscRows.length === 1 ? "s" : ""}{" "}
             your OK
           </span>
-          {lossCount + recCount > 0 && (
+          {lossCount > 0 && (
             <span className="s">
               <span className="pin r" />
-              <b>{lossCount + recCount}</b> price
-              {lossCount + recCount === 1 ? " went" : "s went"} up
+              <b>{lossCount}</b> worth less than held
+            </span>
+          )}
+          {recCount > 0 && (
+            <span className="s">
+              <span className="pin r" />
+              <b>{recCount}</b> price change{recCount === 1 ? "" : "s"} handled
             </span>
           )}
           {errCount > 0 && (

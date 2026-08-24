@@ -409,6 +409,8 @@ td.num { font-family: var(--mono); }
 .budget .big { font-weight: 800; font-size: 24px; letter-spacing: -0.5px; color: var(--good); }
 .budget .cap-note { font-size: 13px; color: var(--mut); width: 100%; }
 .budget .cap-note b { color: var(--ink); }
+/* dry-run hero note (bug 5b) — same full-width row shape as .cap-note */
+.budget .hero-note { width: 100%; font-size: 12.5px; color: var(--faint); margin-top: 2px; }
 .bar {
   height: 12px; border-radius: var(--r-bar);
   background: var(--line); overflow: hidden; border: 1px solid var(--line);
