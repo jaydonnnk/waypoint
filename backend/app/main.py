@@ -24,7 +24,7 @@ app = FastAPI(title="Waypoint backend", lifespan=lifespan)
 # EventSource honors CORS — so the frontend origin must be allowed.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

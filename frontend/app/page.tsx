@@ -1,19 +1,50 @@
 "use client";
 
-// Screen 1 — the mandate (confirm-and-go).
-// The mandate is seeded SERVER-SIDE; this card is display copy only — the
-// real mandate (holder, budget, authority cap) arrives via the stream's
-// `meta` event on Screen 2. Nothing here fabricates API numbers.
+// Screen 1 — start a booking run (Slice 8 design refit, step 4).
+//
+// TRIMMED per 07-design-refit.md: one line, one human sub-line, one button,
+// three tiny reassurances. The old four-point builder essay is gone; its
+// honesty points survive as the reassurance chips (plain words) and the
+// demoted footnote. The mandate itself is still seeded SERVER-SIDE — this
+// card is display copy only, and the start action (seedDesk + navigate) is
+// unchanged from Slices 1–7. Nothing here fabricates API numbers.
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useRef } from "react";
+
+import gsap from "gsap";
+import { useGSAP } from "@gsap/react";
 
 import { seedDesk } from "@/lib/api";
+
+gsap.registerPlugin(useGSAP);
 
 export default function MandatePage() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ---- Screen 1's one signature moment (step 6): a gentle staggered
+  // entrance for the start-card contents — transform/opacity only, under
+  // ~0.6s total, once on mount. gsap runs only inside useGSAP (client,
+  // post-mount), selectors stay inside this page's <main> via scope, and
+  // reduced motion skips the tween entirely.
+  const scopeRef = useRef<HTMLElement>(null);
+  useGSAP(() => {
+    gsap.matchMedia().add(
+      { reduceMotion: "(prefers-reduced-motion: reduce)" },
+      (ctx) => {
+        if (ctx.conditions?.reduceMotion) return; // content just renders
+        gsap.from(".start-title, .start-sub, .assure, .start-btn", {
+          y: 10,
+          autoAlpha: 0,
+          duration: 0.4,
+          ease: "power2.out",
+          stagger: 0.06,
+        });
+      }
+    );
+  }, { scope: scopeRef });
 
   async function openDesk() {
     setBusy(true);
@@ -25,70 +56,57 @@ export default function MandatePage() {
       setBusy(false);
       setError(
         err instanceof Error
-          ? `${err.message} — the desk backend may not be running`
-          : "Could not reach the desk backend"
+          ? `${err.message} — the booking service may not be running`
+          : "Could not reach the booking service"
       );
     }
   }
 
   return (
-    <main className="wrap">
-      <div className="brand">
-        WAYPOINT<span className="tick">.</span>
+    <main className="wrap" ref={scopeRef}>
+      {/* ---- header — same shape as the run screen -------------------- */}
+      <div className="top">
+        <div className="brand">
+          <span className="beacon" />
+          Waypoint
+        </div>
       </div>
-      <div className="sub">the travel treasury desk</div>
 
-      <div className="mandate-intro">
-        <h1>
-          Corporate travel, run like a <em>trading desk</em>.
+      {/* ---- the start card: one line, one button --------------------- */}
+      <div className="start">
+        <h1 className="start-title">
+          Book your team's flights, on budget.
         </h1>
-        <p>
-          A mandate seeds the desk: a budget, an authority cap, and a book of
-          held travel positions. The agent marks them to market, judges
-          hold-vs-book, executes behind a code wall, and admits losses —
-          honestly, in the open.
+        <p className="start-sub">
+          Waypoint books your team's trips, keeps an eye on the fares, and
+          asks you first whenever a call is too big to make on its own.
         </p>
 
-        <div className="card">
-          <ul className="mandate-points">
-            <li>
-              <span className="pt-k">mandate</span>
-              <span>
-                seeded on the server — holder, budget and authority cap appear
-                on the desk the moment the stream opens
-              </span>
-            </li>
-            <li>
-              <span className="pt-k">search meter</span>
-              <span>
-                bounded spend: every live query is metered, and the meter is
-                always on screen
-              </span>
-            </li>
-            <li>
-              <span className="pt-k">one human click</span>
-              <span>
-                anything over the authority cap escalates to two priced
-                options and a recommendation
-              </span>
-            </li>
-            <li>
-              <span className="pt-k">honesty</span>
-              <span>
-                every disclosure rides in-frame — comparison mode, stale
-                marks, ledger-only allocations, all labeled
-              </span>
-            </li>
-          </ul>
+        {/* three tiny reassurances — the honesty points, in plain words */}
+        <div className="assure">
+          <span className="assure-chip">
+            <span className="pin g" />
+            Stays under budget
+          </span>
+          <span className="assure-chip">
+            <span className="pin w" />
+            Asks before overspending
+          </span>
+          <span className="assure-chip">
+            <span className="pin g" />
+            Never invents a fare
+          </span>
         </div>
 
-        <button className="cta" onClick={openDesk} disabled={busy}>
-          {busy ? "Seeding the mandate…" : "Open the desk →"}
+        <button className="btn primary start-btn" onClick={openDesk} disabled={busy}>
+          {busy ? "Starting…" : "Start booking →"}
         </button>
         {error && <div className="status err">{error}</div>}
-        <div className="note">
-          Opening the desk seeds the mandate and starts the cycle server-side;
-          you watch it live on one SSE stream.
+
+        {/* demoted footnote — how starting works, visibly secondary */}
+        <div className="note-soft">
+          Starting sets up your budget and booking limits, then runs it all
+          live — you'll watch every check and booking as it happens.
         </div>
       </div>
     </main>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Waypoint — Booker v3 mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --paper:#FBFAF7; --card:#FFFFFF; --ink:#1B2430; --mut:#6B7684; --faint:#9AA3AE;
+  --line:#EAE7DF; --line2:#DED9CE;
+  --brand:#0F766E;                 /* deep teal — the waypoint beacon */
+  --good:#15A66A; --goodbg:#EAF7F0;
+  --warn:#C8811E; --warnbg:#FBF3E4;
+  --bad:#D64550;  --badbg:#FBEDED;
+  --sans:"Figtree",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+.wrap{max-width:760px;margin:0 auto;padding:26px 20px 90px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* header */
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:26px}
+.brand{font-weight:800;font-size:20px;letter-spacing:-.2px;display:flex;align-items:center;gap:8px}
+.beacon{width:12px;height:12px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 4px rgba(15,118,110,.14)}
+.tag{font-size:13px;color:var(--mut)}
+
+/* run summary */
+.run{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px 24px;box-shadow:0 1px 2px rgba(27,36,48,.03)}
+.run h1{font-size:22px;font-weight:700;margin:0 0 4px;letter-spacing:-.3px}
+.run .who{color:var(--mut);font-size:14px;margin-bottom:18px}
+.budget{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:9px}
+.budget .left{font-size:15px;color:var(--mut)}
+.budget .left b{color:var(--ink);font-weight:700}
+.budget .big{font-weight:800;font-size:26px;letter-spacing:-.5px}
+.bar{height:12px;border-radius:8px;background:#F0EEE8;overflow:hidden;border:1px solid var(--line)}
+.bar .fill{height:100%;width:85%;border-radius:8px;background:linear-gradient(90deg,var(--good),#3fbf86)}
+.statusline{display:flex;gap:18px;margin-top:16px;font-size:14px;flex-wrap:wrap}
+.statusline .s{display:flex;align-items:center;gap:7px;color:var(--mut)}
+.statusline .s b{color:var(--ink);font-weight:700}
+.pin{width:9px;height:9px;border-radius:50%}
+.pin.g{background:var(--good)} .pin.w{background:var(--warn)} .pin.r{background:var(--bad)}
+
+/* decision — the one thing that needs a human */
+.decide{background:var(--warnbg);border:1px solid #EBD9B4;border-radius:18px;padding:20px 22px;margin:16px 0}
+.decide .cap{font-size:12px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--warn);display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.decide h2{font-size:18px;font-weight:700;margin:0 0 3px}
+.decide .route{color:var(--mut);font-size:14px;margin-bottom:12px}
+.decide p{margin:0 0 16px;font-size:15.5px;line-height:1.5}
+.decide p .price{font-weight:800}
+.decide p .over{color:var(--warn);font-weight:700}
+.btns{display:flex;gap:10px;flex-wrap:wrap}
+.btn{border:none;border-radius:11px;padding:13px 20px;font:700 15px var(--sans);cursor:pointer;transition:.15s}
+.btn.primary{background:var(--brand);color:#fff}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{background:var(--card);color:var(--ink);border:1px solid var(--line2)}
+.btn.ghost:hover{border-color:var(--mut)}
+.decide .fine{font-size:13px;color:var(--mut);margin-top:12px}
+
+/* trips */
+.sec{font-size:13px;font-weight:700;letter-spacing:.3px;color:var(--mut);margin:26px 2px 12px;text-transform:uppercase}
+.trip{display:flex;align-items:center;gap:16px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 18px;margin-bottom:10px}
+.avatar{width:38px;height:38px;border-radius:50%;flex:none;display:grid;place-items:center;font-weight:700;font-size:14px;color:#fff;background:var(--brand)}
+.avatar.a2{background:#8A5A2B}.avatar.a3{background:#3B6E8F}.avatar.a4{background:#7A4A7A}.avatar.a5{background:#9AA3AE}
+.trip .info{flex:1;min-width:0}
+.trip .name{font-weight:700;font-size:15.5px}
+.trip .leg{color:var(--mut);font-size:13.5px}
+.trip .right{text-align:right;flex:none}
+.trip .fare{font-weight:700;font-size:16px}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;padding:4px 11px;border-radius:20px;margin-top:3px}
+.badge.ok{background:var(--goodbg);color:var(--good)}
+.badge.wait{background:var(--warnbg);color:var(--warn)}
+.badge.no{background:var(--badbg);color:var(--bad)}
+.saved{font-size:12.5px;color:var(--good);font-weight:600;margin-top:2px}
+.trip.blocked{border-color:#F0D6D6;background:#FFFBFB}
+.trip.blocked .info .leg{color:var(--bad)}
+
+/* footer honesty toggle */
+.record{margin-top:26px;text-align:center}
+.record a{color:var(--brand);font-weight:600;font-size:14px;text-decoration:none;border-bottom:1px solid rgba(15,118,110,.3);padding-bottom:1px}
+.note{margin-top:14px;text-align:center;font-size:12.5px;color:var(--faint)}
+@media(max-width:560px){.trip{flex-wrap:wrap}.trip .right{width:100%;text-align:left;margin-left:54px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="brand"><span class="beacon"></span>Waypoint</div>
+    <div class="tag">Team travel, on budget</div>
+  </div>
+
+  <!-- RUN SUMMARY -->
+  <div class="run">
+    <h1>Q3 Tokyo offsite</h1>
+    <div class="who">Booking flights for 6 people · Singapore → Tokyo · Sep 4</div>
+
+    <div class="budget">
+      <div class="left">Spent <b class="num">$4,240</b> of <b class="num">$5,000</b></div>
+      <div class="big num" style="color:var(--good)">$760 left</div>
+    </div>
+    <div class="bar"><div class="fill"></div></div>
+
+    <div class="statusline">
+      <span class="s"><span class="pin g"></span><b>4</b> booked</span>
+      <span class="s"><span class="pin w"></span><b>1</b> needs your OK</span>
+      <span class="s"><span class="pin r"></span><b>1</b> no seat in budget</span>
+    </div>
+  </div>
+
+  <!-- THE ONE DECISION -->
+  <div class="decide">
+    <div class="cap">● 1 trip needs your approval</div>
+    <h2>Priya Nair</h2>
+    <div class="route">Singapore → Tokyo · Sep 4 · 1 passenger</div>
+    <p>The best seat we found is <span class="price num">$742</span> — that's <span class="over">$42 over</span> your $700 auto-approve limit. Want to book it, or wait for a cheaper fare?</p>
+    <div class="btns">
+      <button class="btn primary">Book it — $742</button>
+      <button class="btn ghost">Wait for a cheaper fare</button>
+    </div>
+    <div class="fine">Anything under $700, Waypoint books on its own. Over that, it always asks you first.</div>
+  </div>
+
+  <!-- TRIPS -->
+  <div class="sec">The 6 trips</div>
+
+  <div class="trip">
+    <div class="avatar">AT</div>
+    <div class="info"><div class="name">Alice Tan</div><div class="leg">Singapore → Tokyo · Sep 4 · 09:20 direct</div></div>
+    <div class="right"><div class="fare num">$548</div><span class="badge ok">✓ Booked</span><div class="saved">saved $72</div></div>
+  </div>
+
+  <div class="trip">
+    <div class="avatar a2">MD</div>
+    <div class="info"><div class="name">Marco Diaz</div><div class="leg">Singapore → Tokyo · Sep 4 · 09:20 direct</div></div>
+    <div class="right"><div class="fare num">$610</div><span class="badge ok">✓ Booked</span></div>
+  </div>
+
+  <div class="trip">
+    <div class="avatar a3">JW</div>
+    <div class="info"><div class="name">Jia Wei</div><div class="leg">Singapore → Tokyo · Sep 4 · 14:05 direct</div></div>
+    <div class="right"><div class="fare num">$588</div><span class="badge ok">✓ Booked</span><div class="saved">saved $40</div></div>
+  </div>
+
+  <div class="trip">
+    <div class="avatar a4">RK</div>
+    <div class="info"><div class="name">Ravi Kumar</div><div class="leg">Singapore → Tokyo · Sep 4 · 14:05 direct</div></div>
+    <div class="right"><div class="fare num">$602</div><span class="badge ok">✓ Booked</span></div>
+  </div>
+
+  <div class="trip">
+    <div class="avatar a5">PN</div>
+    <div class="info"><div class="name">Priya Nair</div><div class="leg">Singapore → Tokyo · Sep 4 · waiting on your approval</div></div>
+    <div class="right"><div class="fare num">$742</div><span class="badge wait">Needs your OK</span></div>
+  </div>
+
+  <div class="trip blocked">
+    <div class="avatar a5">SL</div>
+    <div class="info"><div class="name">Sam Lee</div><div class="leg">No seat under your budget — Waypoint didn't guess or overspend</div></div>
+    <div class="right"><span class="badge no">Couldn't book</span></div>
+  </div>
+
+  <div class="record"><a href="#">See the full record — every price, check &amp; decision →</a></div>
+  <div class="note">Waypoint never books over budget, and never invents a fare it didn't actually find.</div>
+
+</div>
+</body>
+</html>
