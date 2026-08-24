@@ -1,18 +1,29 @@
 "use client";
 
-// Screen 3 — the weekly close.
+// Screen 3 — the wrap-up (Slice 8 design refit, step 5).
 // GET /api/desk/{id}/close, branching on result.status — NEVER on the HTTP
 // code alone: 200 carries DeskResult for every logical outcome
 // (closed / escalated / budget_exhausted / failed), 504 = still running
 // (retry), 500 = the cycle CRASHED (no result exists — disclose honestly).
+//
+// REFIT: same tokens/tone as Screens 1–2, plain ops-manager copy. Every
+// figure still comes from the close response — nothing invented. Honesty
+// elements survive: the mode banner, the fail-closed statuses, the
+// losses/steps/breaches counts (demoted into a record zone), and the
+// auditor second opinion with its fallback disclosure.
 
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import gsap from "gsap";
+import { useGSAP } from "@gsap/react";
 
 import { getDeskClose, getDeskSnapshot, type CloseOutcome } from "@/lib/api";
-import { signedMoney } from "@/lib/format";
+import { money } from "@/lib/format";
 import type { DeskResult, DeskStatus } from "@/lib/types";
+
+gsap.registerPlugin(useGSAP);
 
 type Phase =
   | { kind: "waiting" }
@@ -20,24 +31,24 @@ type Phase =
 
 const STATUS_COPY: Record<DeskStatus, { call: string; cls: string; sub: string }> = {
   closed: {
-    call: "Weekly close — settled",
+    call: "All set",
     cls: "good",
-    sub: "the cycle ran to completion; P&L was computed in code, not asserted",
+    sub: "Every booking ran to the end — and every figure here was worked out in code, never guessed."
   },
   escalated: {
-    call: "Closed on an escalation",
+    call: "Waiting on your approval",
     cls: "warn",
-    sub: "the cycle ended waiting on the one human click — nothing executed past it",
+    sub: "Everything else is done — one booking still needs your OK. Nothing ran past it."
   },
   budget_exhausted: {
-    call: "Budget exhausted",
+    call: "Stopped at the budget line",
     cls: "bad",
-    sub: "the desk stopped at the budget line — budget is never waived, even by a human click",
+    sub: "We stopped when the budget ran out. The budget is never stretched — not even with your OK."
   },
   failed: {
-    call: "Cycle failed — disclosed",
+    call: "Couldn't finish — shown honestly",
     cls: "bad",
-    sub: "the desk gave up honestly instead of guessing; the blotter shows where it stopped",
+    sub: "We gave up honestly rather than guess. The run page shows exactly where it stopped."
   },
 };
 
@@ -51,6 +62,13 @@ export default function ClosePage() {
   // (existing endpoint). Stays undefined if the snapshot is unreachable —
   // amounts then render without a symbol rather than a guessed one.
   const [currency, setCurrency] = useState<string | undefined>(undefined);
+  // Step 6: the bar's spent-vs-budget ratio. DeskResult carries neither
+  // figure, so both come from the SAME snapshot call above (real endpoint
+  // numbers, never invented). Stays null if the snapshot is unreachable or
+  // the figures don't parse — the bar then simply doesn't render.
+  const [figures, setFigures] = useState<{ spent: number; budget: number } | null>(
+    null
+  );
 
   const load = useCallback(() => {
     setPhase({ kind: "waiting" });
@@ -67,7 +85,16 @@ export default function ClosePage() {
     let cancelled = false;
     getDeskSnapshot(deskId)
       .then((snap) => {
-        if (!cancelled) setCurrency(snap.mandate.currency);
+        if (cancelled) return;
+        setCurrency(snap.mandate.currency);
+        const budget = Number(snap.mandate.budget_total);
+        const spent = snap.budgets.reduce(
+          (sum, b) => sum + (Number(b.spent) || 0),
+          0
+        );
+        if (Number.isFinite(budget) && budget > 0 && Number.isFinite(spent)) {
+          setFigures({ spent, budget });
+        }
       })
       .catch(() => {
         /* snapshot is cosmetic here — the close result stands without it */
@@ -75,21 +102,153 @@ export default function ClosePage() {
     return () => {
       cancelled = true;
     };
-  }, [deskId]);
+    // Fetches once on mount, then again whenever phase.kind changes — in
+    // particular when the outcome RESOLVES: a user who lands here mid-cycle
+    // would otherwise bar against a stale pre-finish snapshot and understate
+    // final spend. The normal flow (mount → one outcome) stays two fetches.
+  }, [deskId, phase.kind]);
+
+  // ---------- step 6: the signature moment (gsap) --------------------------
+  // Display-only. The hero figure counts up from 0 to the REAL close-response
+  // pnl (money()-formatted every frame, onComplete lands on the exact real
+  // figure); the bar fills via scaleX to the REAL spent-vs-budget ratio from
+  // the snapshot — no ratio, no fill, never an invented percentage.
+  const scopeRef = useRef<HTMLElement>(null);
+  const heroRef = useRef<HTMLDivElement>(null);
+  const fillRef = useRef<HTMLDivElement>(null);
+  const countedRef = useRef(false);
+  const filledRef = useRef(false);
+  // The once-guards key off the OUTCOME OBJECT itself: they reset only when
+  // a genuinely new outcome arrives — NEVER on dep-only re-runs (the
+  // snapshot resolving AFTER the close result must not replay the count-up
+  // or the bar from zero).
+  const seenOutcomeRef = useRef<CloseOutcome | null>(null);
+
+  useGSAP(
+    () => {
+      if (phase.kind !== "outcome" || phase.outcome.kind !== "result") {
+        // waiting / retrying — a fresh outcome may animate again.
+        seenOutcomeRef.current = null;
+        countedRef.current = false;
+        filledRef.current = false;
+        return;
+      }
+      if (seenOutcomeRef.current !== phase.outcome) {
+        seenOutcomeRef.current = phase.outcome;
+        countedRef.current = false;
+        filledRef.current = false;
+      }
+      const result: DeskResult = phase.outcome.result;
+      const pnlNum = Number(result.pnl);
+      if (!Number.isFinite(pnlNum)) return;
+      const label = pnlNum >= 0 ? "Saved " : "Over by ";
+      const magnitude = Math.abs(pnlNum);
+      // Identical to the JSX render — the tween only ever counts TOWARD it.
+      const finalText = `${label}${money(result.pnl, currency).replace("−", "")}`;
+      const ratio = figures
+        ? Math.min(1, Math.max(0, figures.spent / figures.budget))
+        : null;
+
+      gsap.matchMedia().add(
+        { reduceMotion: "(prefers-reduced-motion: reduce)" },
+        (ctx) => {
+          const reduce = Boolean(ctx.conditions?.reduceMotion);
+
+          // Hero count-up (once per outcome).
+          const heroEl = heroRef.current;
+          if (heroEl) {
+            if (countedRef.current) {
+              heroEl.textContent = finalText; // settle after any re-run
+            } else {
+              countedRef.current = true;
+              if (reduce) {
+                heroEl.textContent = finalText; // real figure, no tween
+              } else {
+                const counter = { v: 0 };
+                gsap.to(counter, {
+                  v: magnitude,
+                  duration: 0.9,
+                  ease: "power2.out",
+                  onUpdate: () => {
+                    const shown = Math.min(Math.round(counter.v), magnitude);
+                    heroEl.textContent = `${label}${money(String(shown), currency)}`;
+                  },
+                  onComplete: () => {
+                    heroEl.textContent = finalText; // always the real figure
+                  },
+                });
+              }
+            }
+          }
+
+          // Bar fill — scaleX only (transformOrigin left center), once,
+          // and only because a real ratio exists. The settled state is
+          // ALWAYS the real ratio, forced via gsap.set: at ratio 0 a
+          // fromTo(0 → 0) would have identical ends and could leave the
+          // element unstyled, so a zero ratio is SET (collapsed), never
+          // tweened — the fill can never overstate spend.
+          const fillEl = fillRef.current;
+          if (fillEl && ratio !== null) {
+            if (filledRef.current) {
+              gsap.set(fillEl, { scaleX: ratio, transformOrigin: "left center" });
+            } else {
+              filledRef.current = true;
+              if (reduce || ratio === 0) {
+                gsap.set(fillEl, { scaleX: ratio, transformOrigin: "left center" });
+              } else {
+                gsap.fromTo(
+                  fillEl,
+                  { scaleX: 0, transformOrigin: "left center" },
+                  {
+                    scaleX: ratio,
+                    transformOrigin: "left center",
+                    duration: 0.7,
+                    ease: "power2.out",
+                    // belt-and-braces: land EXACTLY on the real ratio
+                    onComplete: () => {
+                      gsap.set(fillEl, {
+                        scaleX: ratio,
+                        transformOrigin: "left center",
+                      });
+                    },
+                  }
+                );
+              }
+            }
+          }
+        }
+      );
+      // NO cleanup here: resetting the once-guards on dep-only re-runs
+      // (snapshot or currency arriving after the result) would replay the
+      // count-up and the bar from zero. Guards reset only above, when the
+      // outcome itself changes; unmount cleanup stays automatic via useGSAP.
+    },
+    { scope: scopeRef, dependencies: [phase, figures, currency] }
+  );
+
+  // Shared header — same shape as Screens 1–2.
+  const header = (
+    <div className="top">
+      <div className="brand">
+        <span className="beacon" />
+        Waypoint
+      </div>
+      <div className="sub">
+        The wrap-up<span className="run-id"> · {deskId}</span>
+      </div>
+    </div>
+  );
 
   // ---------- waiting -----------------------------------------------------
   if (phase.kind === "waiting") {
     return (
       <main className="wrap">
-        <div className="brand">
-          WAYPOINT<span className="tick">.</span>
-        </div>
-        <div className="sub">weekly close · {deskId}</div>
-        <div className="card close-status-card">
-          <p className="close-call">Settling the week…</p>
+        {header}
+        <div className="run close-status-card">
+          <p className="close-call">Wrapping up…</p>
           <p className="close-sub">
-            the close endpoint waits with the desk until the cycle finishes
-            (bounded to 60 seconds per attempt)
+            We're waiting for the run to finish before showing the summary —
+            up to 60 seconds a try.
           </p>
         </div>
       </main>
@@ -102,22 +261,21 @@ export default function ClosePage() {
   if (outcome.kind === "still_running") {
     return (
       <main className="wrap">
-        <div className="brand">
-          WAYPOINT<span className="tick">.</span>
-        </div>
-        <div className="sub">weekly close · {deskId}</div>
-        <div className="card close-status-card">
-          <p className="close-call warn">Cycle still running</p>
+        {header}
+        <div className="run close-status-card">
+          <p className="close-call warn">Still going — not stuck, just busy</p>
           <p className="close-sub">
-            the desk hasn&apos;t finished in this 60-second wait — it is not
-            failed, just busy
+            The run hasn't finished in this 60-second wait. It hasn't failed —
+            it's just busy.
           </p>
-          <button className="cta" onClick={() => setAttempt((a) => a + 1)}>
-            Wait again →
-          </button>
-          <Link className="cta ghost" href={`/desk/${deskId}`}>
-            Back to the live desk
-          </Link>
+          <div className="close-actions">
+            <button className="btn primary" onClick={() => setAttempt((a) => a + 1)}>
+              Wait a little longer →
+            </button>
+            <Link className="btn ghost" href={`/desk/${deskId}`}>
+              Back to the run
+            </Link>
+          </div>
         </div>
       </main>
     );
@@ -127,20 +285,19 @@ export default function ClosePage() {
   if (outcome.kind === "crashed") {
     return (
       <main className="wrap">
-        <div className="brand">
-          WAYPOINT<span className="tick">.</span>
-        </div>
-        <div className="sub">weekly close · {deskId}</div>
-        <div className="card close-status-card">
-          <p className="close-call bad">The cycle crashed</p>
+        {header}
+        <div className="run close-status-card">
+          <p className="close-call bad">The run crashed — shown honestly</p>
           <p className="close-sub">
-            honest disclosure: the desk ended abnormally and produced no
-            result. No P&L is shown because none exists — the server keeps
-            the raw cause; nothing unverified is rendered here.
+            It ended abnormally and there is no final result. We're not
+            showing a number because none exists — the cause stays on the
+            server, and nothing unverified is shown here.
           </p>
-          <Link className="cta ghost" href={`/desk/${deskId}`}>
-            Back to the live desk
-          </Link>
+          <div className="close-actions">
+            <Link className="btn ghost" href={`/desk/${deskId}`}>
+              Back to the run
+            </Link>
+          </div>
         </div>
       </main>
     );
@@ -150,19 +307,18 @@ export default function ClosePage() {
   if (outcome.kind === "not_found") {
     return (
       <main className="wrap">
-        <div className="brand">
-          WAYPOINT<span className="tick">.</span>
-        </div>
-        <div className="sub">weekly close · {deskId}</div>
-        <div className="card close-status-card">
-          <p className="close-call bad">Desk not found</p>
+        {header}
+        <div className="run close-status-card">
+          <p className="close-call bad">This run doesn't exist</p>
           <p className="close-sub">
-            the backend has no desk with this id — nothing to close, and
-            retrying won&apos;t change that
+            There's no run with this id — nothing to wrap up, and retrying
+            won't change that.
           </p>
-          <Link className="cta ghost" href="/">
-            Seed a new desk →
-          </Link>
+          <div className="close-actions">
+            <Link className="btn ghost" href="/">
+              Start a new booking →
+            </Link>
+          </div>
         </div>
       </main>
     );
@@ -172,16 +328,15 @@ export default function ClosePage() {
   if (outcome.kind === "unreachable") {
     return (
       <main className="wrap">
-        <div className="brand">
-          WAYPOINT<span className="tick">.</span>
-        </div>
-        <div className="sub">weekly close · {deskId}</div>
-        <div className="card close-status-card">
-          <p className="close-call bad">Couldn&apos;t read the close</p>
+        {header}
+        <div className="run close-status-card">
+          <p className="close-call bad">Couldn't load the summary</p>
           <p className="close-sub">{outcome.detail}</p>
-          <button className="cta" onClick={() => setAttempt((a) => a + 1)}>
-            Retry
-          </button>
+          <div className="close-actions">
+            <button className="btn primary" onClick={() => setAttempt((a) => a + 1)}>
+              Try again
+            </button>
+          </div>
         </div>
       </main>
     );
@@ -193,71 +348,94 @@ export default function ClosePage() {
   const copy = STATUS_COPY[result.status] ?? STATUS_COPY.failed;
   const pnl = Number(result.pnl);
   const pnlCls = pnl > 0 ? "pos" : pnl < 0 ? "neg" : "";
+  // Hero figure: "Saved X" or "Over by X" — the bound pnl, magnitude-only
+  // sign handling on the negative side (same display-only trick as Screen 2).
+  const hero =
+    pnl >= 0
+      ? `Saved ${money(result.pnl, currency)}`
+      : `Over by ${money(result.pnl, currency).replace("−", "")}`;
 
   return (
-    <main className="wrap">
-      <div className="brand">
-        WAYPOINT<span className="tick">.</span>
-      </div>
-      <div className="sub">weekly close · {deskId}</div>
+    <main className="wrap" ref={scopeRef}>
+      {header}
 
-      <div className="card close-status-card">
+      <div className="run close-status-card">
         <p className={`close-call ${copy.cls}`}>{copy.call}</p>
         <p className="close-sub">{copy.sub}</p>
 
-        <div className="close-stats">
-          <div className="close-stat">
-            <div className="cs-k">P&amp;L (mark-to-market)</div>
-            <div className={`cs-v ${pnlCls}`}>
-              {signedMoney(result.pnl, currency)}
-            </div>
+        {/* the one number that matters — bound to result.pnl, never invented */}
+        <div className="budget">
+          <div className="left">On your team's bookings</div>
+          <div ref={heroRef} className={`big num ${pnlCls}`}>
+            {hero}
           </div>
-          <div className="close-stat">
-            <div className="cs-k">losses admitted</div>
-            <div className="cs-v">{result.losses_admitted}</div>
-          </div>
-          <div className="close-stat">
-            <div className="cs-k">steps used</div>
-            <div className="cs-v">{result.step_count}</div>
-          </div>
-          {/* S7: breach count is computed in code server-side; render exactly
-              what came back, nothing if the field is absent. */}
-          {typeof report?.policy_breaches === "number" ? (
-            <div className="close-stat">
-              <div className="cs-k">policy-cap breaches</div>
-              <div className="cs-v">{report.policy_breaches}</div>
-            </div>
-          ) : null}
         </div>
 
-        {/* Mode line — unconditional: honesty register shows WHICH mode ran. */}
+        {/* step 6: spent-vs-budget, scaleX fill — rendered ONLY when both
+            real figures exist (snapshot); no ratio, no bar, never a guess.
+            The note states spent / budget / left — deterministic arithmetic
+            on the two real endpoint values, nothing invented. */}
+        {figures && (
+          <>
+            <div className="bar">
+              <div ref={fillRef} className="fill" />
+            </div>
+            <div className="bar-note num">
+              spent {money(String(figures.spent), currency)} of{" "}
+              {money(String(figures.budget), currency)} ·{" "}
+              {money(String(figures.budget - figures.spent), currency)} left
+            </div>
+          </>
+        )}
+
+        {/* demoted record zone — the counts live here, small and secondary */}
+        <div className="record close-record">
+          <div className="close-stats">
+            <div className="close-stat">
+              <div className="cs-k">trips that cost more</div>
+              <div className="cs-v num">{result.losses_admitted}</div>
+            </div>
+            <div className="close-stat">
+              <div className="cs-k">checks made</div>
+              <div className="cs-v num">{result.step_count}</div>
+            </div>
+            {/* S7: breach count is computed in code server-side; render exactly
+                what came back, nothing if the field is absent — and only when
+                there actually were breaches (a clean desk shows no tile). */}
+            {typeof report?.policy_breaches === "number" && report.policy_breaches > 0 ? (
+              <div className="close-stat">
+                <div className="cs-k">bookings past your limit</div>
+                <div className="cs-v num">{report.policy_breaches}</div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Mode banner — unconditional: plain words for WHICH mode ran. */}
         {result.comparison_mode ? (
           <div className="close-note">
-            comparison mode — decisions logged and marked, nothing ordered.
-            The P&amp;L above is real mark-to-market math; no ticket was ever
-            issued.
+            Dry run — nothing was really booked. Every call was logged, and
+            the figure above is real math — but no ticket was ever bought.
           </div>
         ) : (
           <div className="close-note live">
-            live ticketing — write commands were executed. The blotter and
-            ledger on the desk are the record of what was ordered.
+            Booked for real — these bookings were made. The run's full record
+            lists every order.
           </div>
         )}
 
         {/* S7 risk-officer verdict slot: render the auditor line exactly as
-            returned — labeled as a second-pass heuristic challenge, never an
-            authority. Nothing renders if the line is absent. */}
+            returned — labeled as a second opinion, never an authority.
+            Nothing renders if the line is absent. */}
         {typeof report?.auditor_line === "string" && report.auditor_line ? (
           <div className="close-room filled">
             <div className="auditor-k">
-              second-pass risk officer review — a heuristic challenge, not an
-              authority
+              a second opinion — a check on the work, not the boss
             </div>
             <p className="auditor-line">{report.auditor_line}</p>
             {report.auditor_source === "deterministic-fallback" ? (
               <div className="auditor-src">
-                disclosure: this line came from the deterministic fallback — no
-                auditor agent ran
+                This line came from the automatic fallback — no reviewer ran.
               </div>
             ) : null}
           </div>
@@ -266,9 +444,11 @@ export default function ClosePage() {
         )}
       </div>
 
-      <Link className="cta ghost" href="/">
-        Seed another desk →
-      </Link>
+      <div className="close-actions">
+        <Link className="btn ghost" href="/">
+          Start another booking →
+        </Link>
+      </div>
     </main>
   );
 }

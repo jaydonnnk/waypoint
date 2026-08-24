@@ -1,45 +1,83 @@
 /* Waypoint — the treasury desk. Tokens from the original desk aesthetic;
    blotter / meter / toast / escalation styles built from the demo-beat
-   spec (docs/plans/waypoint/03-program-design.md). */
+   spec (docs/plans/waypoint/03-program-design.md).
+
+   Slice 8 design refit (docs/plans/waypoint/07-design-refit.md): the new
+   "team travel booker" token layer is added below; superseded old tokens
+   are kept as aliases so the current screens keep rendering until their
+   markup is refit in later steps. */
 
 :root {
-  --bg: #f4f4f2;
-  --card: #fff;
-  --ink: #1a1a1a;
-  --mut: #6b6b6b;
-  --line: #dcdcd8;
-  --bad: #c0392b;
-  --good: #2e7d32;
-  --accent: #1f6feb;
-  --warn: #b07d1a;
-  --term-bg: #111;
+  /* ---- Slice 8 palette (approved mockup: docs/plans/waypoint/mockups/desk-v3.html) ---- */
+  --paper: #FBFAF7;            /* warm off-white background */
+  --card: #FFFFFF;             /* cards */
+  --ink: #1B2430;              /* text */
+  --mut: #6B7684;              /* secondary text */
+  --faint: #9AA3AE;            /* tertiary / footnote text */
+  --line: #EAE7DF;             /* hairlines */
+  --line2: #DED9CE;            /* stronger hairlines / ghost button borders */
+  --brand: #0F766E;            /* deep teal — the waypoint beacon; CTAs, avatars */
+  --good: #15A66A;             /* on-budget / booked / saved */
+  --goodbg: #EAF7F0;
+  --warn: #C8811E;             /* needs your OK */
+  --warnbg: #FBF3E4;
+  --bad: #D64550;              /* over budget / couldn't book */
+  --badbg: #FBEDED;
+
+  /* ---- Slice 8 type — Figtree for everything, IBM Plex Mono for figures ---- */
+  --sans: "Figtree", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* ---- Slice 8 radii & spacing (extracted from desk-v3.html) ---- */
+  --r-card: 18px;              /* run summary / decision cards */
+  --r-trip: 14px;              /* trip cards */
+  --r-btn: 11px;               /* buttons */
+  --r-bar: 8px;                /* budget bar + fill */
+  --r-pill: 20px;              /* status badges */
+  --sp-2: 8px;                 /* tight icon/text gaps */
+  --sp-3: 12px;                /* chip-to-text gaps, trip row margin */
+  --sp-4: 16px;                /* trip padding, statusline top margin */
+  --sp-5: 20px;                /* decision padding */
+  --sp-6: 24px;                /* run card horizontal padding */
+  --sp-7: 26px;                /* section separation (summary→trips) */
+
+  /* ---- legacy tokens, aliased for backward compatibility (Slice 8 cleanup later) ---- */
+  --bg: var(--paper);          /* was #f4f4f2 — superseded by --paper */
+  --display: var(--sans);      /* was Fraunces serif — refit bans display serifs */
+  --accent: var(--brand);      /* was #1f6feb office-blue — superseded by --brand */
+  --term-bg: #111;             /* terminal stream — retired when narration goes plain */
   --term-ink: #d7f0d7;
   --term-dim: #7fae7f;
-  --display: "Fraunces", Georgia, "Times New Roman", serif;
-  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font: 15px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
-  background:
-    radial-gradient(circle at 15% 0%, rgba(31, 111, 235, 0.045), transparent 40%),
-    repeating-linear-gradient(0deg, transparent 0 31px, rgba(26, 26, 26, 0.028) 31px 32px),
-    var(--bg);
+  font: 16px/1.55 var(--sans);
+  background: var(--paper);
   color: var(--ink);
+  -webkit-font-smoothing: antialiased;
 }
 
-.wrap { max-width: 720px; margin: 0 auto; padding: 28px 18px 72px; }
+.wrap { max-width: 720px; margin: 0 auto; padding: 26px 20px 90px; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .brand {
-  font-family: var(--display);
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  font-size: 24px;
+  font-weight: 800;
+  font-size: 20px;
+  letter-spacing: -0.2px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
 }
-.brand .tick { color: var(--accent); }
+.beacon {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.14);
+}
 .sub { color: var(--mut); font-size: 13px; margin-top: 2px; }
+.sub .run-id,
+.run .run-id { color: var(--faint); font-size: 11px; font-family: var(--mono); }
 
 /* ---- shared controls / status ---- */
 .cta {
@@ -87,6 +125,31 @@ body {
   font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
   text-transform: uppercase; color: var(--mut); min-width: 132px; padding-top: 2px;
 }
+
+/* ---- Screen 1 refit (step 4) — the trimmed start card ----
+   (step 6: the entrance motion moved to gsap — a staggered fade/rise of
+   the card's contents in page.tsx; no CSS animation here so reduced-motion
+   users get an instant, motion-free render.) */
+.start {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-card); padding: 26px var(--sp-6) 22px;
+  box-shadow: 0 1px 2px rgba(27, 36, 48, 0.03);
+  margin-top: var(--sp-6);
+}
+.start .start-title {
+  font-size: 26px; font-weight: 800; letter-spacing: -0.4px;
+  line-height: 1.22; margin: 0 0 8px;
+}
+.start .start-sub { color: var(--mut); font-size: 15px; margin: 0 0 18px; }
+.assure { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.assure-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--r-pill); padding: 5px 12px;
+  font-size: 12.5px; font-weight: 600; color: var(--mut);
+}
+.start-btn { width: 100%; }
+.start .note-soft { margin-top: 14px; }
 
 /* ---- Screen 2: desk header ---- */
 .desk-head { display: flex; gap: 12px; margin: 18px 0 6px; flex-wrap: wrap; }
@@ -154,18 +217,16 @@ body {
 .register li:first-child { border-top: none; }
 .register li::before { content: "§ "; font-family: var(--mono); color: var(--line); }
 
-/* ---- terminal narration stream ---- */
+/* ---- narration — one plain status line, not a terminal (refit) ---- */
 .stream {
-  background: var(--term-bg); color: var(--term-ink);
-  font: 13px/1.7 var(--mono);
-  border-radius: 10px; padding: 14px 16px; margin: 14px 0;
-  min-height: 60px;
-  box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.5);
+  background: var(--card); color: var(--ink);
+  font: 14px/1.7 var(--sans);
+  border: 1px solid var(--line); border-radius: var(--r-trip);
+  padding: 14px 16px; margin: 8px 0;
+  min-height: 44px;
 }
-.stream .dim { color: var(--term-dim); }
-.stream .cur::after {
-  content: "▍"; color: var(--term-dim); animation: blink 1.1s steps(1) infinite;
-}
+.stream .dim { color: var(--faint); }
+.stream .cur { font-weight: 600; }
 
 /* ---- the blotter ---- */
 .section-k {
@@ -242,20 +303,20 @@ body {
 .esc-btn:disabled { opacity: 0.55; cursor: default; }
 .esc-btn.chosen { background: var(--accent); color: #fff; }
 
-/* ---- cold-open toast ---- */
+/* ---- cold-open toast (refit: ink card on warm paper) ---- */
 .toast {
   position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
   width: min(480px, calc(100vw - 32px));
-  background: var(--term-bg); color: var(--term-ink);
-  border: 1px solid #2c3f2c; border-radius: 10px;
+  background: var(--ink); color: var(--paper);
+  border-radius: var(--r-trip);
   padding: 12px 16px;
-  font: 12.5px/1.55 var(--mono);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  font: 13px/1.55 var(--sans);
+  box-shadow: 0 10px 30px rgba(27, 36, 48, 0.25);
   animation: toast-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
   z-index: 50;
 }
 .toast .toast-k {
-  color: var(--term-dim); font-size: 10px; letter-spacing: 1px;
+  color: var(--faint); font-size: 10px; letter-spacing: 1px;
   text-transform: uppercase; margin-bottom: 3px;
 }
 
@@ -268,42 +329,41 @@ body {
 .result-banner .rb-k { font-family: var(--mono); font-size: 11px; color: var(--mut); }
 .result-banner .cta { margin-top: 0; width: auto; padding: 10px 18px; }
 
-/* ---- Screen 3: weekly close ---- */
-.close-status-card { margin-top: 20px; animation: rise 0.45s ease both; }
-.close-call {
-  font-family: var(--display); font-size: 26px; font-weight: 600; margin: 0;
-}
+/* ---- Screen 3: the wrap-up (refit step 5) ---- */
+/* paired with .run — only the entrance + spacing belong here */
+.close-status-card { margin-top: var(--sp-6); animation: rise 0.45s ease both; }
+.close-call { font-size: 24px; font-weight: 800; letter-spacing: -0.4px; margin: 0; }
 .close-call.good { color: var(--good); }
 .close-call.bad { color: var(--bad); }
 .close-call.warn { color: var(--warn); }
-.close-sub { color: var(--mut); font-size: 13.5px; margin: 6px 0 0; }
+.close-sub { color: var(--mut); font-size: 14px; margin: 6px 0 0; }
+.budget .big.neg { color: var(--bad); }
+.close-actions {
+  display: flex; flex-direction: column; gap: 10px; margin-top: 16px;
+}
+.close-actions .btn { width: 100%; text-align: center; }
 
-.close-stats { display: flex; gap: 12px; margin: 16px 0; flex-wrap: wrap; }
-.close-stat {
-  flex: 1; min-width: 140px; background: var(--card);
-  border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+/* demoted record zone — the counts, small and secondary */
+.record .close-stats { display: flex; gap: 10px; margin: 0; flex-wrap: wrap; }
+.record .close-stat {
+  flex: 1; min-width: 110px; background: var(--card);
+  border: 1px solid var(--line); border-radius: var(--r-bar); padding: 8px 12px;
 }
-.close-stat .cs-k {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.8px;
-  text-transform: uppercase; color: var(--mut);
-}
-.close-stat .cs-v { font-family: var(--mono); font-size: 19px; font-weight: 600; margin-top: 3px; }
-.close-stat .cs-v.pos { color: var(--good); }
-.close-stat .cs-v.neg { color: var(--bad); }
+.record .close-stat .cs-k { font-size: 11.5px; color: var(--faint); }
+.record .close-stat .cs-v { font-size: 16px; font-weight: 700; margin-top: 2px; }
 
 .close-note {
-  border: 1px solid #ecdcba; background: #fdf6e7; color: var(--warn);
-  border-radius: 10px; padding: 10px 14px; font-size: 13px; margin: 12px 0;
+  border: 1px solid var(--line2); background: var(--warnbg); color: var(--warn);
+  border-radius: var(--r-bar); padding: 10px 14px; font-size: 13px;
+  font-weight: 600; margin: 14px 0 0;
 }
-.close-note.live {
-  border-color: #cfe3cf; background: #f1f7f1; color: var(--good);
-}
+.close-note.live { background: var(--goodbg); color: var(--good); }
 .close-room { color: var(--mut); font-size: 12px; margin-top: 18px; }
 /* S7 risk-officer slot — filled only with what /close actually returned. */
 .close-room.filled { border-top: 1px dashed var(--line); padding-top: 12px; }
 .close-room.filled .auditor-k {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.8px;
-  text-transform: uppercase; color: var(--mut);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.2px;
+  color: var(--mut);
 }
 .close-room.filled .auditor-line {
   font-family: var(--display); font-size: 15px; font-style: italic;
@@ -322,6 +382,171 @@ th, td { text-align: left; padding: 10px 12px; font-size: 13px; border-bottom: 1
 th { background: #efefec; color: var(--mut); font-weight: 600; }
 tr:last-child td { border-bottom: none; }
 td.num { font-family: var(--mono); }
+
+/* ---- Screen 2 refit (desk-v3) — the run: summary, decision, trips ---- */
+.top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); margin-bottom: var(--sp-7);
+}
+.r-tag { font-size: 13px; color: var(--mut); text-align: right; }
+.r-tag.err { color: var(--bad); font-weight: 600; }
+.mode-banner { margin-top: 3px; font-size: 12.5px; font-weight: 700; }
+.mode-banner.comparison { color: var(--warn); }
+.mode-banner.live { color: var(--good); }
+.mode-banner.pending { color: var(--faint); font-weight: 600; }
+
+.run {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-card); padding: 22px var(--sp-6);
+  box-shadow: 0 1px 2px rgba(27, 36, 48, 0.03); margin-top: var(--sp-6);
+}
+.run .run-title { font-size: 22px; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.3px; }
+.run .run-who { color: var(--mut); font-size: 14px; margin-bottom: 18px; word-break: break-all; }
+.run .run-id { color: var(--faint); font-size: 11px; font-family: var(--mono); }
+.budget { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: 9px; }
+.budget .left { font-size: 15px; color: var(--mut); }
+.budget .left b { color: var(--ink); font-weight: 700; }
+.budget .big { font-weight: 800; font-size: 24px; letter-spacing: -0.5px; color: var(--good); }
+.budget .cap-note { font-size: 13px; color: var(--mut); width: 100%; }
+.budget .cap-note b { color: var(--ink); }
+.bar {
+  height: 12px; border-radius: var(--r-bar);
+  background: var(--line); overflow: hidden; border: 1px solid var(--line);
+}
+.bar .fill {
+  height: 100%; border-radius: var(--r-bar);
+  background: linear-gradient(90deg, var(--good), #3fbf86);
+  /* step 6 honesty: the fill starts COLLAPSED (scaleX 0) in base CSS,
+     so it can never overstate spend before/without JS. gsap settles it at
+     the REAL ratio (a 0 ratio stays invisible — the honest note stands
+     alone); it never defaults to full width. */
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+.bar-note { margin-top: 6px; font-size: 12.5px; color: var(--faint); }
+.statusline { display: flex; gap: 18px; margin-top: 16px; font-size: 14px; flex-wrap: wrap; }
+.statusline .s { display: flex; align-items: center; gap: 7px; color: var(--mut); }
+.statusline .s b { color: var(--ink); font-weight: 700; }
+.pin { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.pin.g { background: var(--good); }
+.pin.w { background: var(--warn); }
+.pin.r { background: var(--bad); }
+
+/* the decision — the one thing that needs a human */
+.decide {
+  background: var(--warnbg); border: 1px solid var(--line2);
+  border-radius: var(--r-card); padding: var(--sp-5) 22px; margin: var(--sp-4) 0;
+}
+.decide .cap {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.4px;
+  text-transform: uppercase; color: var(--warn);
+  display: flex; align-items: center; gap: var(--sp-2); margin-bottom: 10px;
+}
+.decide .decide-name { font-size: 18px; font-weight: 700; margin: 0 0 3px; }
+.decide .route { color: var(--mut); font-size: 14px; margin-bottom: 12px; }
+.decide .reason { margin: 0 0 12px; font-size: 15.5px; line-height: 1.5; }
+.decide-opts { display: flex; flex-direction: column; gap: 6px; margin: 0 0 var(--sp-3); }
+.decide-opt {
+  display: flex; align-items: baseline; gap: 10px;
+  border: 1px solid var(--line); border-radius: var(--r-bar);
+  padding: 8px 12px; background: var(--card); font-size: 13.5px;
+}
+.decide-opt.rec { border-color: var(--good); background: var(--goodbg); }
+.decide-opt .rec-flag { font-size: 11px; font-weight: 700; color: var(--good); letter-spacing: 0.4px; text-transform: uppercase; }
+.decide-opt .price { margin-left: auto; font-weight: 700; }
+.btns { display: flex; gap: 10px; flex-wrap: wrap; }
+.btn {
+  border: none; border-radius: var(--r-btn); padding: 13px 20px;
+  font: 700 15px var(--sans); cursor: pointer; transition: filter 0.15s, border-color 0.15s;
+}
+.btn.primary { background: var(--brand); color: #fff; }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn.ghost { background: var(--card); color: var(--ink); border: 1px solid var(--line2); }
+.btn.ghost:hover:not(:disabled) { border-color: var(--mut); }
+.btn:disabled { opacity: 0.55; cursor: default; }
+.btn.chosen { box-shadow: inset 0 0 0 2px var(--good); }
+.decide .fine { font-size: 13px; color: var(--mut); margin-top: 12px; }
+.decide-note { margin-top: 10px; font-size: 13px; color: var(--warn); font-weight: 600; }
+
+/* trips — one card per blotter event (real stream data, no mockup rows) */
+.sec {
+  font-size: 13px; font-weight: 700; letter-spacing: 0.3px;
+  color: var(--mut); margin: var(--sp-7) 2px 12px; text-transform: uppercase;
+}
+.trip {
+  display: flex; align-items: center; gap: var(--sp-4);
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-trip); padding: 15px 18px; margin-bottom: 10px;
+}
+.trip .avatar {
+  width: 38px; height: 38px; border-radius: 50%; flex: none;
+  display: grid; place-items: center;
+  font-weight: 700; font-size: 14px; color: #fff; background: var(--brand);
+}
+.trip .avatar.a2 { background: #8A5A2B; }
+.trip .avatar.a3 { background: #3B6E8F; }
+.trip .avatar.a4 { background: #7A4A7A; }
+.trip .avatar.a5 { background: var(--faint); }
+.trip .info { flex: 1; min-width: 0; }
+.trip .name { font-weight: 700; font-size: 15.5px; }
+.trip .leg { color: var(--mut); font-size: 13.5px; }
+.trip .right { text-align: right; flex: none; }
+.trip .fare { font-weight: 700; font-size: 16px; }
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 700; padding: 4px 11px;
+  border-radius: var(--r-pill); margin-top: 3px;
+}
+.badge.ok { background: var(--goodbg); color: var(--good); }
+.badge.wait { background: var(--warnbg); color: var(--warn); }
+.badge.no { background: var(--badbg); color: var(--bad); }
+.badge.plain { background: var(--paper); color: var(--mut); }
+.trip .saved { font-size: 12.5px; color: var(--good); font-weight: 600; margin-top: 2px; }
+.trip.blocked { border-color: var(--badbg); background: var(--badbg); }
+.trip.blocked .info .leg { color: var(--bad); }
+.trip.empty { justify-content: center; color: var(--mut); font-size: 13.5px; padding: 18px; }
+
+/* result + crash banners (restyled for the refit) */
+.done { border-color: var(--good); background: var(--goodbg); }
+.done .rb-k { color: var(--good); }
+.result-banner .rb-sub { font-size: 13px; margin-top: 2px; color: var(--mut); }
+
+/* honesty record footnote */
+.note-soft { margin-top: 14px; text-align: center; font-size: 12.5px; color: var(--faint); }
+.dim-note { color: var(--mut); }
+
+/* "See the full record" panel (step 3) — muted, clearly secondary: dashed
+   separator, small type, quiet text-button trigger. */
+.record {
+  margin-top: var(--sp-7); padding-top: var(--sp-3);
+  border-top: 1px dashed var(--line2);
+}
+.record-toggle {
+  display: inline-block; margin: 0 2px; padding: 0;
+  background: none; border: none;
+  font: inherit; font-size: 12.5px; color: var(--mut);
+  cursor: pointer;
+}
+.record-toggle:hover,
+.record-toggle:focus-visible { color: var(--ink); text-decoration: underline; }
+
+/* the demoted record body — visibly secondary, smaller */
+.fineprint { margin-top: var(--sp-3); opacity: 0.92; }
+.fineprint[hidden] { display: none; }
+.fineprint .fineprint-k {
+  font-size: 11.5px; color: var(--faint);
+  margin: 0 2px 10px;
+}
+.fineprint .register { font-size: 12px; }
+.fineprint .stream { font-size: 12.5px; padding: 10px 14px; min-height: 0; }
+.fineprint .blotter { font-size: 12.5px; }
+.fineprint .brow { padding: 8px 12px; }
+.fineprint .brow .b-body { font-size: 12.5px; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px;
+  padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 /* ---- motion ---- */
 @keyframes rise {
