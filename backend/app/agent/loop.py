@@ -66,26 +66,47 @@ EscalationClear = Callable[[str, str], None]
 # Meter mirror for GET /api/desk/{id} snapshots: (desk_id, used) -> None.
 MeterReport = Callable[[str, int], None]
 
-# Canned sandbox passenger manifest for the write path (demo data; real
-# traveler docs never live in the repo). order create is fail-closed on
-# BOOKING_INPUT_INVALID upstream — the shape is disclosed as demo.
-DEMO_PAX_JSON = json.dumps(
-    {
-        "passengers": [
-            {
-                "type": "adult",
-                "first_name": "Waypoint",
-                "last_name": "Demo",
-                "gender": "male",
-                "birth_date": "1990-01-01",
-                "nationality": "SG",
-                "document_type": "passport",
-                "document_number": "DEMO000001",
-                "document_expiry": "2030-01-01",
-            }
-        ]
-    }
-)
+# One-time sandbox passenger manifest builder for the write path (demo
+# data; real traveler docs never live in the repo). The payload shape is
+# disclosed as demo per passenger-input.md, and traveler_id /
+# passenger_type are CARRIED from the verify response — a static
+# constant can never hold a traveler_id (it only exists after verify),
+# so the payload is built at write time, per call.
+def _build_demo_pax_json(verified_travelers: list[dict]) -> str:
+    """One-time order-create stdin payload built from the verify-returned
+    traveler IDs (carry, never invent — passenger-input.md). Same shape as
+    the live-proven `_build_pax_json` in tests/test_atlas_write_path.py:
+    one `name` field "FAMILY/GIVEN", `passenger_type`, `gender` "M"/"F",
+    `birthday`, nested `document`, plus a top-level `contact` block.
+    Sandbox demo identities only; nothing here is printed or logged."""
+    travelers = verified_travelers or [
+        {"traveler_id": "", "passenger_type": "adult"}
+    ]
+    passengers = [
+        {
+            "traveler_id": t.get("traveler_id", ""),
+            "name": "DEMO/WAYPOINT",
+            "passenger_type": t.get("passenger_type", "adult"),
+            "gender": "M",
+            "birthday": "1990-01-01",
+            "nationality": "SG",
+            "document": {
+                "type": "PP",
+                "number": "DEMO000001",
+                "issuing_country": "SG",
+                "expires": "2030-01-01",
+            },
+        }
+        for t in travelers
+    ]
+    return json.dumps({
+        "passengers": passengers,
+        "contact": {
+            "name": "DEMO/WAYPOINT",
+            "email": "demo@waypoint.test",
+            "mobile": "0065-90000001",
+        },
+    })
 
 
 class DeskAgent:
@@ -672,12 +693,15 @@ class DeskAgent:
                 })
                 return budget_left, contingency_left
 
-            # order create — WRITE, NEVER retried.
+            # order create — WRITE, NEVER retried. The pax payload is
+            # built from THIS verify's travelers (traveler_id carried,
+            # never invented — passenger-input.md).
+            pax_json = _build_demo_pax_json(verified.travelers)
             try:
                 ref = await asyncio.to_thread(
                     self.atlas.create_order,
                     verified.booking_id,
-                    DEMO_PAX_JSON,
+                    pax_json,
                     "continue-without-seat",
                 )
             except AtlasUnknownOrder as signal:

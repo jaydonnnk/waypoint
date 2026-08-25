@@ -59,7 +59,11 @@ def _build_pax_json(verify_result) -> str:
     ]
     return json.dumps({
         "passengers": passengers,
-        "contact": {"name": "WAYPOINT/UAT"},
+        "contact": {
+            "name": "WAYPOINT/UAT",
+            "email": "uat@waypoint.test",
+            "mobile": "0031-600000000",
+        },
     })
 
 
