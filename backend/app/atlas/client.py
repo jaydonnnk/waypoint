@@ -30,6 +30,7 @@ The public signatures are transport-independent — the Gate 3 contract in
 from __future__ import annotations
 
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -50,6 +51,21 @@ from app.models import (
 
 CLI_TIMEOUT_SECONDS = 60.0
 WRITE_TIMEOUT_SECONDS = 90.0  # writes may run longer (order create / pay)
+
+# Workaround for a known atlas-flight-booking CLI bug (confirmed
+# 0.3.12, latest published): its default Windows keyring backend
+# writes each search's offer secrets into ONE credential blob, which
+# overflows Windows' ~2560-byte cap on any search with more than a
+# few offers, failing with CredWrite error 1783. The file-based
+# keyrings.alt backend has no such cap. Sandbox-only credentials
+# (see docs/external/atlas-integration.md) — plaintext-on-disk is an
+# accepted, disclosed tradeoff; the encrypted keyrings.alt variant
+# needs an interactive getpass() prompt per unlock and cannot work
+# from a non-interactive subprocess. setdefault (not direct
+# assignment) so a developer can still override this locally.
+os.environ.setdefault(
+    "PYTHON_KEYRING_BACKEND", "keyrings.alt.file.PlaintextKeyring"
+)
 
 # The ONLY seat policies the CLI contract allows on `order create`
 # (cli-contract.md), placed before --json. Never on `seat select`.
