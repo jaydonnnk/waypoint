@@ -23,7 +23,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import fixture
 from app.agent.auditor import SOURCE_FALLBACK, RiskAuditor, fallback_challenge
@@ -261,17 +261,36 @@ def _inject_scenario_armed() -> bool:
     return os.environ.get(INJECT_SCENARIO_ENV) != "0"
 
 
+class SeedRequest(BaseModel):
+    """Ops-manager budget constraints for the seed. Every field defaults to
+    the historical hardcoded demo value, so an absent/partial body seeds
+    exactly as before. contingency_pct is a FRACTION (0.05 == 5%); the
+    bounds mirror the form's declared input ranges — money values must be
+    positive, contingency caps at 0.25 (the UI's 0–25%)."""
+
+    budget_total: Decimal = Field(default=Decimal("12000.00"), gt=Decimal("0"))
+    authority_cap: Decimal = Field(default=Decimal("1500.00"), gt=Decimal("0"))
+    contingency_pct: float = Field(default=0.05, ge=0.0, le=0.25)
+
+
 @router.post("/desk/seed")
-async def seed_desk() -> dict:
+async def seed_desk(request: SeedRequest | None = None) -> dict:
     """Seed the mandate + portfolio (disclosed seeds) and kick off the cycle.
 
     The desk_id IS the mandate id (one desk per mandate). Persistence lands
     via DeskStore BEFORE the agent task starts, so the cycle's first
     re-read of the world always finds its data. The loss+spike scenario
     injection is one-flag (WAYPOINT_INJECT_SCENARIO; "0" disarms).
+
+    The body is OPTIONAL: no body (or a partial one) falls back to the
+    historical defaults, keeping pre-constraint callers byte-compatible.
     """
+    req = request or SeedRequest()
     mandate, positions, budgets = fixture.seeded_portfolio(
-        inject_scenario=_inject_scenario_armed()
+        inject_scenario=_inject_scenario_armed(),
+        budget_total=req.budget_total,
+        authority_cap=req.authority_cap,
+        contingency_pct=req.contingency_pct,
     )
     desk_id = await asyncio.to_thread(
         STORE.seed_desk, mandate, positions, budgets

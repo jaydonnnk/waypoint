@@ -59,6 +59,9 @@ CONTINGENCY_PCT = 0.05
 
 def seeded_portfolio(
     inject_scenario: bool = True,
+    budget_total: Decimal = BUDGET_TOTAL,
+    authority_cap: Decimal = AUTHORITY_CAP,
+    contingency_pct: float = CONTINGENCY_PCT,
 ) -> tuple[Mandate, list[Position], list[Budget]]:
     """Deterministic demo portfolio: 6 positions with seeded cost bases.
 
@@ -74,6 +77,11 @@ def seeded_portfolio(
     Everything else is plain deterministic data (no randomness beyond the
     unique desk id).
     """
+    # Quantize the incoming total to cents first so the three period
+    # allocations always sum EXACTLY to the total (sub-cent inputs get
+    # rounded here, not leaked into the split). The 12000.00 default is
+    # unchanged by this.
+    budget_total = budget_total.quantize(Decimal("0.01"))
     desk_id = f"desk-{uuid4().hex[:8]}"
     now = datetime.now(timezone.utc)
     if inject_scenario:
@@ -90,9 +98,9 @@ def seeded_portfolio(
         id=desk_id,
         holder="Waypoint Demo Desk",
         created_at=now,
-        budget_total=BUDGET_TOTAL,
-        authority_cap=AUTHORITY_CAP,
-        contingency_pct=CONTINGENCY_PCT,
+        budget_total=budget_total,
+        authority_cap=authority_cap,
+        contingency_pct=contingency_pct,
         currency="USD",
     )
 
@@ -147,18 +155,27 @@ def seeded_portfolio(
         ),
     ]
 
+    # Auto-distribute the total across the three periods 50% / 33⅓% /
+    # remainder (16⅔%) — quantized to cents, exactly reproducing the
+    # original 6000/4000/2000 rows (and their 5% contingencies) at the
+    # 12000 default.
+    cents = Decimal("0.01")
+    pct = Decimal(str(contingency_pct))
+    alloc_1 = (budget_total * Decimal("0.50")).quantize(cents)
+    alloc_2 = (budget_total / Decimal(3)).quantize(cents)
+    alloc_3 = (budget_total - alloc_1 - alloc_2).quantize(cents)
     budgets = [
         Budget(
             desk_id=desk_id, period="2026-W38",
-            allocated=Decimal("6000.00"), contingency=Decimal("300.00"),
+            allocated=alloc_1, contingency=(alloc_1 * pct).quantize(cents),
         ),
         Budget(
             desk_id=desk_id, period="2026-W39",
-            allocated=Decimal("4000.00"), contingency=Decimal("200.00"),
+            allocated=alloc_2, contingency=(alloc_2 * pct).quantize(cents),
         ),
         Budget(
             desk_id=desk_id, period="2026-W40",
-            allocated=Decimal("2000.00"), contingency=Decimal("100.00"),
+            allocated=alloc_3, contingency=(alloc_3 * pct).quantize(cents),
         ),
     ]
     return mandate, positions, budgets

@@ -5,9 +5,19 @@ export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 /** POST /api/desk/seed -> seeds the mandate + portfolio, starts the cycle
- * server-side, returns the desk_id. */
-export async function seedDesk(): Promise<string> {
-  const res = await fetch(`${API_URL}/api/desk/seed`, { method: "POST" });
+ * server-side, returns the desk_id. The ops manager's budget constraints
+ * travel in the body; contingency_pct is a FRACTION (e.g. 0.05), matching
+ * the backend Mandate model (the form converts from percent). */
+export async function seedDesk(constraints: {
+  budget_total: number;
+  authority_cap: number;
+  contingency_pct: number;
+}): Promise<string> {
+  const res = await fetch(`${API_URL}/api/desk/seed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(constraints),
+  });
   if (!res.ok) {
     throw new Error(`POST /api/desk/seed failed (${res.status})`);
   }
