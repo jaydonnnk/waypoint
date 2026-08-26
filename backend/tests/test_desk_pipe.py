@@ -1137,18 +1137,18 @@ def test_injection_flag_disarms_spike_and_losses_fixture_level():
     spike = next(p for p in positions if p.origin == "DAC")
     assert spike.mark_price <= mandate.authority_cap
     assert spike.mark_price >= spike.cost_basis  # near cost, in-band
-    assert "(injected)" not in spike.trip_label
+    assert spike.trip_label == "London client meeting"
     losers = [
         p for p in positions
         if (p.origin, p.dest) in {("JFK", "LIS"), ("GRU", "MIA")}
     ]
     assert len(losers) == 2
     assert all(p.mark_price >= p.cost_basis for p in losers)
-    # The default stays armed and byte-identical to the scripted seed.
+    # The default stays armed — spike mark above cap is the real signal.
     _, armed, _ = fixture.seeded_portfolio()
     spike_on = next(p for p in armed if p.origin == "DAC")
     assert spike_on.mark_price == Decimal("1790.00")
-    assert "(injected)" in spike_on.trip_label
+    assert spike_on.mark_price > mandate.authority_cap
 
 
 def test_injection_env_flag_flows_through_the_seed_endpoint(
@@ -1164,7 +1164,6 @@ def test_injection_env_flag_flows_through_the_seed_endpoint(
         positions = session.execute(
             select(PositionRow).where(PositionRow.desk_id == desk_id)
         ).scalars().all()
-    assert all("(injected)" not in p.trip_label for p in positions)
     dac = next(p for p in positions if p.origin == "DAC")
     assert dac.mark_price <= Decimal("1500.00")
 
@@ -1185,4 +1184,3 @@ def test_injection_env_flag_strict_only_exact_zero_disarms(
         ).scalars().all()
     dac = next(p for p in positions if p.origin == "DAC")
     assert dac.mark_price == Decimal("1790.00")  # still armed
-    assert "(injected)" in dac.trip_label

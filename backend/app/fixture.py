@@ -64,16 +64,12 @@ def seeded_portfolio(
 
     One-flag scenario injection (S7, DECISION 1 — default ON):
 
-    - inject_scenario=True (default, byte-identical to the pre-S7 seed):
-      position 2 (DAC→LHR) is the injected escalation-spike position —
-      its cost basis sits well below the current mark, and the mark is
-      above the authority cap, so the S3 escalation beat arms on it;
-      positions 3 (JFK→LIS) and 6 (GRU→MIA) carry mark-below-cost
-      unrealized losses.
+    - inject_scenario=True (default): position 2 (DAC→LHR) has its mark
+      above the authority cap (arms the escalation beat); positions 3
+      (JFK→LIS) and 6 (GRU→MIA) carry mark-below-cost unrealized losses.
     - inject_scenario=False (clean baseline for rehearsal): same six
-      routes, but pos-2's mark sits in-band under the cap near cost with
-      a plain trip label (no "(injected)"), and pos-3/6 marks sit at or
-      above cost — no spike, no scripted losses.
+      routes, but pos-2's mark sits in-band under the cap near cost, and
+      pos-3/6 marks sit at or above cost — no spike, no scripted losses.
 
     Everything else is plain deterministic data (no randomness beyond the
     unique desk id).
@@ -81,7 +77,7 @@ def seeded_portfolio(
     desk_id = f"desk-{uuid4().hex[:8]}"
     now = datetime.now(timezone.utc)
     if inject_scenario:
-        spike_label = "Escalation demo — fare spike (injected)"
+        spike_label = "London client meeting"
         spike_mark = Decimal("1790.00")   # over the 1500 cap — arms the beat
         lis_mark = Decimal("588.00")      # −22 vs cost — unrealized loss
         mia_mark = Decimal("655.00")      # −35 vs cost — unrealized loss

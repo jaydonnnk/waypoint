@@ -27,6 +27,7 @@ from app.atlas.client import AtlasError, AtlasQueryOnly, AtlasUnknownOrder
 from app.db.store import DeskStore, LedgerInput, MarkUpdate
 from app.fixture import VOLATILITY_PRIORS
 from app.models import DeskResult, Position
+from app.provenance import build_rails
 
 # emit takes a JSON-serializable dict event and returns an awaitable.
 Emit = Callable[[dict], Awaitable[None]]
@@ -78,26 +79,31 @@ def _build_demo_pax_json(verified_travelers: list[dict]) -> str:
     the live-proven `_build_pax_json` in tests/test_atlas_write_path.py:
     one `name` field "FAMILY/GIVEN", `passenger_type`, `gender` "M"/"F",
     `birthday`, nested `document`, plus a top-level `contact` block.
-    Sandbox demo identities only; nothing here is printed or logged."""
+    Each passenger gets its OWN demo identity (given name + document
+    number vary by index) — two travelers sharing one identity/doc
+    number are rejected upstream as PASSENGER_INFO_INVALID (found live
+    on SIN->NRT with 2 adults, 2026-08-25). Sandbox demo identities
+    only; nothing here is printed or logged."""
     travelers = verified_travelers or [
         {"traveler_id": "", "passenger_type": "adult"}
     ]
     passengers = [
         {
             "traveler_id": t.get("traveler_id", ""),
-            "name": "DEMO/WAYPOINT",
+            # Per-index suffix keeps every demo identity distinct.
+            "name": f"DEMO/WAYPOINT{chr(ord('A') + i)}",
             "passenger_type": t.get("passenger_type", "adult"),
             "gender": "M",
             "birthday": "1990-01-01",
             "nationality": "SG",
             "document": {
                 "type": "PP",
-                "number": "DEMO000001",
+                "number": f"DEMO00000{i + 1}",
                 "issuing_country": "SG",
                 "expires": "2030-01-01",
             },
         }
-        for t in travelers
+        for i, t in enumerate(travelers)
     ]
     return json.dumps({
         "passengers": passengers,
@@ -167,6 +173,9 @@ class DeskAgent:
                 losses_admitted=0, step_count=step,
             ))
 
+        # Provenance reads only THIS cycle's judgment; absent → fail-to-least-live fallback label.
+        self.brain.last_source = None
+
         # Comparison mode = decisions logged + marked, NO write commands.
         # Fail-closed: any doubt about ticketing keeps the desk read-only.
         # Per-cycle cache reset (fix 7): a mid-run ticketing activation
@@ -191,6 +200,13 @@ class DeskAgent:
                 "live booking armed AND ticketing live \u2014 write "
                 "commands enabled"
             )
+        # Recorded mode (S9, ADR 0005): a replay client NEVER wears the
+        # live label — getattr probe mirrors the reset_ticketing_cache
+        # precedent above; the client supplies its own gate disclosure.
+        recorded = getattr(self.atlas, "mode_label", None) == "recorded"
+        if not comparison and recorded:
+            mode = "recorded ticketing (replay)"
+            gate_disclosure = getattr(self.atlas, "gate_disclosure", gate_disclosure)
 
         # --- meta: the mandate card + full search meter + mode label.
         await emit({
@@ -205,6 +221,16 @@ class DeskAgent:
                 "volatility priors curated \u2014 no ML",
                 gate_disclosure,
             ],
+            # Per-rail provenance (S12, ADR 0006): ADDITIVE field — `mode`
+            # and `disclosures` above stay byte-identical, and old replays
+            # without it render nothing (frontend reducer guard). Pure
+            # builder; missing inputs fail to the least-live label.
+            "rails": build_rails(
+                atlas=self.atlas,
+                brain=self.brain,
+                comparison=comparison,
+                live_ticketing=(not comparison and not recorded),
+            ),
         })
 
         await emit_step(

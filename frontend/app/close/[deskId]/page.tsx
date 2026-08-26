@@ -33,22 +33,22 @@ const STATUS_COPY: Record<DeskStatus, { call: string; cls: string; sub: string }
   closed: {
     call: "All set",
     cls: "good",
-    sub: "Every booking ran to the end — and every figure here was worked out in code, never guessed."
+    sub: "Every booking is done."
   },
   escalated: {
-    call: "Waiting on your approval",
+    call: "Almost done",
     cls: "warn",
-    sub: "Everything else is done — one booking still needs your OK. Nothing ran past it."
+    sub: "One trip still needs your approval before it can be booked."
   },
   budget_exhausted: {
-    call: "Stopped at the budget line",
+    call: "Budget reached",
     cls: "bad",
-    sub: "We stopped when the budget ran out. The budget is never stretched — not even with your OK."
+    sub: "The remaining trips couldn't be booked within your budget."
   },
   failed: {
-    call: "Couldn't finish — shown honestly",
+    call: "Stopped early",
     cls: "bad",
-    sub: "We gave up honestly rather than guess. The run page shows exactly where it stopped."
+    sub: "Something went wrong — nothing was booked past that point."
   },
 };
 
@@ -292,10 +292,9 @@ export default function ClosePage() {
       <main className="wrap">
         {header}
         <div className="run close-status-card">
-          <p className="close-call warn">Still going — not stuck, just busy</p>
+          <p className="close-call warn">Still working</p>
           <p className="close-sub">
-            The run hasn't finished in this 60-second wait. It hasn't failed —
-            it's just busy.
+            The booking run is still going — give it a moment.
           </p>
           <div className="close-actions">
             <button className="btn primary" onClick={() => setAttempt((a) => a + 1)}>
@@ -316,11 +315,9 @@ export default function ClosePage() {
       <main className="wrap">
         {header}
         <div className="run close-status-card">
-          <p className="close-call bad">The run crashed — shown honestly</p>
+          <p className="close-call bad">Something went wrong</p>
           <p className="close-sub">
-            It ended abnormally and there is no final result. We're not
-            showing a number because none exists — the cause stays on the
-            server, and nothing unverified is shown here.
+            The run couldn't finish. No final numbers to show.
           </p>
           <div className="close-actions">
             <Link className="btn ghost" href={`/desk/${deskId}`}>
@@ -338,10 +335,9 @@ export default function ClosePage() {
       <main className="wrap">
         {header}
         <div className="run close-status-card">
-          <p className="close-call bad">This run doesn't exist</p>
+          <p className="close-call bad">Booking not found</p>
           <p className="close-sub">
-            There's no run with this id — nothing to wrap up, and retrying
-            won't change that.
+            We couldn't find this booking.
           </p>
           <div className="close-actions">
             <Link className="btn ghost" href="/">
@@ -444,19 +440,16 @@ export default function ClosePage() {
         <div className="record close-record">
           <div className="close-stats">
             <div className="close-stat">
-              <div className="cs-k">trips worth less than held</div>
+              <div className="cs-k">Price drops</div>
               <div className="cs-v num">{result.losses_admitted}</div>
             </div>
             <div className="close-stat">
-              <div className="cs-k">checks made</div>
+              <div className="cs-k">Fare checks</div>
               <div className="cs-v num">{result.step_count}</div>
             </div>
-            {/* S7: breach count is computed in code server-side; render exactly
-                what came back, nothing if the field is absent — and only when
-                there actually were breaches (a clean desk shows no tile). */}
             {typeof report?.policy_breaches === "number" && report.policy_breaches > 0 ? (
               <div className="close-stat">
-                <div className="cs-k">bookings past your limit</div>
+                <div className="cs-k">Over your limit</div>
                 <div className="cs-v num">{report.policy_breaches}</div>
               </div>
             ) : null}
@@ -466,13 +459,11 @@ export default function ClosePage() {
         {/* Mode banner — unconditional: plain words for WHICH mode ran. */}
         {result.comparison_mode ? (
           <div className="close-note">
-            Dry run — nothing was really booked. Every call was logged, and
-            the figure above is real math — but no ticket was ever bought.
+            Dry run — no real bookings were made.
           </div>
         ) : (
           <div className="close-note live">
-            Booked for real — these bookings were made. The run's full record
-            lists every order.
+            These bookings are confirmed.
           </div>
         )}
 
@@ -484,7 +475,7 @@ export default function ClosePage() {
         {typeof report?.auditor_line === "string" && report.auditor_line ? (
           <div className="close-room filled">
             <div className="auditor-k">
-              a second opinion — a check on the work, not the boss
+              Second opinion on this run
             </div>
           </div>
         ) : (
@@ -512,11 +503,11 @@ export default function ClosePage() {
             <div id="close-full-record" className="fineprint" hidden={!recordOpen}>
               <div className="sec fineprint-k">The full record</div>
               <div className="close-room filled">
-                <div className="auditor-k">the reviewer's line — as written</div>
+                <div className="auditor-k">Reviewer note</div>
                 <p className="auditor-line">{report.auditor_line}</p>
                 {report.auditor_source === "deterministic-fallback" ? (
                   <div className="auditor-src">
-                    This line came from the automatic fallback — no reviewer ran.
+                    Automated review — no manual reviewer ran.
                   </div>
                 ) : null}
               </div>

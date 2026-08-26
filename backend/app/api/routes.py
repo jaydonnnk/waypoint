@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -26,7 +27,7 @@ from pydantic import BaseModel
 
 from app import fixture
 from app.agent.auditor import SOURCE_FALLBACK, RiskAuditor, fallback_challenge
-from app.agent.loop import METER_MAX, DeskAgent
+from app.agent.loop import DEFAULT_ESCALATION_WAIT, METER_MAX, DeskAgent
 from app.db.store import DeskStore
 from app.models import CloseReport, DeskResult
 
@@ -43,6 +44,27 @@ AUDITOR_WAIT_SECONDS = 8.0
 # "0" — unset or any other value keeps the scripted loss+spike scenario
 # ON (the demo default).
 INJECT_SCENARIO_ENV = "WAYPOINT_INJECT_SCENARIO"
+
+# S10 (ADR 0007): the escalation click wait, env-overridable. In the
+# recorded container nobody is there to click, and the 300s demo default
+# would stretch every boot-seeded cycle past five minutes; compose sets a
+# short wait so the cycle expires the escalation and gives up gracefully
+# (loop's bounded-wait path — fail closed). Unset / unparsable / negative
+# keeps the exact demo default.
+ESCALATION_WAIT_ENV = "WAYPOINT_ESCALATION_WAIT"
+
+
+def _escalation_wait() -> float:
+    raw = os.environ.get(ESCALATION_WAIT_ENV)
+    if raw is None:
+        return DEFAULT_ESCALATION_WAIT
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_ESCALATION_WAIT
+    if not math.isfinite(value) or value < 0.0:
+        return DEFAULT_ESCALATION_WAIT
+    return value
 
 # HUMAN_WAIVER_MARKER — honesty register (S7 review ruling):
 # A blotter trade row carrying this marker in its note is treated as
@@ -65,6 +87,24 @@ HUMAN_WAIVER_MARKER = "human waiver"
 # One store + one agent for the process. AGENT must stay a module-level
 # attribute so tests can monkeypatch it (stub-client DI).
 STORE = DeskStore()
+
+
+def build_atlas():
+    """The ONE Atlas-rail seam (S9, ADR 0005): branch on the strict
+    WAYPOINT_ATLAS_MODE parse — ONLY exact "recorded" selects the replay
+    client; unset/typo/anything else keeps the live AtlasClient (today's
+    behavior). Money safety never rests on this switch: it rests on the
+    two fail-closed write gates (WAYPOINT_LIVE_BOOKING + ticketing_live),
+    so fail-to-live cannot endanger money."""
+    from app.atlas.config import read_atlas_mode  # local: keep DI light
+
+    if read_atlas_mode() == "recorded":
+        from app.atlas.recorded import RecordedAtlasClient
+
+        return RecordedAtlasClient()
+    from app.atlas.client import AtlasClient
+
+    return AtlasClient()
 
 
 @dataclass
@@ -90,6 +130,12 @@ class DeskState:
 
 # In-memory desk registry, keyed by desk_id.
 DESKS: dict[str, DeskState] = {}
+
+# One cycle at a time, process-wide (ADR 0005's single-active-cycle
+# determinism guarantee): the recorded replay cursor is per-client state,
+# so two interleaved cycles would serve each other's envelopes — the lock
+# serializes every desk cycle.
+CYCLE_LOCK = asyncio.Lock()
 
 
 def _register_escalation(desk_id: str, esc_id: str) -> dict | None:
@@ -121,10 +167,12 @@ def _report_meter(desk_id: str, used: int) -> None:
 
 AGENT = DeskAgent(
     step_budget=12,
+    atlas=build_atlas(),
     store=STORE,
     escalation_slot=_register_escalation,
     escalation_clear=_clear_escalation,
     meter_report=_report_meter,
+    escalation_wait=_escalation_wait(),
 )
 
 # The S7 risk auditor — routes-layer placement (DECISION 4): it runs ONCE
@@ -178,7 +226,10 @@ async def _emit(state: DeskState, event: dict) -> None:
 async def _run_desk(state: DeskState) -> None:
     """Run the agent, then mark the desk done (with result or an error event)."""
     try:
-        result = await AGENT.run(state.desk_id, lambda ev: _emit(state, ev))
+        async with CYCLE_LOCK:  # ADR 0005: single-active-cycle determinism
+            result = await AGENT.run(
+                state.desk_id, lambda ev: _emit(state, ev)
+            )
         async with state.cond:
             state.result = result
             state.done = True

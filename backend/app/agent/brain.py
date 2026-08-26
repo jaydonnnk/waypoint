@@ -48,6 +48,11 @@ JUDGE_TIMEOUT_SECONDS = 15.0
 # Disclosed in every fallback rationale (honesty register).
 FALLBACK_NOTE = "deterministic fallback (prior-band rule) — Qwen unavailable"
 
+# Wire values for the provenance rail (S12): the auditor.py precedent,
+# exactly these strings — frozen contract, branched on, never parsed.
+SOURCE_AGENT = "agent"
+SOURCE_FALLBACK = "deterministic-fallback"
+
 # The transport seam: async (messages list) -> raw model content string.
 Transport = Callable[[list[dict]], Awaitable[str]]
 
@@ -91,6 +96,10 @@ class DeskBrain:
         self._transport = transport
         self._model = model
         self._timeout = timeout
+        # Provenance rail (S12): which source produced the LAST judgment.
+        # None = no judgment yet — provenance reads fail to the least-live
+        # label (never a live claim). judge() sets it at every exit.
+        self.last_source: str | None = None
 
     # ------------------------------------------------------------------
     # Advise gate: ONE batched call per cycle (all positions, one prompt).
@@ -112,6 +121,7 @@ class DeskBrain:
             return []
         # LLM unavailable (no key and no injected transport) → fallback.
         if self._transport is None and not os.environ.get("DASHSCOPE_API_KEY"):
+            self.last_source = SOURCE_FALLBACK  # provenance rail (S12)
             return fallback
         try:
             prompt = self._build_prompt(
@@ -124,9 +134,12 @@ class DeskBrain:
                 json.loads(self._strip_to_json(raw)), positions
             )
             if actions is None:
+                self.last_source = SOURCE_FALLBACK  # provenance rail (S12)
                 return fallback
+            self.last_source = SOURCE_AGENT  # provenance rail (S12)
             return actions
         except Exception:  # noqa: BLE001 — degrade, never crash the cycle
+            self.last_source = SOURCE_FALLBACK  # provenance rail (S12)
             return fallback
 
     # ------------------------------------------------------------------

@@ -32,6 +32,7 @@ import type {
   EscalationOption,
   Mandate,
   Position,
+  Rail,
   StreamEvent,
 } from "@/lib/types";
 
@@ -45,6 +46,9 @@ type DeskState = {
   mandate: Mandate | null;
   mode: string | null;
   disclosures: string[];
+  // Per-rail provenance (S12): null when the meta event carries no rails
+  // (old replays) — the strip renders ONLY when present.
+  rails: Rail[] | null;
   meter: { used: number; max: number } | null; // always SET, never incremented
   steps: { n: number; text: string }[];
   blotter: BlotterRow[];
@@ -59,6 +63,7 @@ const INITIAL: DeskState = {
   mandate: null,
   mode: null,
   disclosures: [],
+  rails: null,
   meter: null,
   steps: [],
   blotter: [],
@@ -81,6 +86,7 @@ function reducer(state: DeskState, action: Action): DeskState {
         mandate: event.mandate,
         mode: event.mode,
         disclosures: event.disclosures,
+        rails: event.rails ?? null, // additive (S12) — absent → nothing renders
         meter: event.meter, // SET — concurrent fan-out can duplicate/reorder
       };
     case "step":
@@ -169,11 +175,11 @@ function plainStatus(status: DeskResult["status"]): string {
     case "closed":
       return "All done";
     case "escalated":
-      return "Done — still waiting on your OK";
+      return "Done — one trip still needs your OK";
     case "budget_exhausted":
-      return "Stopped at your budget — nothing booked past it";
+      return "Budget reached — nothing booked past it";
     case "failed":
-      return "Couldn't finish — the full record shows why";
+      return "Stopped early — details in the full record";
   }
 }
 
@@ -184,18 +190,18 @@ function tripTitle(event: StreamEvent): string {
       return event.kind === "book"
         ? "Booked"
         : event.kind === "hold"
-          ? "Waiting on a better price"
+          ? "On hold"
           : "Needs your OK";
     case "mark":
-      return event.stale ? "Price check — holding for now" : "Price checked";
+      return event.stale ? "Price held" : "Fare updated";
     case "alloc":
-      return "Came in under the quote";
+      return "Savings found";
     case "loss":
-      return "Worth less than we're holding it at";
+      return "Price dropped";
     case "reconcile":
-      return "Price changed — handled";
+      return "Price adjusted";
     case "error":
-      return "Something went wrong";
+      return "Issue";
     case "escalate":
       return "Needs your OK";
     default:
@@ -289,27 +295,15 @@ function optionVerb(key: "A" | "B", recommendation: "A" | "B"): string {
 function plainToast(k: string): { title: string; body: string } {
   switch (k) {
     case "book decision logged":
-      return { title: "Booked", body: "The price looked fair — booked." };
+      return { title: "Booked", body: "Price looked good." };
     case "hold call":
-      return {
-        title: "Holding",
-        body: "Holding off until we get a fresh price.",
-      };
+      return { title: "On hold", body: "Waiting for a better price." };
     case "escalate call":
-      return {
-        title: "Needs your OK",
-        body: "The price moved too much — I asked you first.",
-      };
+      return { title: "Needs your OK", body: "Price moved — asking you first." };
     case "stale mark — disclosed":
-      return {
-        title: "Price check — holding for now",
-        body: "Keeping the last price we saw for now.",
-      };
+      return { title: "Price held", body: "Using last known price." };
     case "marked to market":
-      return {
-        title: "Price checked",
-        body: "Checked against today's fares.",
-      };
+      return { title: "Fare updated", body: "Checked against today's prices." };
     default:
       return { title: k, body: "" };
   }
@@ -667,8 +661,11 @@ export default function DeskPage() {
     const d = decisions[r.event.esc_id];
     return !d || d.state === "open" || d.state === "busy" || d.state === "failed";
   });
-  const bookedCount = screen.blotter.filter(
-    (r) => r.event.type === "trade" && r.event.kind === "book"
+  // Booked = snapshot-confirmed ONLY (positions are the source of truth):
+  // a book JUDGMENT fires before the execute wall, so blotter trade events
+  // never count as booked — status "booked" AND ticket_asserted must hold.
+  const bookedCount = Object.values(positions).filter(
+    (p) => p.status === "booked" && p.ticket_asserted
   ).length;
   const lossCount = screen.blotter.filter((r) => r.event.type === "loss").length;
   const recCount = screen.blotter.filter(
@@ -699,7 +696,11 @@ export default function DeskPage() {
       case "trade":
         badge =
           event.kind === "book" ? (
-            <span className="badge ok">Booked</span>
+            snapPos && snapPos.status === "booked" ? (
+              <span className="badge ok">Booked</span>
+            ) : (
+              <span className="badge plain">Book decision logged</span>
+            )
           ) : event.kind === "hold" ? (
             <span className="badge plain">Holding</span>
           ) : (
@@ -752,24 +753,21 @@ export default function DeskPage() {
             {" · "}
             {event.type === "trade"
               ? event.kind === "book"
-                ? "The price looked fair, so I booked it."
+                ? "Price looked good"
                 : event.kind === "hold"
-                  ? "Holding off keeps the budget safe until we get a fresh price."
-                  : "The price moved too much to trust — so I asked you first."
+                  ? "Waiting for a better fare"
+                  : "Asking you first"
               : event.type === "mark"
                 ? event.stale
-                  ? "keeping the last price we saw for now"
-                  : "checked against today's fares"
+                  ? "Using last known price"
+                  : "Checked today's fares"
                 : event.type === "alloc"
-                  ? "paid less than the quote"
+                  ? "Came in under quote"
                   : event.type === "loss"
-                    ? `Now ${money(event.amount, currency).replace(
-                        "−",
-                        ""
-                      )} below what we're holding it at — we're saying so, not hiding it`
+                    ? `Down ${money(event.amount, currency).replace("−", "")}`
                     : event.type === "reconcile"
-                      ? "we handled it before booking anything"
-                      : "the details are in the full record below"}
+                      ? "Adjusted before booking"
+                      : "See full record"}
           </div>
           {extra}
         </div>
@@ -797,12 +795,12 @@ export default function DeskPage() {
             {ixEl}
             <div className="b-main">
               <div className="b-head">
-                <span className="chip loss">worth less than held</span>
+                <span className="chip loss">price drop</span>
                 {posEl}
                 <span className="num">{money(event.amount, currency)}</span>
               </div>
               <div className="b-body">{event.note}</div>
-              <div className="b-disc">disclosure: {event.disclosure}</div>
+              <div className="b-disc">{event.disclosure}</div>
             </div>
           </div>
         );
@@ -826,7 +824,7 @@ export default function DeskPage() {
             <div className="b-main">
               <div className="b-head">
                 <span className={event.stale ? "chip mark-stale" : "chip mark"}>
-                  {event.stale ? "mark · stale" : "mark"}
+                  {event.stale ? "price held" : "fare check"}
                 </span>
                 {posEl}
                 <span className="num">
@@ -835,13 +833,13 @@ export default function DeskPage() {
               </div>
               <div className="b-body">
                 {event.stale
-                  ? "held at the last mark — search skipped, uncertainty disclosed"
+                  ? "Kept last known price — couldn't get a fresh one"
                   : event.search_ref
-                    ? `reprice ref ${event.search_ref} · meter at ${event.meter_used}`
-                    : `meter at ${event.meter_used}`}
+                    ? `Fare lookup #${event.search_ref} · check ${event.meter_used}`
+                    : `Check ${event.meter_used}`}
               </div>
               {event.disclosure && (
-                <div className="b-disc">disclosure: {event.disclosure}</div>
+                <div className="b-disc">{event.disclosure}</div>
               )}
             </div>
           </div>
@@ -853,10 +851,10 @@ export default function DeskPage() {
             {ixEl}
             <div className="b-main">
               <div className="b-head">
-                <span className="chip escalate">needs your OK</span>
+                <span className="chip escalate">approval needed</span>
                 {posEl}
                 {decision.state === "chosen" && (
-                  <span className="chip alloc">resolved</span>
+                  <span className="chip alloc">done</span>
                 )}
               </div>
               <div className="esc">
@@ -944,14 +942,14 @@ export default function DeskPage() {
             {ixEl}
             <div className="b-main">
               <div className="b-head">
-                <span className="chip reconcile">reconcile</span>
+                <span className="chip reconcile">adjusted</span>
                 {posEl}
                 <span className="num">{money(event.delta, currency)}</span>
               </div>
               <div className="b-body">
-                price changed — resolution: <b>{event.resolution}</b>
+                Price changed — {event.resolution === "absorb" ? "absorbed" : "re-quoted"}
               </div>
-              <div className="b-disc">disclosure: {event.disclosure}</div>
+              <div className="b-disc">{event.disclosure}</div>
             </div>
           </div>
         );
@@ -961,15 +959,15 @@ export default function DeskPage() {
             {ixEl}
             <div className="b-main">
               <div className="b-head">
-                <span className="chip alloc">alloc</span>
+                <span className="chip alloc">savings</span>
                 {posEl}
                 <span className="num">{money(event.amount, currency)}</span>
               </div>
               <div className="b-body">
-                realized savings allocated · seat ref{" "}
+                Saved {money(event.amount, currency)} · seat{" "}
                 <b>{event.seat_ref}</b>
               </div>
-              <div className="b-disc">disclosure: {event.disclosure}</div>
+              <div className="b-disc">{event.disclosure}</div>
             </div>
           </div>
         );
@@ -979,13 +977,12 @@ export default function DeskPage() {
             {ixEl}
             <div className="b-main">
               <div className="b-head">
-                <span className="chip error">error</span>
+                <span className="chip error">issue</span>
                 {posEl}
                 <span className="num">{event.code}</span>
               </div>
               <div className="b-disc">
-                disclosed failure — code only; the raw message never leaves
-                the server
+                Error logged — details kept server-side
               </div>
             </div>
           </div>
@@ -1125,6 +1122,7 @@ export default function DeskPage() {
           </div>
         </div>
       </div>
+
       {streamDead && (
         <div className="status err">
           We can't reach this booking — it may have ended or the link is
@@ -1134,10 +1132,9 @@ export default function DeskPage() {
 
       {/* ---- run summary -------------------------------------------------- */}
       <div className="run">
-        <h1 className="run-title">Waypoint</h1>
+        <h1 className="run-title">Booking your team's trips</h1>
         <div className="run-who">
-          Booking your team's trips
-          <span className="run-id"> · {deskId}</span>
+          <span className="run-id">{deskId}</span>
         </div>
 
         <div className="budget">
@@ -1182,27 +1179,29 @@ export default function DeskPage() {
             <span className="pin g" />
             <b>{bookedCount}</b> booked
           </span>
-          <span className="s">
-            <span className="pin w" />
-            <b>{openEscRows.length}</b> need{openEscRows.length === 1 ? "s" : ""}{" "}
-            your OK
-          </span>
+          {openEscRows.length > 0 && (
+            <span className="s">
+              <span className="pin w" />
+              <b>{openEscRows.length}</b> need{openEscRows.length === 1 ? "s" : ""}{" "}
+              your OK
+            </span>
+          )}
           {lossCount > 0 && (
             <span className="s">
               <span className="pin r" />
-              <b>{lossCount}</b> worth less than held
+              <b>{lossCount}</b> price drop{lossCount === 1 ? "" : "s"}
             </span>
           )}
           {recCount > 0 && (
             <span className="s">
               <span className="pin r" />
-              <b>{recCount}</b> price change{recCount === 1 ? "" : "s"} handled
+              <b>{recCount}</b> price adjustment{recCount === 1 ? "" : "s"}
             </span>
           )}
           {errCount > 0 && (
             <span className="s">
               <span className="pin r" />
-              <b>{errCount}</b> hiccup{errCount === 1 ? "" : "s"}
+              <b>{errCount}</b> issue{errCount === 1 ? "" : "s"}
             </span>
           )}
         </div>
@@ -1263,6 +1262,23 @@ export default function DeskPage() {
           </div>
         )}
 
+        {/* per-rail provenance strip (S12, ADR 0006): demoted into
+            the full record — ops manager doesn't need this on main view */}
+        {screen.rails && (
+          <div className="rails">
+            <div className="rails-note">
+              Data sources for this run
+            </div>
+            {screen.rails.map((rail) => (
+              <div key={rail.rail} className="rail">
+                <span className="rail-name">{rail.rail}</span>
+                <span className={`rail-state ${rail.state}`}>{rail.label}</span>
+                <span className="rail-detail">{rail.detail}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* narration — the working log, demoted into the fine print */}
         <div className="stream">
           {screen.steps.length === 0 && (
@@ -1292,8 +1308,7 @@ export default function DeskPage() {
             <div className="brow">
               <div className="b-main">
                 <div className="b-body dim-note">
-                  nothing here yet — every check and decision lands here as
-                  it happens
+                  Nothing here yet — entries appear as trips are processed.
                 </div>
               </div>
             </div>
@@ -1308,12 +1323,9 @@ export default function DeskPage() {
         <div className="result-banner done">
           <div>
             <div className="rb-k">{plainStatus(screen.result.status)}</div>
-            <div className="rb-sub">
-              Every price and decision is in the full record above.
-            </div>
           </div>
           <Link className="cta" href={`/close/${deskId}`}>
-            See the summary →
+            See summary →
           </Link>
         </div>
       )}
@@ -1324,16 +1336,14 @@ export default function DeskPage() {
           <div>
             <div className="rb-k">Stopped early</div>
             <div className="rb-sub">
-              Something failed, so there's no final result. The full record
-              above is everything that happened — and we didn't guess or
-              overspend.
+              Something went wrong — nothing was booked past that point.
             </div>
           </div>
         </div>
       )}
 
       <div className="note-soft">
-        We never book over your budget, and we never invent a fare.
+        Always within budget. Every fare is real.
       </div>
 
       {/* ---- cold-open toast: plain copy only — the reducer's raw body

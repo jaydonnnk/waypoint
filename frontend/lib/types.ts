@@ -88,6 +88,18 @@ export interface DeskSnapshot {
   done: boolean;
 }
 
+// Per-rail provenance row on the meta event (S12, ADR 0006). ADDITIVE:
+// old replays carry no `rails` field at all — the reducer keeps null and
+// the strip renders nothing. `state` is a closed vocabulary branched on
+// for tone classes, never parsed: live/recorded/comparison/unknown
+// (Atlas), live/fallback (Qwen), curated (priors), real (ledger).
+export interface Rail {
+  rail: string;
+  state: string;
+  label: string;
+  detail: string;
+}
+
 // The SSE event contract (backend/app/agent/loop.py) — 10 types, exact
 // field names. There is no book event; booking surfaces as trade kind
 // "book" plus the terminal result.
@@ -99,6 +111,7 @@ export type StreamEvent =
       meter: { used: number; max: number };
       mode: string;
       disclosures: string[];
+      rails?: Rail[]; // additive (S12) — absent on old replays
     }
   | { type: "step"; n: number; text: string }
   | {

@@ -1,12 +1,29 @@
 """SQLite setup — the desk tables land in S1 (first real DB writes)."""
 from __future__ import annotations
 
+import os
+
 from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-DATABASE_URL = "sqlite:///./waypoint.db"
+# S10 (ADR 0007): env-overridable so the container can park the DB on a
+# volume-mounted DIRECTORY (a named volume mounted on a FILE path
+# initializes as a directory and breaks SQLite). Unset keeps the exact
+# pre-S10 value — local behavior unchanged.
+DATABASE_URL = os.environ.get(
+    "WAYPOINT_DATABASE_URL", "sqlite:///./waypoint.db"
+)
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(
+    DATABASE_URL,
+    # SQLite-only driver arg (other backends reject it): allows the
+    # asyncio.to_thread seams to use connections off the creating thread.
+    connect_args=(
+        {"check_same_thread": False}
+        if DATABASE_URL.startswith("sqlite")
+        else {}
+    ),
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 # Legacy visa-pivot tables (fixed known list — never user input) that may

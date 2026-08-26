@@ -1,0 +1,12 @@
+# Keep the build context lean and secret-free (S10, ADR 0007).
+# The image COPYs only app/, scripts/, data/recorded/ — but the context
+# is still uploaded to the daemon, so exclude the heavy/sensitive paths.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+waypoint.db
+tests/
+Dockerfile
+.dockerignore

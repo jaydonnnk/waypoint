@@ -1,0 +1,90 @@
+# Waypoint — recorded-rail deployment (S10, ADR 0007).
+#
+# ZERO CREDENTIALS: this stack starts and serves with no DASHSCOPE_API_KEY,
+# no SANDBOX_ACCESS_KEY / SANDBOX_SECRET_KEY, no atlas-flight CLI, no
+# keyring. The Atlas rail is the recorded replay (WAYPOINT_ATLAS_MODE=recorded);
+# the brain and auditor run their disclosed deterministic fallbacks.
+# See docs/plans/waypoint/DEPLOYMENT.md for the credential table and the
+# post-deploy smoke checklist.
+services:
+  backend:
+    build: ./backend
+    image: waypoint-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # The recorded rail, selected explicitly (the switch defaults live).
+      WAYPOINT_ATLAS_MODE: recorded
+      # The human arm-switch is ARMED — and safe: the write gates decide
+      # WHETHER writes execute; the rail decides WHERE envelopes come from.
+      # The recorded client has NO transport to any provider (no subprocess,
+      # no network — unmatched calls fail closed with NO_RECORDING), so the
+      # two-gate execute wall replays the captured envelopes to their honest
+      # end (captured pay TIMEOUT) and can order nothing. Disarming it would
+      # only downgrade the demo to comparison mode.
+      WAYPOINT_LIVE_BOOKING: "1"
+      # The scripted loss+spike scenario stays armed (demo default; "0"
+      # disarms). Uncomment for a clean baseline:
+      # WAYPOINT_INJECT_SCENARIO: "0"
+      # Nobody is present to make the one human escalation click inside a
+      # container; shorten the bounded wait so the cycle expires the
+      # escalation and gives up gracefully in seconds instead of the 300s
+      # demo default (fail-closed path, loop.py — money never moves on
+      # silence). Unset locally, the demo default applies.
+      WAYPOINT_ESCALATION_WAIT: "5"
+      # For a VPS, admit the public frontend origin (comma-separated);
+      # unset keeps the localhost defaults.
+      # WAYPOINT_CORS_ORIGIN: "https://demo.example.com"
+      # Park SQLite on the volume-mounted DIRECTORY /app/db (a named
+      # volume on a FILE path initializes as a directory and breaks
+      # SQLite). Unset locally, database.py keeps its exact default.
+      WAYPOINT_DATABASE_URL: sqlite:////app/db/waypoint.db
+      # Intentionally ABSENT: DASHSCOPE_API_KEY, SANDBOX_ACCESS_KEY,
+      # SANDBOX_SECRET_KEY. Never add them — the recording needs none.
+    volumes:
+      # One SQLite file, one uvicorn worker. Desk state survives
+      # container rebuilds; init_db()'s guarded drop-and-recreate never
+      # destroys a desk that has data.
+      - waypoint-db:/app/db
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the client bundle at build time: the VIEWER's browser
+        # calls the backend directly (REST + SSE), so this must be an
+        # origin the browser can reach. Override for a VPS deployment,
+        # e.g. --build-arg NEXT_PUBLIC_API_URL=https://api.example.com
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+  # Boot seeding via the existing prewarm pattern: one-shot, same image,
+  # runs after the backend is healthy. Seeds a desk, runs its recorded
+  # cycle to settle, and verifies the SSE replay buffer — so a fresh
+  # `docker compose up` lands on a ready desk (cold-open replays from
+  # event 0). Exits 0 when the desk is warm.
+  prewarm:
+    image: waypoint-backend
+    environment:
+      WAYPOINT_BASE_URL: http://backend:8000
+    command: ["python", "scripts/prewarm.py"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  waypoint-db:
