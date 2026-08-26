@@ -32,11 +32,15 @@ RUN uv python install 3.12
 # has no uvicorn), breaking the app's own start command.
 RUN uv tool install --python 3.12 atlas-flight-booking==0.3.12
 
-# keyrings.alt — Windows CredWrite 1783 workaround also needed in-container
-# (blob-size overflow is Linux-agnostic once enough offers come back);
-# client.py sets PYTHON_KEYRING_BACKEND via os.environ.setdefault, so
-# installing the package here is the only extra step required.
-RUN pip install --no-cache-dir keyrings.alt
+# keyrings.alt — installed into BOTH the app's 3.11 env (client.py's
+# os.environ.setdefault needs it importable for validation) AND the
+# atlas-flight CLI's own isolated 3.12 venv (the subprocess that
+# actually reads/writes the keyring file). Missing from the CLI venv
+# = auth status probe can't find the plaintext backend = falls back
+# to default backend = AUTHORIZATION_REQUIRED = comparison mode even
+# with WAYPOINT_LIVE_BOOKING=1.
+RUN pip install --no-cache-dir keyrings.alt \
+    && /root/.local/share/uv/tools/atlas-flight-booking/bin/pip install --no-cache-dir keyrings.alt
 
 # --- app dependencies ------------------------------------------------------
 COPY requirements.txt .
