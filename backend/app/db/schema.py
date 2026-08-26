@@ -41,6 +41,10 @@ class MandateRow(Base):
     contingency_pct: Mapped[Decimal] = mapped_column(Numeric(5, 4))
     currency: Mapped[str] = mapped_column(String(3))
     holder: Mapped[str] = mapped_column(String)
+    # Display-only trip context (operator-provided, not derived).
+    team_size: Mapped[int] = mapped_column(Integer, default=1)
+    destination_label: Mapped[str] = mapped_column(String, default="")
+    trip_purpose: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )

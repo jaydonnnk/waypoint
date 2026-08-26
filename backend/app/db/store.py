@@ -50,6 +50,9 @@ def _to_mandate(row: MandateRow) -> Mandate:
     return Mandate(
         id=row.id,
         holder=row.holder,
+        team_size=row.team_size,
+        destination_label=row.destination_label,
+        trip_purpose=row.trip_purpose,
         created_at=row.created_at,
         budget_total=row.budget_total,
         authority_cap=row.authority_cap,
@@ -123,6 +126,9 @@ class DeskStore:
                     contingency_pct=Decimal(str(mandate.contingency_pct)),
                     currency=mandate.currency,
                     holder=mandate.holder,
+                    team_size=mandate.team_size,
+                    destination_label=mandate.destination_label,
+                    trip_purpose=mandate.trip_purpose,
                     created_at=mandate.created_at,
                 )
             )

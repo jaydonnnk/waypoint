@@ -271,6 +271,10 @@ class SeedRequest(BaseModel):
     budget_total: Decimal = Field(default=Decimal("12000.00"), gt=Decimal("0"))
     authority_cap: Decimal = Field(default=Decimal("1500.00"), gt=Decimal("0"))
     contingency_pct: float = Field(default=0.05, ge=0.0, le=0.25)
+    # Display-only trip context — free text, persisted and echoed as-is.
+    team_size: int = Field(default=1, ge=1, le=50)
+    destination_label: str = Field(default="")
+    trip_purpose: str = Field(default="")
 
 
 @router.post("/desk/seed")
@@ -291,6 +295,9 @@ async def seed_desk(request: SeedRequest | None = None) -> dict:
         budget_total=req.budget_total,
         authority_cap=req.authority_cap,
         contingency_pct=req.contingency_pct,
+        team_size=req.team_size,
+        destination_label=req.destination_label,
+        trip_purpose=req.trip_purpose,
     )
     desk_id = await asyncio.to_thread(
         STORE.seed_desk, mandate, positions, budgets

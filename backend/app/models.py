@@ -11,7 +11,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 PriceStatus = Literal["reference", "current", "verified"]
 
@@ -88,6 +88,10 @@ class Mandate(BaseModel):
 
     id: str
     holder: str
+    # Display-only trip context (operator-provided, not derived).
+    team_size: int = Field(default=1, ge=1, le=50)
+    destination_label: str = ""
+    trip_purpose: str = ""
     created_at: datetime
     budget_total: Decimal
     authority_cap: Decimal

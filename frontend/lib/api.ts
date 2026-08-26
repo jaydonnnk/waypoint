@@ -7,11 +7,16 @@ export const API_URL =
 /** POST /api/desk/seed -> seeds the mandate + portfolio, starts the cycle
  * server-side, returns the desk_id. The ops manager's budget constraints
  * travel in the body; contingency_pct is a FRACTION (e.g. 0.05), matching
- * the backend Mandate model (the form converts from percent). */
+ * the backend Mandate model (the form converts from percent). Optional
+ * trip context (team_size / destination_label / trip_purpose) rides the
+ * same body; all three default server-side when blank. */
 export async function seedDesk(constraints: {
   budget_total: number;
   authority_cap: number;
   contingency_pct: number;
+  team_size: number;
+  destination_label: string;
+  trip_purpose: string;
 }): Promise<string> {
   const res = await fetch(`${API_URL}/api/desk/seed`, {
     method: "POST",

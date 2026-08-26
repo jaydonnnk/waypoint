@@ -62,6 +62,9 @@ def seeded_portfolio(
     budget_total: Decimal = BUDGET_TOTAL,
     authority_cap: Decimal = AUTHORITY_CAP,
     contingency_pct: float = CONTINGENCY_PCT,
+    team_size: int = 1,
+    destination_label: str = "",
+    trip_purpose: str = "",
 ) -> tuple[Mandate, list[Position], list[Budget]]:
     """Deterministic demo portfolio: 6 positions with seeded cost bases.
 
@@ -94,9 +97,14 @@ def seeded_portfolio(
         spike_mark = Decimal("845.00")    # in-band, near cost, under the cap
         lis_mark = Decimal("623.00")      # >= cost — no injected loss
         mia_mark = Decimal("702.00")      # >= cost — no injected loss
+    # team_size/destination_label/trip_purpose are operator-provided trip
+    # context (plain labels), never derived or verified data.
     mandate = Mandate(
         id=desk_id,
         holder="Waypoint Demo Desk",
+        team_size=team_size,
+        destination_label=destination_label,
+        trip_purpose=trip_purpose,
         created_at=now,
         budget_total=budget_total,
         authority_cap=authority_cap,

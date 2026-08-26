@@ -29,10 +29,16 @@ export default function MandatePage() {
   const [authorityCap, setAuthorityCap] = useState(1500);
   const [contingencyPct, setContingencyPct] = useState(5);
 
+  // ---- optional trip context (task #2) — display-only, never gates the
+  // start button; blank defaults keep today's behavior identical.
+  const [teamSize, setTeamSize] = useState(1);
+  const [destination, setDestination] = useState("");
+  const [tripPurpose, setTripPurpose] = useState("");
+
   // ---- Screen 1's one signature moment (step 6): a gentle staggered
-  // entrance for the start-card contents — transform/opacity only, ~0.76s
-  // total (0.4s tween + 6 × 0.06s stagger over the 7 animated elements:
-  // title, sub, chips, the 3 constraint fields, button), once on mount.
+  // entrance for the start-card contents — transform/opacity only, ~0.94s
+  // total (0.4s tween + 9 × 0.06s stagger over the 10 animated elements:
+  // title, sub, chips, the 6 constraint fields, button), once on mount.
   // gsap runs only inside useGSAP (client, post-mount), selectors stay
   // inside this page's <main> via scope, and reduced motion skips the
   // tween entirely.
@@ -80,6 +86,12 @@ export default function MandatePage() {
         budget_total: budgetTotal,
         authority_cap: authorityCap,
         contingency_pct: contingencyPct / 100,
+        // team_size is deliberately NOT in constraintsValid — blank/NaN or
+        // an out-of-range typed value normalizes back to the default 1 here,
+        // and anything else clamps to the 1–50 Mandate bounds (never send NaN).
+        team_size: Number.isInteger(teamSize) ? Math.min(Math.max(teamSize, 1), 50) : 1,
+        destination_label: destination.trim(),
+        trip_purpose: tripPurpose.trim(),
       });
       router.push(`/desk/${deskId}`);
     } catch (err) {
@@ -181,6 +193,37 @@ export default function MandatePage() {
               max={25}
               step={1}
               onChange={(e) => setContingencyPct(e.target.valueAsNumber)}
+            />
+          </label>
+          {/* optional trip context — same styling, deliberately NOT part
+              of constraintsValid; leaving these blank changes nothing */}
+          <label className="constraint-field">
+            <span className="constraint-k">Team size</span>
+            <input
+              type="number"
+              value={Number.isNaN(teamSize) ? "" : teamSize}
+              min={1}
+              max={50}
+              step={1}
+              onChange={(e) => setTeamSize(e.target.valueAsNumber)}
+            />
+          </label>
+          <label className="constraint-field">
+            <span className="constraint-k">Destination</span>
+            <input
+              type="text"
+              value={destination}
+              placeholder="e.g. London, UK"
+              onChange={(e) => setDestination(e.target.value)}
+            />
+          </label>
+          <label className="constraint-field">
+            <span className="constraint-k">Trip purpose</span>
+            <input
+              type="text"
+              value={tripPurpose}
+              placeholder="e.g. Q4 client visits"
+              onChange={(e) => setTripPurpose(e.target.value)}
             />
           </label>
         </div>

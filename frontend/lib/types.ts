@@ -10,6 +10,10 @@ export interface Mandate {
   authority_cap: string;
   contingency_pct: number;
   currency: string;
+  // Optional trip context (task #2) — operator-entered, display-only.
+  team_size: number;
+  destination_label: string;
+  trip_purpose: string;
 }
 
 export interface Position {
