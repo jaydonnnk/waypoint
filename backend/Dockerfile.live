@@ -40,7 +40,7 @@ RUN uv tool install --python 3.12 atlas-flight-booking==0.3.12
 # to default backend = AUTHORIZATION_REQUIRED = comparison mode even
 # with WAYPOINT_LIVE_BOOKING=1.
 RUN pip install --no-cache-dir keyrings.alt \
-    && /root/.local/share/uv/tools/atlas-flight-booking/bin/pip install --no-cache-dir keyrings.alt
+    && uv pip install --python /root/.local/share/uv/tools/atlas-flight-booking/bin/python keyrings.alt
 
 # --- app dependencies ------------------------------------------------------
 COPY requirements.txt .
