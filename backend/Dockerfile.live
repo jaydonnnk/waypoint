@@ -1,0 +1,56 @@
+# Waypoint backend — LIVE-rail deployment image.
+#
+# Unlike Dockerfile (recorded-rail, zero-credential-by-construction), this
+# image installs the atlas-flight CLI so app/atlas/client.py's subprocess
+# transport has a real binary to call. Sandbox credentials only (see
+# docs/external/atlas-integration.md) — never point this at production
+# Atlas without a deliberate, separate decision.
+#
+# atlas-flight requires Python >= 3.12 (backend app itself runs 3.11 —
+# see app/atlas/client.py header) so the CLI gets its OWN venv via uv,
+# isolated from the app's dependencies.
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# --- atlas-flight CLI (its own Python 3.12 runtime via uv) ---------------
+# curl + a 3.12 interpreter are the only extra system deps needed.
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+RUN uv python install 3.12
+RUN uv tool install --python 3.12 atlas-flight-booking==0.3.12
+ENV PATH="/root/.local/bin:/root/.local/share/uv/tools/atlas-flight-booking/bin:${PATH}"
+
+# keyrings.alt — Windows CredWrite 1783 workaround also needed in-container
+# (blob-size overflow is Linux-agnostic once enough offers come back);
+# client.py sets PYTHON_KEYRING_BACKEND via os.environ.setdefault, so
+# installing the package here is the only extra step required.
+RUN pip install --no-cache-dir keyrings.alt
+
+# --- app dependencies ------------------------------------------------------
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# App + operational scripts + the recording (kept so WAYPOINT_ATLAS_MODE
+# can still fall back to recorded for a given run without rebuilding).
+COPY app ./app
+COPY scripts ./scripts
+COPY data/recorded ./data/recorded
+
+RUN touch waypoint.db && chmod +x scripts/restore_atlas_keyring.sh
+
+EXPOSE 8000
+
+# ONE worker — one SQLite file; asyncio.to_thread DB access is the
+# concurrency model (ADR 0007). Never add --workers > 1.
+#
+# restore_atlas_keyring.sh runs first (free-tier disk workaround — see
+# its own header) then execs uvicorn so it stays PID 1 for signals.
+CMD ["sh", "-c", "./scripts/restore_atlas_keyring.sh && exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"]
