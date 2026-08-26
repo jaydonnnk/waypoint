@@ -25,8 +25,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
 RUN uv python install 3.12
+# `uv tool install` shims the `atlas-flight` entrypoint into
+# /root/.local/bin (already on PATH above) — it does NOT need the
+# tool's own isolated venv bin dir on PATH, and adding that would
+# shadow the base image's `python` with the CLI's 3.12 venv (which
+# has no uvicorn), breaking the app's own start command.
 RUN uv tool install --python 3.12 atlas-flight-booking==0.3.12
-ENV PATH="/root/.local/bin:/root/.local/share/uv/tools/atlas-flight-booking/bin:${PATH}"
 
 # keyrings.alt — Windows CredWrite 1783 workaround also needed in-container
 # (blob-size overflow is Linux-agnostic once enough offers come back);
