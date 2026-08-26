@@ -331,6 +331,24 @@ async def stream(desk_id: str) -> StreamingResponse:
     )
 
 
+@router.get("/debug/atlas-status")
+async def debug_atlas_status() -> dict:
+    """TEMPORARY diagnostic (live-rail rollout only — see git history):
+    surfaces the raw auth-status envelope so a Render free-tier deploy
+    (no shell) can be debugged without guessing. Exposes ONLY codes/
+    booleans — same discipline as everywhere else in this codebase
+    (branch on code, never message; no secret ever rides the wire).
+    Remove once the live rail is confirmed working end to end."""
+    probe = getattr(AGENT.atlas, "auth_status", None)
+    if probe is None:
+        return {"error": "current atlas client has no auth_status() (recorded rail?)"}
+    try:
+        status = await asyncio.to_thread(probe)
+        return status.model_dump(mode="json")
+    except Exception as exc:  # noqa: BLE001 — diagnostic only, never crash
+        return {"error": type(exc).__name__, "detail": str(exc)}
+
+
 @router.get("/desk/{desk_id}")
 async def desk_snapshot(desk_id: str) -> dict:
     """Desk state snapshot: positions/ledger/budgets + the search meter."""
