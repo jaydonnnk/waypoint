@@ -44,6 +44,33 @@ class Base(DeclarativeBase):
     pass
 
 
+# Mandate columns added after the first shipped schema. No migration tooling
+# exists; stale pre-existing DBs (e.g. a synced-backup file restoring the old
+# 7-column table) must self-heal on startup, so backfill any missing columns.
+_MANDATE_COLUMN_BACKFILL = (
+    ("team_size", "INTEGER NOT NULL DEFAULT 1"),
+    ("destination_label", "TEXT NOT NULL DEFAULT ''"),
+    ("trip_purpose", "TEXT NOT NULL DEFAULT ''"),
+)
+
+
+def _backfill_mandate_columns() -> None:
+    """Idempotent ALTER TABLE ADD COLUMN for missing mandate columns.
+
+    No-op on fresh or already-migrated DBs; SQLite supports ADD COLUMN with
+    constant defaults, so no table rebuild or indexes are needed.
+    """
+    with engine.begin() as conn:
+        present = {
+            row.name for row in conn.execute(text("PRAGMA table_info(mandate)"))
+        }
+        for name, ddl in _MANDATE_COLUMN_BACKFILL:
+            if name not in present:
+                conn.execute(
+                    text(f"ALTER TABLE mandate ADD COLUMN {name} {ddl}")
+                )
+
+
 def init_db() -> None:
     """Drop-and-recreate the desk tables, then create them.
 
@@ -86,3 +113,6 @@ def init_db() -> None:
                 for name in legacy:
                     conn.execute(text(f'DROP TABLE IF EXISTS "{name}"'))
     Base.metadata.create_all(bind=engine)
+    # PRAGMA-based backfill shim is SQLite-only; skip on other dialects.
+    if engine.dialect.name == "sqlite":
+        _backfill_mandate_columns()
