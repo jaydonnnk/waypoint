@@ -16,6 +16,7 @@ import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 
 import { seedDesk } from "@/lib/api";
+import WaypointField from "./WaypointField";
 
 gsap.registerPlugin(useGSAP);
 
@@ -63,71 +64,8 @@ export default function MandatePage() {
           }
         );
 
-        // (2) the "waypoint field" — a continuous, cinematic ambient drift on
-        // the left hero (transform/opacity only, GPU-cheap, loops forever).
-        // Concentric beacon rings breathe outward; floating pins drift on
-        // their own phase; a soft sheen sweeps across. Higgsfield-style
-        // living background, no video/asset weight.
-        gsap.to(".wp-ring", {
-          scale: 1.35,
-          autoAlpha: 0,
-          duration: 4.2,
-          ease: "sine.out",
-          stagger: { each: 1.4, repeat: -1 },
-        });
-        gsap.utils.toArray<HTMLElement>(".wp-pin").forEach((pin, i) => {
-          gsap.to(pin, {
-            y: `+=${16 + i * 6}`,
-            x: `+=${i % 2 ? -10 : 12}`,
-            duration: 3.5 + i * 0.6,
-            ease: "sine.inOut",
-            yoyo: true,
-            repeat: -1,
-          });
-        });
-        gsap.fromTo(
-          ".wp-sheen",
-          { xPercent: -120 },
-          {
-            xPercent: 120,
-            duration: 9,
-            ease: "sine.inOut",
-            repeat: -1,
-            yoyo: true,
-          }
-        );
-
-        // (3) aurora blobs — big, soft, slow parallax drift for depth.
-        gsap.utils.toArray<HTMLElement>(".wp-aurora").forEach((blob, i) => {
-          gsap.to(blob, {
-            xPercent: i % 2 ? -18 : 22,
-            yPercent: i % 2 ? 16 : -14,
-            scale: 1.15,
-            duration: 14 + i * 4,
-            ease: "sine.inOut",
-            yoyo: true,
-            repeat: -1,
-          });
-        });
-
-        // (4) the flights — a bright dash glides down each normalized arc
-        // (dasharray = short glint + full-length gap; offset sweeps it end to
-        // end), staggered and with a breather between passes, like routes
-        // being plotted live.
-        gsap.utils.toArray<SVGPathElement>(".glint").forEach((glint, i) => {
-          gsap.fromTo(
-            glint,
-            { strokeDashoffset: 1030 },
-            {
-              strokeDashoffset: 30,
-              duration: 6.5,
-              ease: "power1.inOut",
-              repeat: -1,
-              repeatDelay: 1.6,
-              delay: i * 2.4,
-            }
-          );
-        });
+        // The ambient field (rings, pins, sheen, aurora, route glints) lives
+        // in <WaypointField/> now — shared across every screen.
       }
     );
   }, { scope: scopeRef });
@@ -176,44 +114,8 @@ export default function MandatePage() {
 
   return (
     <main className="mandate-screen" ref={scopeRef}>
-      {/* the living waypoint field spans the WHOLE screen (behind both panes)
-          so the teal atmosphere blends across into the form side — drifting
-          rings, floating pins, a sheen sweep. aria-hidden: pure ambience,
-          all motion added by gsap on mount. */}
-      <div className="wp-field" aria-hidden="true">
-        {/* slow-drifting light — gives the teal depth and life */}
-        <span className="wp-aurora a1" />
-        <span className="wp-aurora a2" />
-        <span className="wp-aurora a3" />
-
-        {/* the routes: faint great-circle arcs with a glint travelling each,
-            like flights being plotted across a map. Arcs drawn in a sliced
-            viewBox so they span the whole screen; the travelling dots follow
-            the same paths via CSS offset-path (see globals.css). */}
-        <svg className="wp-routes" viewBox="0 0 1280 760"
-             preserveAspectRatio="xMidYMid slice">
-          {/* faint base arcs */}
-          <path className="route" d="M -120 640 Q 420 240 1400 180" />
-          <path className="route" d="M -120 300 Q 560 740 1400 500" />
-          <path className="route" d="M -120 480 Q 700 380 1400 320" />
-          {/* bright glints travelling each arc (pathLength=1000 → normalized
-              so the dash maths is resolution-independent) */}
-          <path className="glint" pathLength={1000} d="M -120 640 Q 420 240 1400 180" />
-          <path className="glint" pathLength={1000} d="M -120 300 Q 560 740 1400 500" />
-          <path className="glint" pathLength={1000} d="M -120 480 Q 700 380 1400 320" />
-        </svg>
-
-        {/* breathing beacon rings + steady waypoints */}
-        <span className="wp-ring" />
-        <span className="wp-ring" />
-        <span className="wp-ring" />
-        <span className="wp-pin p1" />
-        <span className="wp-pin p2" />
-        <span className="wp-pin p3" />
-        <span className="wp-pin p4" />
-        <span className="wp-pin p5" />
-        <span className="wp-sheen" />
-      </div>
+      {/* the living waypoint field spans the WHOLE screen, behind both panes */}
+      <WaypointField />
 
       {/* brand — pinned top-left over the whole screen */}
       <div className="hero-brand">

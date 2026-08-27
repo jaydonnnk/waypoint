@@ -19,6 +19,7 @@
   --brand: #0F766E;            /* deep teal — the waypoint beacon; CTAs, avatars */
   --good: #15A66A;             /* on-budget / booked / saved */
   --goodbg: #EAF7F0;
+  --pop: #F2764B;              /* warm coral — complementary CTA accent */
   --warn: #C8811E;             /* needs your OK */
   --warnbg: #FBF3E4;
   --bad: #D64550;              /* over budget / couldn't book */
@@ -82,7 +83,7 @@ body {
 /* ---- shared controls / status ---- */
 .cta {
   margin-top: 18px; width: 100%; padding: 14px; border: none; border-radius: 10px;
-  background: var(--accent); color: #fff; font-size: 15px; font-weight: 600;
+  background: var(--pop); color: #fff; font-size: 15px; font-weight: 600;
   cursor: pointer; transition: transform 0.12s ease, filter 0.12s ease;
 }
 .cta:hover:not(:disabled) { filter: brightness(1.07); transform: translateY(-1px); }
@@ -343,6 +344,54 @@ body {
   }
   .hero { padding: clamp(72px, 12vh, 104px) 24px 8px; }
   .hero-form { padding: 24px 24px 56px; }
+}
+
+/* ---- shared immersive shell for Screens 2 & 3 (desk / close) ----
+   Same teal ground + animated waypoint field as the landing; the existing
+   content column (.wrap) floats on top as opaque white cards. Only the
+   page-level text OUTSIDE the cards is recoloured for the teal — the cards
+   keep their dark-on-white treatment, so all the dense data stays legible. */
+.teal-app {
+  position: relative; min-height: 100vh; overflow-x: hidden;
+  background:
+    radial-gradient(120% 120% at 82% 10%, rgba(94, 234, 212, 0.16) 0%,
+      transparent 55%),
+    linear-gradient(160deg, #0a4d47 0%, #0f766e 48%, #12857b 100%);
+  color: #fff;
+}
+/* field fixed so the atmosphere stays put while the content scrolls */
+.teal-app .wp-field { position: fixed; z-index: 0; }
+/* content column defaults to dark ink (cards are light) — only the bare
+   on-teal elements below are re-whitened. Without this the teal-app's own
+   #fff bleeds into every card and hides the text. */
+.teal-app > .wrap { position: relative; z-index: 2; max-width: 860px; color: var(--ink); }
+
+/* page-level (non-card) text recoloured for the teal ground */
+.teal-app .brand { color: #fff; }
+.teal-app .beacon {
+  background: #fff; box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18);
+}
+.teal-app .sub,
+.teal-app .r-tag,
+.teal-app .sec,
+.teal-app .note-soft { color: rgba(255, 255, 255, 0.86); }
+.teal-app .sub .run-id,
+.teal-app .r-tag .run-id { color: rgba(255, 255, 255, 0.6); }
+/* "See the full record" toggle: white ONLY where .record sits directly on
+   the teal (desk page, after the trip cards) — inside a light card (the
+   close page's .run) it must stay dark or it vanishes on the white bg. */
+.teal-app > .wrap > .record { border-top-color: rgba(255, 255, 255, 0.25); }
+.teal-app > .wrap > .record > .record-toggle { color: rgba(255, 255, 255, 0.86); }
+.teal-app > .wrap > .record > .record-toggle:hover,
+.teal-app > .wrap > .record > .record-toggle:focus-visible { color: #fff; }
+/* connection / mode line — tuned so each state reads on teal */
+.teal-app .mode-banner.live { color: #7fe3c9; }
+.teal-app .mode-banner.pending { color: rgba(255, 255, 255, 0.6); }
+.teal-app .r-tag.err { color: #ffb4ac; }
+.teal-app .status.err { color: #ffb4ac; }
+
+@media (max-width: 620px) {
+  .teal-app > .wrap { padding-left: 16px; padding-right: 16px; }
 }
 
 /* ---- Screen 2: desk header ---- */
@@ -690,8 +739,8 @@ td.num { font-family: var(--mono); }
   border: none; border-radius: var(--r-btn); padding: 13px 20px;
   font: 700 15px var(--sans); cursor: pointer; transition: filter 0.15s, border-color 0.15s;
 }
-.btn.primary { background: var(--brand); color: #fff; }
-.btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn.primary { background: var(--pop); color: #fff; }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.06); }
 .btn.ghost { background: var(--card); color: var(--ink); border: 1px solid var(--line2); }
 .btn.ghost:hover:not(:disabled) { border-color: var(--mut); }
 .btn:disabled { opacity: 0.55; cursor: default; }

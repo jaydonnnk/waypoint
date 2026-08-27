@@ -25,6 +25,7 @@ import type { ReactNode } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 
+import WaypointField from "../../WaypointField";
 import { deskStreamUrl, getDeskSnapshot, postEscalationDecision } from "@/lib/api";
 import { money } from "@/lib/format";
 import type {
@@ -1089,7 +1090,9 @@ export default function DeskPage() {
   }
 
   return (
-    <main className="wrap" ref={scopeRef}>
+    <main className="teal-app" ref={scopeRef}>
+      <WaypointField />
+      <div className="wrap">
       {/* ---- header ------------------------------------------------------ */}
       <div className="top">
         <div className="brand">
@@ -1384,6 +1387,7 @@ export default function DeskPage() {
             </div>
           );
         })()}
+      </div>
     </main>
   );
 }

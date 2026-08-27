@@ -15,10 +15,12 @@
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 
+import WaypointField from "../../WaypointField";
 import { getDeskClose, getDeskSnapshot, type CloseOutcome } from "@/lib/api";
 import { money } from "@/lib/format";
 import type { DeskResult, DeskStatus } from "@/lib/types";
@@ -255,6 +257,17 @@ export default function ClosePage() {
     { scope: scopeRef, dependencies: [phase, figures, currency] }
   );
 
+  // Shared shell — the immersive teal ground + animated waypoint field
+  // behind every close-page state, with the content column floated on top.
+  // scopeRef rides on <main> for the gsap count-up/bar scope (harmless on
+  // the non-outcome states, which don't animate).
+  const shell = (children: ReactNode) => (
+    <main className="teal-app" ref={scopeRef}>
+      <WaypointField />
+      <div className="wrap">{children}</div>
+    </main>
+  );
+
   // Shared header — same shape as Screens 1–2.
   const header = (
     <div className="top">
@@ -270,8 +283,8 @@ export default function ClosePage() {
 
   // ---------- waiting -----------------------------------------------------
   if (phase.kind === "waiting") {
-    return (
-      <main className="wrap">
+    return shell(
+      <>
         {header}
         <div className="run close-status-card">
           <p className="close-call">Wrapping up…</p>
@@ -280,7 +293,7 @@ export default function ClosePage() {
             up to 60 seconds a try.
           </p>
         </div>
-      </main>
+      </>
     );
   }
 
@@ -288,8 +301,8 @@ export default function ClosePage() {
 
   // ---------- 504: still running (retry) -----------------------------------
   if (outcome.kind === "still_running") {
-    return (
-      <main className="wrap">
+    return shell(
+      <>
         {header}
         <div className="run close-status-card">
           <p className="close-call warn">Still working</p>
@@ -305,14 +318,14 @@ export default function ClosePage() {
             </Link>
           </div>
         </div>
-      </main>
+      </>
     );
   }
 
   // ---------- 500: crashed --------------------------------------------------
   if (outcome.kind === "crashed") {
-    return (
-      <main className="wrap">
+    return shell(
+      <>
         {header}
         <div className="run close-status-card">
           <p className="close-call bad">Something went wrong</p>
@@ -325,14 +338,14 @@ export default function ClosePage() {
             </Link>
           </div>
         </div>
-      </main>
+      </>
     );
   }
 
   // ---------- 404: desk not found (no retry — it won't appear) ---------------
   if (outcome.kind === "not_found") {
-    return (
-      <main className="wrap">
+    return shell(
+      <>
         {header}
         <div className="run close-status-card">
           <p className="close-call bad">Booking not found</p>
@@ -345,14 +358,14 @@ export default function ClosePage() {
             </Link>
           </div>
         </div>
-      </main>
+      </>
     );
   }
 
   // ---------- unreachable ----------------------------------------------------
   if (outcome.kind === "unreachable") {
-    return (
-      <main className="wrap">
+    return shell(
+      <>
         {header}
         <div className="run close-status-card">
           <p className="close-call bad">Couldn't load the summary</p>
@@ -363,7 +376,7 @@ export default function ClosePage() {
             </button>
           </div>
         </div>
-      </main>
+      </>
     );
   }
 
@@ -393,8 +406,8 @@ export default function ClosePage() {
       : "Over by ";
   const hero = `${heroLabel}${money(result.pnl, currency).replace("−", "")}`;
 
-  return (
-    <main className="wrap" ref={scopeRef}>
+  return shell(
+    <>
       {header}
 
       <div className="run close-status-card">
@@ -528,6 +541,6 @@ export default function ClosePage() {
           Start another booking →
         </Link>
       </div>
-    </main>
+    </>
   );
 }
