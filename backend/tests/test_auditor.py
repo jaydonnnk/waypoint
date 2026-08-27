@@ -21,6 +21,7 @@ from app.agent.auditor import (
     SOURCE_FALLBACK,
     RiskAuditor,
     fallback_challenge,
+    plain_challenge,
 )
 from app.models import Mandate, Position
 
@@ -231,3 +232,67 @@ def test_no_key_and_no_transport_degrades_up_front(monkeypatch):
     line, source = read_sync(auditor)
     assert source == SOURCE_FALLBACK
     assert line == fallback_challenge(make_positions(), 0)
+
+
+# --- plain_challenge (task #8): code-built, structured facts only --------
+
+
+def _over_cap_ledger() -> list[dict]:
+    return [{
+        "id": 3, "ts": NOW, "kind": "trade", "amount": Decimal("1790.00"),
+        "position_id": "desk-t-pos-1", "ref": "ord-1",
+        "note": "booked \u2014 over-cap, sandbox money",
+    }]
+
+
+def test_plain_challenge_over_cap_book_names_route_amount_and_cap():
+    """Breaches > 0 → the over-cap booking template quotes the blotter
+    amount and the mandate cap — never invented, never recomputed."""
+    line = plain_challenge(
+        make_mandate(), make_positions(), _over_cap_ledger(), 1,
+    )
+    assert "JFK" in line and "LIS" in line
+    assert "$1,790" in line  # the ledger amount, verbatim figure
+    assert "$1,500" in line  # the mandate cap, verbatim figure
+    assert "auto-approve limit" in line
+
+
+def test_plain_challenge_waived_trade_falls_to_hold_path():
+    """A waived over-cap row is exempt (same rule as the breach count),
+    so the challenge lands on the hold path instead."""
+    ledger = _over_cap_ledger()
+    ledger[0]["note"] = "human waiver approved \u2014 booked"
+    line = plain_challenge(make_mandate(), make_positions(), ledger, 0)
+    assert "JFK" in line and "LIS" in line  # worst-delta hold pick
+    assert "$22" in line and "less than we paid" in line
+
+
+def test_plain_challenge_hold_names_worst_delta_both_signs():
+    """No breaches → the worst mark-vs-cost position (same pick as the
+    fallback), sign-aware: down = less than paid, up = more than paid."""
+    down = plain_challenge(make_mandate(), make_positions(), LEDGER_TAIL, 0)
+    assert "JFK" in down and "LIS" in down
+    assert "$22" in down and "less than we paid" in down
+    up_positions = [make_position(
+        "desk-t-pos-3", origin="DAC", dest="LHR",
+        cost=Decimal("700.00"), mark=Decimal("760.00"),
+    )]
+    up = plain_challenge(make_mandate(), up_positions, LEDGER_TAIL, 0)
+    assert "DAC" in up and "LHR" in up
+    assert "$60" in up and "more than we paid" in up
+
+
+def test_plain_challenge_clean_run_on_empty_blotter():
+    """Nothing on the blotter → the simple clean-run line."""
+    line = plain_challenge(make_mandate(), [], [], 0)
+    assert line == (
+        "Your reviewer checked every decision on this run and found "
+        "nothing to challenge."
+    )
+
+
+def test_plain_challenge_is_deterministic_and_independent_of_line():
+    """Same facts → same line (no LLM, no randomness); it never reads the
+    free-text auditor line, so agent vs fallback output changes nothing."""
+    args = (make_mandate(), make_positions(), LEDGER_TAIL, 0)
+    assert plain_challenge(*args) == plain_challenge(*args)

@@ -44,20 +44,90 @@ export default function MandatePage() {
   // tween entirely.
   const scopeRef = useRef<HTMLElement>(null);
   useGSAP(() => {
+    // Runs ONLY when the user has no reduced-motion preference — so the whole
+    // ambient scene is skipped for reduce-motion users, and matchMedia reverts
+    // it cleanly on unmount.
     gsap.matchMedia().add(
-      { reduceMotion: "(prefers-reduced-motion: reduce)" },
-      (ctx) => {
-        if (ctx.conditions?.reduceMotion) return; // content just renders
+      "(prefers-reduced-motion: no-preference)",
+      () => {
+        // (1) one-shot staggered entrance for the form + hero copy.
         gsap.from(
-          ".start-title, .start-sub, .assure, .constraint-field, .start-btn",
+          ".hero-brand, .hero-title, .hero-lead, .assure, " +
+            ".start-title, .start-sub, .constraint-field, .start-btn",
           {
-            y: 10,
+            y: 14,
             autoAlpha: 0,
-            duration: 0.4,
-            ease: "power2.out",
-            stagger: 0.06,
+            duration: 0.5,
+            ease: "power3.out",
+            stagger: 0.05,
           }
         );
+
+        // (2) the "waypoint field" — a continuous, cinematic ambient drift on
+        // the left hero (transform/opacity only, GPU-cheap, loops forever).
+        // Concentric beacon rings breathe outward; floating pins drift on
+        // their own phase; a soft sheen sweeps across. Higgsfield-style
+        // living background, no video/asset weight.
+        gsap.to(".wp-ring", {
+          scale: 1.35,
+          autoAlpha: 0,
+          duration: 4.2,
+          ease: "sine.out",
+          stagger: { each: 1.4, repeat: -1 },
+        });
+        gsap.utils.toArray<HTMLElement>(".wp-pin").forEach((pin, i) => {
+          gsap.to(pin, {
+            y: `+=${16 + i * 6}`,
+            x: `+=${i % 2 ? -10 : 12}`,
+            duration: 3.5 + i * 0.6,
+            ease: "sine.inOut",
+            yoyo: true,
+            repeat: -1,
+          });
+        });
+        gsap.fromTo(
+          ".wp-sheen",
+          { xPercent: -120 },
+          {
+            xPercent: 120,
+            duration: 9,
+            ease: "sine.inOut",
+            repeat: -1,
+            yoyo: true,
+          }
+        );
+
+        // (3) aurora blobs — big, soft, slow parallax drift for depth.
+        gsap.utils.toArray<HTMLElement>(".wp-aurora").forEach((blob, i) => {
+          gsap.to(blob, {
+            xPercent: i % 2 ? -18 : 22,
+            yPercent: i % 2 ? 16 : -14,
+            scale: 1.15,
+            duration: 14 + i * 4,
+            ease: "sine.inOut",
+            yoyo: true,
+            repeat: -1,
+          });
+        });
+
+        // (4) the flights — a bright dash glides down each normalized arc
+        // (dasharray = short glint + full-length gap; offset sweeps it end to
+        // end), staggered and with a breather between passes, like routes
+        // being plotted live.
+        gsap.utils.toArray<SVGPathElement>(".glint").forEach((glint, i) => {
+          gsap.fromTo(
+            glint,
+            { strokeDashoffset: 1030 },
+            {
+              strokeDashoffset: 30,
+              duration: 6.5,
+              ease: "power1.inOut",
+              repeat: -1,
+              repeatDelay: 1.6,
+              delay: i * 2.4,
+            }
+          );
+        });
       }
     );
   }, { scope: scopeRef });
@@ -105,40 +175,90 @@ export default function MandatePage() {
   }
 
   return (
-    <main className="wrap" ref={scopeRef}>
-      {/* ---- header — same shape as the run screen -------------------- */}
-      <div className="top">
-        <div className="brand">
-          <span className="beacon" />
-          Waypoint
-        </div>
+    <main className="mandate-screen" ref={scopeRef}>
+      {/* the living waypoint field spans the WHOLE screen (behind both panes)
+          so the teal atmosphere blends across into the form side — drifting
+          rings, floating pins, a sheen sweep. aria-hidden: pure ambience,
+          all motion added by gsap on mount. */}
+      <div className="wp-field" aria-hidden="true">
+        {/* slow-drifting light — gives the teal depth and life */}
+        <span className="wp-aurora a1" />
+        <span className="wp-aurora a2" />
+        <span className="wp-aurora a3" />
+
+        {/* the routes: faint great-circle arcs with a glint travelling each,
+            like flights being plotted across a map. Arcs drawn in a sliced
+            viewBox so they span the whole screen; the travelling dots follow
+            the same paths via CSS offset-path (see globals.css). */}
+        <svg className="wp-routes" viewBox="0 0 1280 760"
+             preserveAspectRatio="xMidYMid slice">
+          {/* faint base arcs */}
+          <path className="route" d="M -120 640 Q 420 240 1400 180" />
+          <path className="route" d="M -120 300 Q 560 740 1400 500" />
+          <path className="route" d="M -120 480 Q 700 380 1400 320" />
+          {/* bright glints travelling each arc (pathLength=1000 → normalized
+              so the dash maths is resolution-independent) */}
+          <path className="glint" pathLength={1000} d="M -120 640 Q 420 240 1400 180" />
+          <path className="glint" pathLength={1000} d="M -120 300 Q 560 740 1400 500" />
+          <path className="glint" pathLength={1000} d="M -120 480 Q 700 380 1400 320" />
+        </svg>
+
+        {/* breathing beacon rings + steady waypoints */}
+        <span className="wp-ring" />
+        <span className="wp-ring" />
+        <span className="wp-ring" />
+        <span className="wp-pin p1" />
+        <span className="wp-pin p2" />
+        <span className="wp-pin p3" />
+        <span className="wp-pin p4" />
+        <span className="wp-pin p5" />
+        <span className="wp-sheen" />
       </div>
 
-      {/* ---- the start card: one line, one button --------------------- */}
-      <div className="start">
-        <h1 className="start-title">
-          Book your team's flights, on budget.
-        </h1>
-        <p className="start-sub">
-          Waypoint books your team's trips, keeps an eye on the fares, and
-          asks you first whenever a call is too big to make on its own.
-        </p>
+      {/* brand — pinned top-left over the whole screen */}
+      <div className="hero-brand">
+        <span className="beacon" />
+        Waypoint
+      </div>
 
-        {/* three tiny reassurances — the honesty points, in plain words */}
-        <div className="assure">
-          <span className="assure-chip">
-            <span className="pin g" />
-            Stays under budget
-          </span>
-          <span className="assure-chip">
-            <span className="pin w" />
-            Asks before overspending
-          </span>
-          <span className="assure-chip">
-            <span className="pin g" />
-            Never invents a fare
-          </span>
+      {/* ---- LEFT: the hero pitch ------------------------------------------ */}
+      <section className="hero">
+        <div className="hero-inner">
+          <h1 className="hero-title">
+            Book your team's flights, on budget.
+          </h1>
+          <p className="hero-lead">
+            Waypoint books your team's trips, keeps an eye on the fares, and
+            asks you first whenever a call is too big to make on its own.
+          </p>
+
+          {/* three tiny reassurances — the honesty points, in plain words */}
+          <div className="assure">
+            <span className="assure-chip">
+              <span className="pin g" />
+              Stays under budget
+            </span>
+            <span className="assure-chip">
+              <span className="pin w" />
+              Asks before overspending
+            </span>
+            <span className="assure-chip">
+              <span className="pin g" />
+              Never invents a fare
+            </span>
+          </div>
         </div>
+      </section>
+
+      {/* ---- RIGHT: the start card --------------------------------------- */}
+      <section className="hero-form">
+        <div className="start">
+        <h2 className="start-title">
+          Set your limits
+        </h2>
+        <p className="start-sub">
+          Your budget and booking caps — Waypoint holds to these on every fare.
+        </p>
 
         {/* budget constraints — the ops manager's numbers, set up front */}
         <style>{`
@@ -243,7 +363,8 @@ export default function MandatePage() {
           Starting sets up your budget and booking limits, then runs it all
           live — you'll watch every check and booking as it happens.
         </div>
-      </div>
+        </div>
+      </section>
     </main>
   );
 }

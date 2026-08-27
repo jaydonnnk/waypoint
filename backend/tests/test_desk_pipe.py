@@ -1066,14 +1066,20 @@ def test_close_returns_close_report_with_zero_breaches(
     assert final.status_code == 200
     body = final.json()
     # Exactly the frozen wire contract — nothing more, nothing less.
+    # (task #8: `auditor_plain` joined as an additive optional field.)
     assert set(body) == {
         "result", "policy_breaches", "auditor_line", "auditor_source",
+        "auditor_plain",
     }
     assert body["result"]["desk_id"] == desk_id
     assert body["result"]["status"] == "closed"
     assert body["policy_breaches"] == 0
     assert body["auditor_line"]
     assert body["auditor_source"] == "agent"
+    # Task #8: the code-built plain line rides on BOTH paths (agent line
+    # above) — structured facts only, never parsed from the free text.
+    assert body["auditor_plain"]
+    assert body["auditor_plain"] != body["auditor_line"]
     assert stub_auditor.calls == 1  # exactly one close-time read
 
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from decimal import Decimal
 from typing import Awaitable, Callable
 
 import httpx
@@ -74,6 +75,79 @@ def fallback_challenge(
     if policy_breaches is not None:
         line += f" Code-computed policy breaches this cycle: {policy_breaches}."
     return line
+
+
+# Mirror of routes.HUMAN_WAIVER_MARKER (kept literal here: routes imports
+# THIS module, so importing routes back would be circular). Same discipline
+# as count_policy_breaches — branch on structured row fields, never prose.
+_WAIVER_MARKER = "human waiver"
+
+
+def _money(amount: Decimal, currency: str) -> str:
+    """Display-only money formatting of a blotter figure — never computed
+    into anything. Whole dollars drop the ".00"; non-USD keeps its code."""
+    text = f"{amount:,.2f}"
+    if text.endswith(".00"):
+        text = text[:-3]
+    return f"${text}" if currency == "USD" else f"{currency} {text}"
+
+
+def plain_challenge(
+    mandate: Mandate,
+    positions: list[Position],
+    ledger_tail: list[dict],
+    policy_breaches: int,
+) -> str:
+    """Plain-English second opinion — PURE code, zero LLM (task #8).
+
+    Built from the SAME structured facts the auditor read; the free-text
+    `auditor_line` is never parsed, summarized, or quoted here, and every
+    figure is read straight off the blotter objects handed in. Branches on
+    structured facts only:
+    1. OVER-CAP BOOK: a `trade` row over the authority cap without the
+       waiver marker → name its position's route, the amount, the cap.
+    2. HOLD: the worst mark-vs-cost position (same pick as
+       `fallback_challenge`) → route + the blotter delta, sign-aware.
+    3. NOTHING TO CHALLENGE: empty blotter → the clean-run line.
+    Works identically for the agent and the deterministic-fallback paths —
+    it comes from code facts, not from whichever line won.
+    """
+    if policy_breaches > 0:
+        for row in ledger_tail:
+            if row.get("kind") != "trade":
+                continue
+            amount = row.get("amount")
+            if amount is None or amount <= mandate.authority_cap:
+                continue
+            if _WAIVER_MARKER in (row.get("note") or ""):
+                continue
+            pos = next(
+                (p for p in positions if p.id == row.get("position_id")),
+                None,
+            )
+            if pos is not None:
+                return (
+                    f"Your reviewer double-checked the {pos.origin}\u2192"
+                    f"{pos.dest} booking: at {_money(amount, mandate.currency)} "
+                    "it\u2019s over your "
+                    f"{_money(mandate.authority_cap, mandate.currency)} "
+                    "auto-approve limit, so nothing was booked without "
+                    "your OK."
+                )
+            break  # breaching row with no resolvable position → hold path
+    if positions:
+        worst = min(positions, key=lambda p: p.mark_price - p.cost_basis)
+        delta = worst.mark_price - worst.cost_basis
+        direction = "less" if delta < 0 else "more"
+        return (
+            f"Your reviewer flagged the {worst.origin}\u2192{worst.dest} "
+            f"trip we held: it now prices {_money(abs(delta), mandate.currency)} "
+            f"{direction} than we paid \u2014 worth a look before the next cycle."
+        )
+    return (
+        "Your reviewer checked every decision on this run and found "
+        "nothing to challenge."
+    )
 
 
 class RiskAuditor:

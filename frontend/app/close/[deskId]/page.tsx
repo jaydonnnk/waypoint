@@ -477,7 +477,10 @@ export default function ClosePage() {
             <div className="auditor-k">
               Second opinion on this run
             </div>
-            <p className="auditor-line">{report.auditor_line}</p>
+            {/* Task #8: plain-English line when the backend supplied one;
+                falls back to the verbatim auditor line if absent. The full
+                record below keeps the verbatim line either way. */}
+            <p className="auditor-line">{report.auditor_plain || report.auditor_line}</p>
             {report.auditor_source === "deterministic-fallback" ? (
               <div className="auditor-src">Automated review — no manual reviewer ran.</div>
             ) : null}

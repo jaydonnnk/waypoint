@@ -26,7 +26,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import fixture
-from app.agent.auditor import SOURCE_FALLBACK, RiskAuditor, fallback_challenge
+from app.agent.auditor import (
+    SOURCE_FALLBACK,
+    RiskAuditor,
+    fallback_challenge,
+    plain_challenge,
+)
 from app.agent.loop import DEFAULT_ESCALATION_WAIT, METER_MAX, DeskAgent
 from app.db.store import DeskStore
 from app.models import CloseReport, DeskResult
@@ -399,11 +404,20 @@ async def close(desk_id: str) -> CloseReport:
     except Exception:  # noqa: BLE001 — degrade, never crash the close
         line = fallback_challenge(positions, policy_breaches)
         source = SOURCE_FALLBACK
+    # Task #8: plain-English twin of the auditor line, built IN CODE from
+    # the same structured blotter facts (never parsed out of `line`).
+    # Defensive degrade to None — the frontend falls back to the verbatim
+    # line, so a builder hiccup can never turn a close into an error.
+    try:
+        plain = plain_challenge(mandate, positions, ledger_tail, policy_breaches)
+    except Exception:  # noqa: BLE001 — degrade, never crash the close
+        plain = None
     return CloseReport(
         result=state.result,
         policy_breaches=policy_breaches,
         auditor_line=line,
         auditor_source=source,
+        auditor_plain=plain,
     )
 
 

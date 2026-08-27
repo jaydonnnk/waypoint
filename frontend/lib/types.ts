@@ -62,6 +62,10 @@ export interface CloseReport {
   policy_breaches: number;
   auditor_line: string;
   auditor_source: "agent" | "deterministic-fallback";
+  // Task #8 (additive): plain-English twin of `auditor_line`, built in
+  // code from the same blotter facts. Optional — absent/null means fall
+  // back to the verbatim `auditor_line` in the visible slot.
+  auditor_plain?: string | null;
 }
 
 // The two priced escalation options — always exactly [A, B] on the wire.

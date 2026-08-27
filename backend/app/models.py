@@ -159,12 +159,17 @@ class CloseReport(BaseModel):
     (never an LLM); `auditor_line` is the risk auditor's narration over
     already-classified data — a second-pass heuristic challenge, never an
     oracle or authority. `auditor_source`: "agent" | "deterministic-fallback".
+    `auditor_plain` (task #8, additive): one short plain-English sentence
+    built IN CODE from the same structured blotter facts the auditor read —
+    never parsed out of `auditor_line`. None only if that builder degrades;
+    the verbatim `auditor_line` stays the record of truth either way.
     """
 
     result: DeskResult
     policy_breaches: int
     auditor_line: str
     auditor_source: str
+    auditor_plain: str | None = None
 
 
 # --- Atlas write path (S2). Offer/Layover above stay verbatim. -------------
