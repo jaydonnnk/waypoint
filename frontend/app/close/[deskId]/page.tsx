@@ -477,6 +477,10 @@ export default function ClosePage() {
             <div className="auditor-k">
               Second opinion on this run
             </div>
+            <p className="auditor-line">{report.auditor_line}</p>
+            {report.auditor_source === "deterministic-fallback" ? (
+              <div className="auditor-src">Automated review — no manual reviewer ran.</div>
+            ) : null}
           </div>
         ) : (
           <div className="close-room" aria-hidden="true" />
