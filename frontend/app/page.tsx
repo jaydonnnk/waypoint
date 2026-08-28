@@ -163,28 +163,6 @@ export default function MandatePage() {
         </p>
 
         {/* budget constraints — the ops manager's numbers, set up front */}
-        <style>{`
-          .constraints { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
-          .constraint-field {
-            flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 6px;
-            background: var(--paper); border: 1px solid var(--line);
-            border-radius: var(--r-bar); padding: 10px 12px;
-          }
-          .constraint-k {
-            font-family: var(--mono); font-size: 10px; letter-spacing: 0.8px;
-            text-transform: uppercase; color: var(--mut);
-          }
-          .constraint-field input {
-            width: 100%; border: 1px solid var(--line2); border-radius: 8px;
-            background: var(--card); color: var(--ink);
-            font: 600 15px var(--mono); padding: 8px 10px;
-            transition: border-color 0.15s ease, box-shadow 0.15s ease;
-          }
-          .constraint-field input:focus {
-            outline: none; border-color: var(--brand);
-            box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
-          }
-        `}</style>
         <div className="constraints">
           <label className="constraint-field">
             <span className="constraint-k">Total budget ($)</span>

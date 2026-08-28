@@ -1143,13 +1143,6 @@ export default function DeskPage() {
         {/* trip context (task #2) — the operator's own words, displayed
             plainly as context, never as verified data; renders nothing
             when both label and purpose are blank */}
-        <style>{`
-          .run .run-ctx {
-            font-family: var(--mono); font-size: 10px; letter-spacing: 0.8px;
-            text-transform: uppercase; color: var(--mut);
-            margin: -10px 0 18px;
-          }
-        `}</style>
         {screen.mandate &&
           (screen.mandate.destination_label || screen.mandate.trip_purpose) && (
             <div className="run-ctx">
