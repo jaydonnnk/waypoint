@@ -1,0 +1,1 @@
+Documentation artifacts are Markdown ADRs/plans plus Next.js-style HTML mockups under `plans/waypoint/mockups/`; operational context records the Atlas CLI (`atlas-flight`, uv tool v0.3.12) and its OAuth + OS keyring authentication flow.

@@ -1,0 +1,1 @@
+Centralized documentation for the Waypoint autonomous flight disruption-recovery agent, including gated project plans, numbered architecture decision records, and durable Atlas integration notes.

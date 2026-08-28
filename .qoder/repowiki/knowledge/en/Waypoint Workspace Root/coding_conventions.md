@@ -1,0 +1,1 @@
+- External reusable skills are declared in skills-lock.json with source, type, path, and computed hash instead of being vendored inline.

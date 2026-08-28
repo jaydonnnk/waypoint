@@ -1,0 +1,1 @@
+Before continuing work, every doc in this folder plus `docs/external/atlas-integration.md` must be read; environment switching is done via `atlas-flight environment use sandbox --json`; ticketing requires passing UAT test cases per selected module (Flight Booking, Ticket Fulfillment, Webhook Notification, Refund) through ATRIP's UAT Testing flow.

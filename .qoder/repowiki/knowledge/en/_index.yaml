@@ -1,0 +1,27 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: en-US
+branch: main
+nodes_managed: true
+exported_at: "2026-08-21T17:47:41Z"
+modules:
+    "":
+        dir_name: Waypoint Workspace Root
+        title: Waypoint Workspace Root
+        scope:
+            - .gitignore
+            - skills-lock.json
+        source_files: []
+        children:
+            - docs
+        depends_on: []
+        related_to: []
+    docs:
+        dir_name: Waypoint Project Documentation & ADRs
+        title: Waypoint Project Documentation & ADRs
+        scope:
+            - docs/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []

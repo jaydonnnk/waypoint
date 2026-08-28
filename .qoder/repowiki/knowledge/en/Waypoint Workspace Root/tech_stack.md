@@ -1,0 +1,1 @@
+N/A — root holds only repo-level configuration; child modules define their own stacks.

@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: ""
+title: Waypoint Workspace Root
+scope:
+    - .gitignore
+    - skills-lock.json
+source_files: []
+depends_on: []
+related_to: []

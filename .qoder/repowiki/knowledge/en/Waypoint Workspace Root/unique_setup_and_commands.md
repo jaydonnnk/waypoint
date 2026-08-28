@@ -1,0 +1,1 @@
+No build or run commands at this level; development ignores are applied globally via .gitignore and external skills are pinned via skills-lock.json.

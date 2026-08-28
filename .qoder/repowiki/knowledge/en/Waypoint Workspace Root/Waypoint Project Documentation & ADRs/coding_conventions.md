@@ -1,0 +1,5 @@
+- Architecture Decisions are recorded as numbered files prefixed `NNNN-` under `adr/`, each following a fixed Context → Decision → Consequences template with an Accepted date.
+- Project plans under `plans/waypoint/` are versioned numerically (`00-status.md`, `01-product.md`, `02-architecture.md`, …) so they can be referenced by cross-links like `[[0002]]`.
+- External operational facts (API surfaces, auth locations, environment switches) are isolated in `external/` and explicitly state that no secrets are stored there — only names, locations, and state.
+- Slice plans enumerate deliverables as checkbox items (`[ ] Slice N — …`) and record sequencing dependencies between slices.
+- Gate approvals are tracked inline at the top of the status file with explicit dates, anchoring the plan to a frozen set of locked decisions.
