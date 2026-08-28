@@ -97,6 +97,7 @@ Live write-path proof is double-gated behind `WAYPOINT_WRITE_PATH=1` on top of t
 ## Status
 
 - Slices S1–S8 implemented (data foundation → Atlas write path → desk brain → reconciliation/alloc/escalation → frontend refit → hardening → risk officer/close → design refit v3). See `docs/plans/waypoint/00-status.md` and `04-slices.md`.
+- Recorded-mode slices S9–S13 implemented (ADR 0005–0007): recorded Atlas replay mode (`WAYPOINT_ATLAS_MODE=recorded`), zero-credential Docker deployment, prompt-injection containment, per-rail provenance UI, and the brain-eval harness — recorded never wears the live label.
 - Atlas sandbox: AUTHORIZED; search and (as of the 2026-08-25 probe) ticketing both live — `docs/external/atlas-integration.md` tracks activation state and known CLI issues.
 
 ## Docs map
