@@ -1,0 +1,49 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Waybot chat</title>
+<style>
+body{background:#0b1417;color:#e6f2f1;font:14px/1.45 system-ui;margin:0;padding:30px;display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.phone{background:#17212b;border-radius:22px;width:320px;padding:14px;box-shadow:0 8px 40px #0006}
+.hdr{color:#8fc7ff;font-weight:600;padding:6px 8px 12px;border-bottom:1px solid #22303c;margin-bottom:12px;font-size:14px}
+.hdr small{color:#6d8296;font-weight:400;display:block}
+.b{max-width:80%;padding:9px 12px;border-radius:14px;margin:6px 0;font-size:13px}
+.bot{background:#212d3a;border-bottom-left-radius:4px}
+.me{background:#2b5278;margin-left:auto;border-bottom-right-radius:4px}
+.card{background:#0e1a22;border:1px solid #2b3d4a;border-radius:10px;padding:12px;font-size:12px}
+.card .k{color:#6d8296}.card .v{color:#e6f2f1;font-family:ui-monospace,monospace}
+.card .line{display:flex;justify-content:space-between;padding:3px 0}
+.kb{display:flex;gap:6px;margin-top:8px}
+.kbtn{flex:1;background:#2b5278;color:#cfe4ff;text-align:center;padding:8px;border-radius:8px;font-size:12px}
+.photo{background:#0e1a22;border:1px dashed #2b3d4a;border-radius:8px;height:70px;display:flex;align-items:center;justify-content:center;color:#4d6373;font-size:12px}
+.cap{text-align:center;color:#6d8296;font-size:11px;margin:10px 0 4px}
+</style></head><body>
+
+<div class="phone">
+  <div class="hdr">Waybot <small>Singapore → SF · team trip</small></div>
+  <div class="b bot">Hi Wei Ling 👋 You've been added to your team's SIN→SFO trip. Send a photo of your <b>passport photo page</b> to get on the booking.</div>
+  <div class="me b"><div class="photo">📷 passport.jpg</div></div>
+  <div class="b bot">Reading it…</div>
+  <div class="b bot">Got it. Please check these are right:
+    <div class="card" style="margin-top:8px">
+      <div class="line"><span class="k">Name</span><span class="v">TAN / WEI LING</span></div>
+      <div class="line"><span class="k">Passport</span><span class="v">E•••••23</span></div>
+      <div class="line"><span class="k">Nationality</span><span class="v">SGP</span></div>
+      <div class="line"><span class="k">Birthday</span><span class="v">1991-••-••</span></div>
+      <div class="line"><span class="k">Expires</span><span class="v">2029-04</span></div>
+      <div class="kb"><div class="kbtn">✓ Correct</div><div class="kbtn">✏️ Fix</div></div>
+    </div>
+  </div>
+  <div class="me b">✓ Correct</div>
+  <div class="b bot">You're verified ✅ Nothing else needed. We'll message you here when flights are booked.</div>
+</div>
+
+<div class="phone">
+  <div class="cap">FALLBACK — checksum fails / blurry photo</div>
+  <div class="hdr">Waybot <small>typed entry</small></div>
+  <div class="b bot">I couldn't read the passport cleanly (the document number didn't validate). No problem — type it instead.</div>
+  <div class="b bot">What's your <b>passport number</b>?</div>
+  <div class="me b">E1234523</div>
+  <div class="b bot">Family name?</div>
+  <div class="me b">TAN</div>
+  <div class="b bot">…and so on for each field, then the same confirm card. Same validation gate applies before it counts.</div>
+</div>
+
+</body></html>
