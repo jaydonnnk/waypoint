@@ -31,3 +31,75 @@
   text-transform: uppercase; color: var(--mut);
   margin: -10px 0 18px;
 }
+
+/* §3 — judge-visible agent evidence */
+.pin.t {
+  background: var(--brand);
+}
+
+.pa-working {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  min-height: 22px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.pa-working-k {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--mut);
+  margin-bottom: 2px;
+}
+
+.pa-working-text {
+  display: block;
+  animation: rise 0.35s ease both;
+}
+
+.pa-sources {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.pa-source {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.pa-source-name {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.pa-source-label {
+  font-weight: 600;
+  color: var(--mut);
+}
+
+.pa-source-label.live {
+  color: var(--good);
+}
+
+.pa-source-label.recorded,
+.pa-source-label.fallback,
+.pa-source-label.comparison,
+.pa-source-label.unknown {
+  color: var(--warn);
+}
+
+.pa-source-label.curated,
+.pa-source-label.real {
+  color: var(--mut);
+}

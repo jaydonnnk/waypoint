@@ -715,6 +715,12 @@ export default function DeskPage() {
   ).length;
   const errCount = screen.blotter.filter((r) => r.event.type === "error").length;
   const settled = Boolean(screen.result) || screen.cycleFailed;
+  // Pass 2 (Person A): the newest narration step, surfaced verbatim in the
+  // main run card. Pure derivation — no state, no memo, no step mutation.
+  const latestStep =
+    screen.steps.length > 0
+      ? screen.steps[screen.steps.length - 1]
+      : null;
 
   // ---------- render helpers ----------------------------------------------
 
@@ -1300,7 +1306,48 @@ export default function DeskPage() {
               <b>{errCount}</b> issue{errCount === 1 ? "" : "s"}
             </span>
           )}
+          {screen.meter && screen.meter.max > 0 && (
+            <span className="s">
+              <span className="pin t" />
+              Fare checks <b>{screen.meter.used}</b> of <b>{screen.meter.max}</b>
+            </span>
+          )}
         </div>
+
+        {/* Pass 2 (Person A): live narration — the latest step's own text,
+            verbatim. Wrapper stays mounted (polite live region); content
+            clears the moment the run settles. No synthesis, no timers. */}
+        <div className="pa-working" aria-live="polite">
+          {!settled && latestStep ? (
+            <>
+              <span className="pa-working-k">Working on</span>
+              <span
+                className="pa-working-text"
+                key={screen.steps.length}
+              >
+                {latestStep.text}
+              </span>
+            </>
+          ) : null}
+        </div>
+
+        {/* Pass 2 (Person A): provenance strip — rail name + label rendered
+            verbatim from the stream's rails[]. Never reworded, never
+            strengthened; rail.detail stays in the full record only. */}
+        {screen.rails && screen.rails.length > 0 && (
+          <div className="pa-sources">
+            {screen.rails.map((rail) => (
+              <span key={rail.rail} className="pa-source">
+                <span className="pa-source-name">
+                  {rail.rail}
+                </span>
+                <span className={`pa-source-label ${rail.state}`}>
+                  {rail.label}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ---- the decisions (only when something needs a human) ---------- */}
