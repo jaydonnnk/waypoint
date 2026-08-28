@@ -27,6 +27,12 @@ from app.db.schema import (
 )
 from app.models import Budget, Mandate, Position
 
+# TYPE_CHECKING-only import to avoid circular ref.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.bot.mrz import MrzFields
+
 # How much of the blotter `reload_desk` pulls back (newest-first tail).
 LEDGER_TAIL_LIMIT = 50
 
@@ -466,6 +472,160 @@ class DeskStore:
                 )
             session.commit()
             return (desk_id, slot)
+
+    def add_traveler(
+        self,
+        desk_id: str,
+        slot: int,
+        fields: "MrzFields",
+        email: str | None = None,
+        mobile: str | None = None,
+    ) -> str:
+        """Insert (or upsert by desk_id+slot) a verified traveler.
+
+        Returns the traveler row id. Duplicate doc_number on the same desk
+        is rejected (raises ValueError).
+        """
+        import uuid
+
+        with database.SessionLocal() as session:
+            # Reject duplicate doc_number on the same desk.
+            existing_doc = (
+                session.execute(
+                    select(TravelerRow).where(
+                        TravelerRow.desk_id == desk_id,
+                        TravelerRow.doc_number == fields.doc_number,
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if existing_doc is not None and existing_doc.slot != slot:
+                raise ValueError(
+                    f"duplicate doc_number {fields.doc_number} on desk {desk_id}"
+                )
+
+            # Upsert by desk_id+slot: replace if same slot re-submits.
+            existing_slot = (
+                session.execute(
+                    select(TravelerRow).where(
+                        TravelerRow.desk_id == desk_id,
+                        TravelerRow.slot == slot,
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if existing_slot is not None:
+                existing_slot.family_name = fields.family_name
+                existing_slot.given_name = fields.given_name
+                existing_slot.gender = fields.gender
+                existing_slot.birthday = fields.birthday
+                existing_slot.nationality = fields.nationality_iso2
+                existing_slot.doc_number = fields.doc_number
+                existing_slot.issuing_country = fields.issuing_country
+                existing_slot.doc_expiry = fields.doc_expiry
+                # Keep an already-captured contact if this resubmit omits it
+                # (a photo redo shouldn't wipe a previously typed email/mobile).
+                if email is not None:
+                    existing_slot.contact_email = email
+                if mobile is not None:
+                    existing_slot.contact_mobile = mobile
+                existing_slot.verified_at = datetime.now()
+                session.commit()
+                return existing_slot.id
+
+            traveler_id = str(uuid.uuid4())
+            session.add(
+                TravelerRow(
+                    id=traveler_id,
+                    desk_id=desk_id,
+                    slot=slot,
+                    family_name=fields.family_name,
+                    given_name=fields.given_name,
+                    gender=fields.gender,
+                    birthday=fields.birthday,
+                    nationality=fields.nationality_iso2,
+                    doc_number=fields.doc_number,
+                    issuing_country=fields.issuing_country,
+                    doc_expiry=fields.doc_expiry,
+                    contact_email=email,
+                    contact_mobile=mobile,
+                )
+            )
+            session.commit()
+            return traveler_id
+
+    def list_travelers(self, desk_id: str) -> list[dict]:
+        """All verified travelers on a desk, ordered by slot."""
+        with database.SessionLocal() as session:
+            rows = (
+                session.execute(
+                    select(TravelerRow)
+                    .where(TravelerRow.desk_id == desk_id)
+                    .order_by(TravelerRow.slot)
+                )
+                .scalars()
+                .all()
+            )
+            return [
+                {
+                    "id": r.id,
+                    "slot": r.slot,
+                    "family_name": r.family_name,
+                    "given_name": r.given_name,
+                    "gender": r.gender,
+                    "birthday": r.birthday,
+                    "nationality": r.nationality,
+                    "doc_type": r.doc_type,
+                    "doc_number": r.doc_number,
+                    "issuing_country": r.issuing_country,
+                    "doc_expiry": r.doc_expiry,
+                    "contact_email": r.contact_email,
+                    "contact_mobile": r.contact_mobile,
+                }
+                for r in rows
+            ]
+
+    def purge_travelers(self, desk_id: str) -> None:
+        """Delete all travelers on a desk (desk close)."""
+        with database.SessionLocal() as session:
+            session.execute(
+                TravelerRow.__table__.delete().where(
+                    TravelerRow.desk_id == desk_id
+                )
+            )
+            session.commit()
+
+    def get_team_size(self, desk_id: str) -> int:
+        """Read the mandate's team_size. Raises KeyError for unknown desk."""
+        with database.SessionLocal() as session:
+            row = session.get(MandateRow, desk_id)
+            if row is None:
+                raise KeyError(f"unknown desk: {desk_id}")
+            return row.team_size
+
+    def has_ledger_marker(self, desk_id: str, marker: str) -> bool:
+        """True if any ledger note on this desk starts with `marker`.
+
+        Restart-safe dedupe for one-shot desk events (e.g.
+        travelers_complete): the marker lives in the durable blotter, so a
+        process restart never re-fires the event.
+        """
+        with database.SessionLocal() as session:
+            row = (
+                session.execute(
+                    select(LedgerRow)
+                    .where(
+                        LedgerRow.desk_id == desk_id,
+                        LedgerRow.note.like(f"{marker}%"),
+                    )
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
+            return row is not None
 
     def desk_state(self, desk_id: str) -> dict:
         """Snapshot for GET /api/desk/{desk_id} (positions/ledger/budgets)."""

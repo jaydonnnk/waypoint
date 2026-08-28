@@ -39,3 +39,10 @@ def load_iata_country() -> dict[str, str]:
 def load_iata_city() -> dict[str, str]:
     """Airport IATA -> display city name. Carried on `Layover.city`."""
     return _load_csv("iata_city.csv", "iata", "city")
+
+
+@lru_cache(maxsize=1)
+def load_iso3_to_iso2() -> dict[str, str]:
+    """MRZ ISO-3 nationality -> ISO-2 (curated). FAIL-CLOSED: unmapped
+    ISO-3 codes return None from the caller — never free text."""
+    return _load_csv("iso3_to_iso2.csv", "iso3", "iso2")

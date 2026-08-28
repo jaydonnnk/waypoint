@@ -721,8 +721,25 @@ class DeskAgent:
 
             # order create — WRITE, NEVER retried. The pax payload is
             # built from THIS verify's travelers (traveler_id carried,
-            # never invented — passenger-input.md).
-            pax_json = _build_demo_pax_json(verified.travelers)
+            # never invented — passenger-input.md). S3: real travelers
+            # for gated desks, demo for ungated (byte-safe). The builder
+            # opens DB sessions, so it runs off the event loop via
+            # asyncio.to_thread (the store-access convention).
+            from app.pax import build_pax_json
+            pax_build = await asyncio.to_thread(
+                build_pax_json, desk_id, verified.travelers, self.store
+            )
+            if pax_build.hold:
+                # Gated desk missing/short roster → hold + escalate,
+                # NEVER silently book demo identities.
+                await emit({
+                    "type": "error",
+                    "code": "PAX_ROSTER_INCOMPLETE",
+                    "position_id": pos.id,
+                })
+                return budget_left, contingency_left
+            pax_json = pax_build.pax_json
+            pax_source = pax_build.pax_source
             try:
                 ref = await asyncio.to_thread(
                     self.atlas.create_order,
@@ -802,10 +819,16 @@ class DeskAgent:
             pos.status = "booked"
             pos.ticket_asserted = True
             budget_left -= verified.current_price
+            # pax_source rides the booking provenance (S3): 'collected'
+            # = real captured travelers on a gated desk; 'demo' = ungated
+            # legacy/recorded desk demo identities (byte-safe).
             settle.append(LedgerInput(
                 kind="trade", amount=verified.current_price,
                 position_id=pos.id, ref=ref.order_no,
-                note="booked \u2014 TICKETED asserted, sandbox money",
+                note=(
+                    f"booked \u2014 TICKETED asserted, sandbox money; "
+                    f"pax_source={pax_source}"
+                ),
             ))
             # Alloc beat — S4 SEAM (Branch B: cut, ledger-only). The seat
             # module is NOT activated on this sandbox account (Step 2's live

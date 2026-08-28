@@ -15,6 +15,7 @@ The decisions the agent would otherwise make silently mid-implementation. Signat
 ### New — backend core
 - `backend/app/events.py` — the typed domain-event sink (`DeskEvent`, `EventSink`). In-process pub/sub; the loop publishes, the bot subscribes. The ONE place every announced moment is enumerated.
 - `backend/app/pax.py` — the real-traveler pax builder (moves + replaces `_build_demo_pax_json`; keeps a demo fallback for empty rosters so existing tests stand).
+- `backend/app/travelers.py` — the backend-side `travelers_complete` decision (store = source of truth); DB-backed fire-once dedupe via ledger marker + process asyncio lock; bot handlers are thin callers.
 
 ### New — tests
 - `backend/tests/test_mrz.py` — check-digit vectors (valid + each single-field corruption fails).
@@ -104,6 +105,12 @@ class MrzFields:
 def parse_td3(line1: str, line2: str) -> MrzFields | None: ...   # None = structurally invalid
 def check_digit(data: str) -> str: ...                            # 7-3-1 weighted mod-10
 def validate(fields_raw: dict) -> MrzFields | None: ...           # all 4 check digits pass → fields; else None
+def build_typed_fields(family_name: str, given_name: str, gender: str, birthday: str,
+                       nationality: str, doc_number: str, issuing_country: str,
+                       doc_expiry: str) -> MrzFields | None: ...
+# build_typed_fields() = typed-entry constructor through the SAME fail-closed gate:
+#   curated-CSV nationality/issuing validation, calendar dates, expiry-not-past,
+#   DOB-not-future. None on any failure — typed path is exactly as strict as photo.
 # validate() is the ONLY path by which a photo becomes a stored traveler.
 # ISO-3 → ISO-2 nationality via app.data.loaders (reuse existing tooling).
 # FAIL-CLOSED: ISO-3 not in the curated CSV → validate() returns None → typed-entry fallback
@@ -155,7 +162,8 @@ def bind_chat(self, chat_id: str, token: str) -> tuple[str, int] | None: ...  # 
 def bump_code_attempts(self, desk_id: str) -> int: ...             # returns new count
 def set_approved_offer(self, desk_id: str, offer_id: str) -> None: ...
 def bump_reapproval(self, desk_id: str) -> int: ...
-def purge_travelers(self, desk_id: str) -> None: ...               # at close
+def purge_travelers(self, desk_id: str) -> None: ...               # at close — implemented; close-path wiring deferred/assigned to the close slice
+def has_ledger_marker(self, desk_id: str, marker: str) -> bool: ...  # parameterized prefix scan — durable fire-once dedupe
 def offer_snapshot(self, desk_id: str) -> dict: ...               # for the G5 pack
 ```
 

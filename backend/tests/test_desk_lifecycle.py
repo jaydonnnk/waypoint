@@ -130,3 +130,78 @@ def test_release_cas_is_single_winner(tmp_db, stub_agent, stub_auditor):
     assert routes.STORE.try_release(desk_id) is True
     assert routes.STORE.try_release(desk_id) is False
     assert routes.STORE.get_lifecycle(desk_id) == "released"
+
+
+# ---------------------------------------------------------------------------
+# S3: travelers_complete fires once, backend-side
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_travelers_complete_fires_once_backend(tmp_db, stub_agent, stub_auditor):
+    """Nth insert fires exactly one travelers_complete; a resubmit on the
+    same slot does NOT refire.
+
+    Backend-side (03-program-design §2): the fire decision lives in
+    app.travelers (store = source of truth), NOT in bot internals — this
+    test imports no bot module. Dedupe is DB-backed (a ledger marker), so
+    it is restart-safe.
+
+    FAILS pre-S3: add_traveler, get_team_size, has_ledger_marker, and
+    app.travelers.maybe_fire_travelers_complete do not exist.
+    """
+    from app.bot.mrz import MrzFields
+    from app.db.store import DeskStore
+    from app.events import EventSink
+    from app.travelers import maybe_fire_travelers_complete
+
+    store = DeskStore()
+    sink = EventSink()
+
+    publish_calls: list = []
+    original_publish = sink.publish
+
+    def tracking_publish(event):
+        publish_calls.append(event)
+        original_publish(event)
+
+    sink.publish = tracking_publish
+
+    # Seed a gated desk with team_size=2.
+    with TestClient(app) as client:
+        body = client.post(
+            "/api/desk/seed", json={"gated": True, "team_size": 2}
+        ).json()
+        desk_id = body["desk_id"]
+
+    fields1 = MrzFields(
+        family_name="TAN", given_name="WEI", gender="M",
+        birthday="1990-01-01", nationality_iso2="SG",
+        doc_number="E1111111", issuing_country="SG", doc_expiry="2030-01-01",
+    )
+    fields2 = MrzFields(
+        family_name="LIM", given_name="AH", gender="F",
+        birthday="1992-06-15", nationality_iso2="SG",
+        doc_number="E2222222", issuing_country="SG", doc_expiry="2031-06-15",
+    )
+
+    # First traveler (1/2) — should NOT fire.
+    store.add_traveler(desk_id, slot=1, fields=fields1)
+    fired = await maybe_fire_travelers_complete(store, sink, desk_id)
+    assert fired is False
+    tc_events = [e for e in publish_calls if e.type == "travelers_complete"]
+    assert len(tc_events) == 0
+
+    # Second traveler (2/2) — SHOULD fire exactly once.
+    store.add_traveler(desk_id, slot=2, fields=fields2)
+    fired = await maybe_fire_travelers_complete(store, sink, desk_id)
+    assert fired is True
+    tc_events = [e for e in publish_calls if e.type == "travelers_complete"]
+    assert len(tc_events) == 1
+
+    # Resubmit on slot 1 (update, not insert) — must NOT refire.
+    store.add_traveler(desk_id, slot=1, fields=fields1)
+    fired = await maybe_fire_travelers_complete(store, sink, desk_id)
+    assert fired is False
+    tc_events = [e for e in publish_calls if e.type == "travelers_complete"]
+    assert len(tc_events) == 1  # still 1, not 2

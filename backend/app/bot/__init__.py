@@ -51,8 +51,11 @@ def build_application(
 
     application = ApplicationBuilder().token(token).build()
 
-    # Wire /start deep-link handler.
+    # Wire /start deep-link + photo + callback + typed-entry handlers.
     register_handlers(application, store)
+
+    # Stash the sink in bot_data so handlers can publish events.
+    application.bot_data["sink"] = sink
 
     # Subscribe the notify handler to the domain-event sink so desk events
     # (travelers_complete, etc.) reach the manager's Telegram chat.

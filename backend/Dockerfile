@@ -25,6 +25,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY scripts ./scripts
 COPY data/recorded ./data/recorded
+# Bot passport path (S3): the curated ISO-3->ISO-2 nationality CSV must be
+# present for mrz.validate() to run when the bot is enabled.
+COPY data/iso3_to_iso2.csv ./data/iso3_to_iso2.csv
 
 # Empty DB fallback: compose parks the DB on the /app/db volume via
 # WAYPOINT_DATABASE_URL; a plain `docker run` without that env falls

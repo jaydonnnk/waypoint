@@ -8,13 +8,14 @@
 ## Slices (finalized at Gate 4 — see 04-slices.md)
 - [x] S1 — TRACER: seed-without-start → code → cycle fires (schema+sink+_start_cycle+confirm+share card) — built 2026-08-28; 3 lifecycle tests + full suite (175) green, frontend type-check clean
 - [x] S2 — Waybot skeleton + deep-link bind (bot in lifespan, subscribes to sink) — built 2026-08-28; 17 new tests + full suite (193) green, frontend type-check clean; L4 invite_token index fix landed; Qoder cross-check: H1+8M+3L all fixed (see MISTAKES.md §Slice 2)
-- [ ] S3 — Passport extraction + MRZ gate + G1 write-path swap (G1 CLOSED)
+- [x] S3 — Passport extraction + MRZ gate + G1 write-path swap (G1 CLOSED) — built 2026-08-29; full suite (219) green, frontend type-check clean; mrz.py (ICAO TD3 7-3-1 gate, calendar+expiry+fail-closed nationality), extract.py (Qwen-VL OCR), pax.py (gated-hold/ungated-demo), handlers.py (photo+confirm+typed), session.py (full state machine), store additions (add/list/purge_travelers, has_ledger_marker), app/travelers.py (backend-side travelers_complete, DB-backed dedupe), loop.py swap (pax_source provenance). Qoder cross-check: 0 High; 10M+6L fixed, 3 documented-open (M5 purge/M8 demo-contract/M10 manager_chat_id — see MISTAKES.md §Slice 3)
 - [ ] S4 — Security guard module (7 guards → failing tests)
 - [ ] S5 — Pre-trip approval, pinned resume (G4 CLOSED) ← MVP complete here
 - [ ] S6 — Travel pack (G5 CLOSED, bounded)
 - [ ] S7 — Policy filter (G2 CLOSED to data limits)
 - [ ] S8 — Trip construction (G3 PARTIAL)
 - [ ] S9 — Duty of care (G6 PARTIAL)
+- [ ] S3-deferred (M5): wire `store.purge_travelers(desk_id)` into the desk-close path when the close slice lands — traveler PII must not outlive the desk
 
 ## Code facts verified against repo (2026-08-28)
 - Persist precedes task: routes.py:307-313 (STORE.seed_desk then asyncio.create_task) — seed-without-start is a clean split.
