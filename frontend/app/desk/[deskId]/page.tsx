@@ -536,9 +536,9 @@ export default function DeskPage() {
             {
               autoAlpha: 1,
               y: 0,
-              duration: 0.5,
+              duration: 0.42,
               ease: "power2.out",
-              stagger: 0.09,
+              stagger: 0.07,
             }
           );
         }
@@ -763,7 +763,16 @@ export default function DeskPage() {
         );
         amount = (
           <div className="fare num">
-            {money(event.old, currency)} → {money(event.new, currency)}
+            {event.old !== event.new ? (
+              <>
+                <s>{money(event.old, currency)}</s> →{" "}
+                {money(event.new, currency)}
+              </>
+            ) : (
+              <>
+                {money(event.old, currency)} → {money(event.new, currency)}
+              </>
+            )}
           </div>
         );
         break;
@@ -775,7 +784,7 @@ export default function DeskPage() {
         badge = <span className="badge no">Dropped in value</span>;
         amount = (
           <div className="fare num">
-            {money(event.amount, currency).replace("−", "")}
+            ↓ {money(event.amount, currency).replace("−", "")}
           </div>
         );
         break;
@@ -795,9 +804,12 @@ export default function DeskPage() {
       <div key={ix} data-ix={ix} className={blocked ? "trip blocked" : "trip"}>
         <div className={avatarCls}>{tripInitials(snapPos, pos)}</div>
         <div className="info">
-          <div className="name">{tripTitle(event)}</div>
+          {/* Pass 3 (R1): the TRIP IDENTITY is the card's heading — unique
+              per card, so the feed scans; the state word demotes to the leg.
+              Both helpers untouched; only what feeds which line swaps. */}
+          <div className="name">{tripIdentity(snapPos, pos)}</div>
           <div className="leg">
-            {tripIdentity(snapPos, pos)}
+            {tripTitle(event)}
             {" · "}
             {event.type === "trade"
               ? event.kind === "book"
@@ -817,6 +829,15 @@ export default function DeskPage() {
                       ? "Adjusted before booking"
                       : "See full record"}
           </div>
+          {/* Decorative route line — renders ONLY when the snapshot carries
+              BOTH endpoints; never invents codes, absent snapshot → nothing. */}
+          {snapPos?.origin && snapPos?.dest && (
+            <div className="route-line" aria-hidden="true">
+              <span className="rl-code num">{snapPos.origin}</span>
+              <span className="rl-track" />
+              <span className="rl-code num">{snapPos.dest}</span>
+            </div>
+          )}
           {extra}
         </div>
         <div className="right">
@@ -1306,187 +1327,242 @@ export default function DeskPage() {
               <b>{errCount}</b> issue{errCount === 1 ? "" : "s"}
             </span>
           )}
-          {screen.meter && screen.meter.max > 0 && (
-            <span className="s">
-              <span className="pin t" />
-              Fare checks <b>{screen.meter.used}</b> of <b>{screen.meter.max}</b>
-            </span>
-          )}
+          {/* Pass 3: the fare-check meter MOVED to the agent console rail
+              (below) — removed here, not duplicated. Same data, same guard. */}
         </div>
-
-        {/* Pass 2 (Person A): live narration — the latest step's own text,
-            verbatim. Wrapper stays mounted (polite live region); content
-            clears the moment the run settles. No synthesis, no timers. */}
-        <div className="pa-working" aria-live="polite">
-          {!settled && latestStep ? (
-            <>
-              <span className="pa-working-k">Working on</span>
-              <span
-                className="pa-working-text"
-                key={screen.steps.length}
-              >
-                {latestStep.text}
-              </span>
-            </>
-          ) : null}
-        </div>
-
-        {/* Pass 2 (Person A): provenance strip — rail name + label rendered
-            verbatim from the stream's rails[]. Never reworded, never
-            strengthened; rail.detail stays in the full record only. */}
-        {screen.rails && screen.rails.length > 0 && (
-          <div className="pa-sources">
-            {screen.rails.map((rail) => (
-              <span key={rail.rail} className="pa-source">
-                <span className="pa-source-name">
-                  {rail.rail}
-                </span>
-                <span className={`pa-source-label ${rail.state}`}>
-                  {rail.label}
-                </span>
-              </span>
-            ))}
-          </div>
-        )}
       </div>
 
-      {/* ---- the decisions (only when something needs a human) ---------- */}
-      {escRows.map(renderDecision)}
-
-      {/* ---- the trips — one card per real stream event ------------------ */}
-      <div className="sec">The trips</div>
-      {screen.blotter.length === 0 ? (
-        <div className="trip empty">
-          Just starting — updates will appear here.
-        </div>
-      ) : (
-        screen.blotter.map(renderTrip)
-      )}
-
-      {/* ---- the full record: every check, disclosure and code ------------
-             (step 3 — collapsed by default, behind a quiet toggle. The
-              JSX inside is the step-2 fineprint block near-verbatim:
-              nothing deleted, headings relabeled to plain English. The
-              panel is local UI state only; it never touches the stream,
-              and `hidden` keeps every row mounted so toggling cannot
-              disturb the render.) ---------------------------------------- */}
-      <div className="record">
-        <button
-          type="button"
-          className="record-toggle"
-          aria-expanded={recordOpen}
-          aria-controls="full-record"
-          onClick={() => setRecordOpen((o) => !o)}
-        >
-          {recordOpen ? "Hide the full record ↑" : "See the full record →"}
-        </button>
-        <div id="full-record" className="fineprint" hidden={!recordOpen}>
-        <div className="sec fineprint-k">
-          The full record{screen.blotter.length > 0 &&
-            ` · ${screen.blotter.length} entries`}
-        </div>
-
-        {/* search meter — hidden from the main view; stays in the DOM so
-            the step-3 record panel can surface it. */}
-        <div className="visually-hidden">
-          search meter:{" "}
-          {screen.meter ? `${screen.meter.used} of ${screen.meter.max}` : "— of —"}
-        </div>
-
-        {/* disclosure register: every meta.disclosures[] string */}
-        {screen.disclosures.length > 0 && (
-          <div className="register">
-            <div className="register-k">notes</div>
-            <ul>
-              {screen.disclosures.map((d) => (
-                <li key={d}>{d}</li>
-              ))}
-            </ul>
-          </div>
+      {/* ---- Pass 3 command layout: decisions | console | main feed ------
+             Re-parented only — every component's logic, bindings and copy
+             are unchanged. Below 1080px the grid stacks in DOM order:
+             decisions → console → trips (exception-first). */}
+      <div className="desk-grid">
+        {escRows.length > 0 && (
+          <div className="desk-decisions">{escRows.map(renderDecision)}</div>
         )}
 
-        {/* per-rail provenance strip (S12, ADR 0006): demoted into
-            the full record — ops manager doesn't need this on main view */}
-        {screen.rails && (
-          <div className="rails">
-            <div className="rails-note">
-              Data sources for this run
-            </div>
-            {screen.rails.map((rail) => (
-              <div key={rail.rail} className="rail">
-                <span className="rail-name">{rail.rail}</span>
-                <span className={`rail-state ${rail.state}`}>{rail.label}</span>
-                <span className="rail-detail">{rail.detail}</span>
+        {/* Agent console — the Pass 2 evidence blocks MOVED here (never
+            duplicated), upgraded visually. No new copy: the existing
+            "Working on" kicker is the console's visual header. */}
+        <aside className="desk-console" aria-label="Agent activity">
+          {/* (a) working-on — same guard, same aria-live, wrapper always
+              mounted; the beacon pulse lives INSIDE the conditional content
+              so it can never claim work before the stream starts. */}
+          <div className="pa-working" aria-live="polite">
+            {!settled && latestStep ? (
+              <>
+                <span className="pa-working-k">
+                  <span className="pa-beacon" aria-hidden="true" />
+                  Working on
+                </span>
+                <span
+                  className="pa-working-text"
+                  key={screen.steps.length}
+                >
+                  {latestStep.text}
+                </span>
+              </>
+            ) : null}
+          </div>
+
+          {/* (b) fare-check meter — bound ONLY to screen.meter, clamped at
+              100; plain width style, no animation toward fake values. */}
+          {screen.meter && screen.meter.max > 0 && (
+            <div className="console-meter">
+              <div className="cm-k">Fare checks</div>
+              <div className="cm-read num">
+                <b>{screen.meter.used}</b> of <b>{screen.meter.max}</b>
               </div>
-            ))}
-          </div>
-        )}
-
-        {/* narration — the working log, demoted into the fine print */}
-        <div className="stream">
-          {screen.steps.length === 0 && (
-            <div>
-              <span className="dim">›</span> Working on it.
+              <div className="cm-track" aria-hidden="true">
+                <div
+                  className="cm-fill"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      (screen.meter.used / screen.meter.max) * 100
+                    )}%`,
+                  }}
+                />
+              </div>
             </div>
           )}
-          {screen.steps.map((s, i) => (
-            <div
-              key={`${s.n}-${i}`}
-              className={
-                i === screen.steps.length - 1 &&
-                !screen.result &&
-                !screen.cycleFailed
-                  ? "cur"
-                  : undefined
-              }
-            >
-              <span className="dim">›</span> {s.text}
-            </div>
-          ))}
-        </div>
 
-        {/* the log — every row, incl. escalation slots + buttons */}
-        <div className="blotter">
-          {screen.blotter.length === 0 && (
-            <div className="brow">
-              <div className="b-main">
-                <div className="b-body dim-note">
-                  Nothing here yet — entries appear as trips are processed.
+          {/* (c) data sources — rail name + label verbatim, same state
+              classes; rail.detail stays in the full record only. */}
+          {screen.rails && screen.rails.length > 0 && (
+            <div className="pa-sources">
+              {screen.rails.map((rail) => (
+                <span key={rail.rail} className="pa-source">
+                  <span className="pa-source-name">
+                    {rail.rail}
+                  </span>
+                  <span className={`pa-source-label ${rail.state}`}>
+                    {rail.label}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+        </aside>
+
+        <div className="desk-main">
+          {/* ---- the trips — one card per real stream event ------------- */}
+          <div className="sec">The trips</div>
+          {screen.blotter.length === 0 ? (
+            <>
+              <div className="trip empty">
+                Just starting — updates will appear here.
+              </div>
+              {/* Honest skeletons — obvious placeholders (no text, no
+                  numbers), rendered only while a run is genuinely starting
+                  (not settled, not the awaiting gate). */}
+              {!settled && !awaiting && (
+                <>
+                  <div className="trip skeleton" aria-hidden="true">
+                    <div className="sk-avatar" /><div className="sk-lines">
+                    <div className="sk-line" /><div className="sk-line short" /></div>
+                  </div>
+                  <div className="trip skeleton" aria-hidden="true">
+                    <div className="sk-avatar" /><div className="sk-lines">
+                    <div className="sk-line" /><div className="sk-line short" /></div>
+                  </div>
+                  <div className="trip skeleton" aria-hidden="true">
+                    <div className="sk-avatar" /><div className="sk-lines">
+                    <div className="sk-line" /><div className="sk-line short" /></div>
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            screen.blotter.map(renderTrip)
+          )}
+
+          {/* ---- the full record: every check, disclosure and code --------
+                 (step 3 — collapsed by default, behind a quiet toggle. The
+                  JSX inside is the step-2 fineprint block near-verbatim:
+                  nothing deleted, headings relabeled to plain English. The
+                  panel is local UI state only; it never touches the stream,
+                  and `hidden` keeps every row mounted so toggling cannot
+                  disturb the render.) ------------------------------------ */}
+          <div className="record">
+            <button
+              type="button"
+              className="record-toggle"
+              aria-expanded={recordOpen}
+              aria-controls="full-record"
+              onClick={() => setRecordOpen((o) => !o)}
+            >
+              {recordOpen ? "Hide the full record ↑" : "See the full record →"}
+            </button>
+            <div id="full-record" className="fineprint" hidden={!recordOpen}>
+            <div className="sec fineprint-k">
+              The full record{screen.blotter.length > 0 &&
+                ` · ${screen.blotter.length} entries`}
+            </div>
+
+            {/* search meter — hidden from the main view; stays in the DOM so
+                the step-3 record panel can surface it. */}
+            <div className="visually-hidden">
+              search meter:{" "}
+              {screen.meter ? `${screen.meter.used} of ${screen.meter.max}` : "— of —"}
+            </div>
+
+            {/* disclosure register: every meta.disclosures[] string */}
+            {screen.disclosures.length > 0 && (
+              <div className="register">
+                <div className="register-k">notes</div>
+                <ul>
+                  {screen.disclosures.map((d) => (
+                    <li key={d}>{d}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* per-rail provenance strip (S12, ADR 0006): demoted into
+                the full record — ops manager doesn't need this on main view */}
+            {screen.rails && (
+              <div className="rails">
+                <div className="rails-note">
+                  Data sources for this run
+                </div>
+                {screen.rails.map((rail) => (
+                  <div key={rail.rail} className="rail">
+                    <span className="rail-name">{rail.rail}</span>
+                    <span className={`rail-state ${rail.state}`}>{rail.label}</span>
+                    <span className="rail-detail">{rail.detail}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* narration — the working log, demoted into the fine print */}
+            <div className="stream">
+              {screen.steps.length === 0 && (
+                <div>
+                  <span className="dim">›</span> Working on it.
+                </div>
+              )}
+              {screen.steps.map((s, i) => (
+                <div
+                  key={`${s.n}-${i}`}
+                  className={
+                    i === screen.steps.length - 1 &&
+                    !screen.result &&
+                    !screen.cycleFailed
+                      ? "cur"
+                      : undefined
+                  }
+                >
+                  <span className="dim">›</span> {s.text}
+                </div>
+              ))}
+            </div>
+
+            {/* the log — every row, incl. escalation slots + buttons */}
+            <div className="blotter">
+              {screen.blotter.length === 0 && (
+                <div className="brow">
+                  <div className="b-main">
+                    <div className="b-body dim-note">
+                      Nothing here yet — entries appear as trips are processed.
+                    </div>
+                  </div>
+                </div>
+              )}
+              {screen.blotter.map(renderBlotter)}
+            </div>
+            </div>
+          </div>
+
+          {/* ---- terminal result -> the summary ------------------------- */}
+          {screen.result && (
+            <div className="result-banner done">
+              <div>
+                <div className="rb-k">{plainStatus(screen.result.status)}</div>
+              </div>
+              <Link className="cta" href={`/close/${deskId}`}>
+                See summary →
+              </Link>
+            </div>
+          )}
+
+          {/* ---- crash path: terminal DESK_CYCLE_FAILED, no result ------ */}
+          {screen.cycleFailed && !screen.result && (
+            <div className="result-banner">
+              <div>
+                <div className="rb-k">Stopped early</div>
+                <div className="rb-sub">
+                  Something went wrong — nothing was booked past that point.
                 </div>
               </div>
             </div>
           )}
-          {screen.blotter.map(renderBlotter)}
-        </div>
-        </div>
-      </div>
 
-      {/* ---- terminal result -> the summary ------------------------------- */}
-      {screen.result && (
-        <div className="result-banner done">
-          <div>
-            <div className="rb-k">{plainStatus(screen.result.status)}</div>
-          </div>
-          <Link className="cta" href={`/close/${deskId}`}>
-            See summary →
-          </Link>
-        </div>
-      )}
-
-      {/* ---- crash path: terminal DESK_CYCLE_FAILED, no result emitted -- */}
-      {screen.cycleFailed && !screen.result && (
-        <div className="result-banner">
-          <div>
-            <div className="rb-k">Stopped early</div>
-            <div className="rb-sub">
-              Something went wrong — nothing was booked past that point.
-            </div>
+          <div className="note-soft">
+            Always within budget. Every fare is real.
           </div>
         </div>
-      )}
-
-      <div className="note-soft">
-        Always within budget. Every fare is real.
       </div>
 
       {/* ---- cold-open toast: plain copy only — the reducer's raw body

@@ -49,6 +49,27 @@
   --term-bg: #111;             /* terminal stream — retired when narration goes plain */
   --term-ink: #d7f0d7;
   --term-dim: #7fae7f;
+
+  /* ---- Pass 3 type scale (1.25 modular, USWDS-style tokens) ---- */
+  --fs-fine: 12px;         /* fine print, record rows */
+  --fs-body: 14px;         /* secondary text, legs, notes */
+  --fs-ui: 15.5px;         /* primary UI text, buttons */
+  --fs-h3: 17.5px;         /* card sub-heads, trip names */
+  --fs-h2: 22px;           /* section/card titles */
+  --fs-h1: 27px;           /* page titles */
+  --fs-hero: clamp(32px, 4.6vw, 46px);  /* THE saved figure */
+
+  /* ---- Pass 3 elevation (soft, y-offset, never harsh) ---- */
+  --shadow-1: 0 1px 2px rgba(27, 36, 48, 0.05);
+  --shadow-2: 0 6px 16px -6px rgba(27, 36, 48, 0.12);
+  --shadow-3: 0 14px 34px -10px rgba(27, 36, 48, 0.22);
+
+  /* ---- Pass 3 focus + motion ---- */
+  --ring: 0 0 0 3px rgba(15, 118, 110, 0.28);
+  --t-fast: 150ms;
+  --t-med: 220ms;
+  --t-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 * { box-sizing: border-box; }

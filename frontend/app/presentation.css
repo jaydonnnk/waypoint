@@ -103,3 +103,290 @@
 .pa-source-label.real {
   color: var(--mut);
 }
+
+/* §5 — Pass 3 command layout: grid skeleton, summary hero, decision ask.
+   Below 1080px the three zones stack in DOM order — decisions → console
+   → trips (exception-first). .desk-decisions is conditionally rendered
+   in the page, so an empty slot never leaves a stray grid gap. */
+.desk-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.desk-main { min-width: 0; }
+
+@media (min-width: 1080px) {
+  .teal-app > .wrap { max-width: 1180px; }
+  .desk-grid {
+    grid-template-columns: minmax(0, 1fr) 330px;
+    grid-template-areas:
+      "decisions console"
+      "main console";
+    column-gap: var(--sp-6);
+  }
+  .desk-decisions { grid-area: decisions; }
+  .desk-main { grid-area: main; }
+  .desk-console { grid-area: console; position: sticky; top: var(--sp-6); }
+}
+
+/* summary card — the Saved figure is the page's largest element (R3) */
+.run {
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-6);
+}
+.run .run-title { font-size: var(--fs-h2); }
+.budget .big {
+  font-size: var(--fs-hero);
+  letter-spacing: -1px;
+  line-height: 1.05;
+}
+.bar { height: 10px; }
+/* spent/left note carries meaning — --faint fails AA, bump to --mut */
+.bar-note { color: var(--mut); }
+
+/* statusline chips → quiet pills; pin dots stay the redundant channel */
+.statusline { gap: 8px; }
+.statusline .s {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 5px 12px;
+  font-size: 13px;
+}
+
+/* decision card — the ask (R4): rises in, recommendation dominates */
+.decide {
+  border: 1px solid #ecdcba;
+  box-shadow: var(--shadow-3);
+  animation: rise var(--t-slow) var(--ease-out) both;
+}
+.decide-opt.rec {
+  border: 2px solid var(--good);
+  background: var(--goodbg);
+  padding: 10px 14px;
+}
+.btns .btn { min-height: 48px; font-size: var(--fs-ui); }
+.btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.esc-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+@media (max-width: 620px) {
+  .btns .btn { flex: 1; }
+}
+
+/* §6 — trip cards: identity-first headings (R1), calmer blocked state */
+.trip {
+  min-height: 64px;
+  padding: var(--sp-4);
+  box-shadow: var(--shadow-1);
+  transition:
+    transform var(--t-fast) var(--ease-out),
+    box-shadow var(--t-fast) var(--ease-out);
+}
+/* hover only — never on data updates. (GSAP entrances leave an inline
+   transform on animated cards, so the lift shows wherever no tween ran,
+   e.g. reduced motion; the elevation always applies.) */
+.trip:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); }
+.trip .name { font-size: var(--fs-h3); font-weight: 700; }
+.trip .leg { font-size: var(--fs-body); }
+.trip .fare { text-align: right; }
+.trip .fare s { color: var(--faint); text-decoration-thickness: 1.5px; }
+
+/* decorative route line (aria-hidden) — Flighty-style, pure CSS */
+.route-line { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.rl-code { font-size: 11px; color: var(--faint); }
+.rl-track {
+  position: relative;
+  flex: 1;
+  height: 1px;
+  background: var(--line2);
+}
+.rl-track::before,
+.rl-track::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+.rl-track::before { left: 0; }
+.rl-track::after { right: 0; }
+
+/* blocked: no full red wash — hairline card, red edge, light tint */
+.trip.blocked {
+  background: var(--card); /* fallback where color-mix is unsupported */
+  background: color-mix(in srgb, var(--badbg) 50%, var(--card));
+  border-left: 3px solid var(--bad);
+}
+
+.badge {
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+}
+
+/* §7 — the agent console: the labor made visible (R2). Quiet card; the
+   existing "Working on" kicker doubles as its visual header — no new copy. */
+.desk-console {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-1);
+  padding: var(--sp-5);
+}
+.desk-console .pa-working {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+/* the wrapper stays mounted (aria-live) — collapse it when it's empty */
+.desk-console .pa-working:empty { min-height: 0; }
+.desk-console .pa-working-k {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pa-beacon {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+  flex: none;
+  animation: beacon-pulse 1.8s ease-in-out infinite;
+}
+@keyframes beacon-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* fare-check micro-meter — bound ONLY to screen.meter; plain width style,
+   no animation toward fake values */
+.console-meter {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.cm-k {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--mut);
+}
+.cm-read { font-size: 15px; color: var(--ink); margin: 2px 0 6px; }
+.cm-read b { font-weight: 700; }
+.cm-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+.cm-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--brand);
+}
+
+/* data sources — stacked rows, name left / label right; the fallback
+   rule stands (label muted unless explicitly `live`) */
+.desk-console .pa-sources {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 7px;
+}
+.desk-console .pa-source {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
+/* §8 — record polish, honest skeletons, toast, Waybot awaiting refinements */
+.record-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 16px;
+  background: var(--card);
+  border: 1px solid var(--line2);
+  border-radius: var(--r-btn);
+  font-size: 12.5px;
+  color: var(--mut);
+  transition:
+    border-color var(--t-fast) var(--ease-out),
+    color var(--t-fast) var(--ease-out);
+}
+.record-toggle:hover,
+.record-toggle:focus-visible {
+  color: var(--ink);
+  border-color: var(--mut);
+  text-decoration: none;
+}
+.record-toggle:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* ledger rhythm — consistent 8px, prose capped at ~72ch */
+.fineprint .brow .b-body { max-width: 72ch; }
+.fineprint .stream {
+  border-radius: var(--r-bar);
+  padding: var(--sp-4);
+}
+
+/* skeletons — obviously placeholders: no text, no numbers */
+.trip.skeleton { pointer-events: none; }
+.sk-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--line);
+  flex: none;
+}
+.sk-lines { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.sk-line {
+  height: 10px;
+  width: 72%;
+  border-radius: 5px;
+  background: var(--line);
+}
+.sk-line.short { width: 44%; background: var(--paper); }
+.trip.skeleton .sk-avatar,
+.trip.skeleton .sk-line {
+  animation: shimmer 1.6s linear infinite;
+}
+@keyframes shimmer {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* toast — shadow-3, reuses the frozen toast-in entrance. ≥720px sits
+   bottom-right: the keyframe ends at translateX(-50%), so the anchor is
+   the gutter plus half the 480px cap width (width is always 480px here). */
+.toast {
+  box-shadow: var(--shadow-3);
+  border-radius: var(--r-trip);
+  padding-bottom: max(var(--sp-4), env(safe-area-inset-bottom));
+}
+@media (min-width: 720px) {
+  .toast { left: calc(100vw - 262px); }
+}
+
+/* Waybot awaiting gate — CSS-only refinements (logic + copy untouched) */
+.decide .constraint-field input {
+  min-height: 48px;
+  font-size: 18px;
+  letter-spacing: 1px;
+}
+.decide .constraint-field input:focus { box-shadow: var(--ring); }
+
+/* Pass 3 motion guards — local (the global reduced-motion block stays
+   untouched): static skeletons + no beacon pulse under reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .trip.skeleton .sk-avatar,
+  .trip.skeleton .sk-line { animation: none; }
+  .pa-beacon { animation: none; }
+}
