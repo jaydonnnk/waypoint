@@ -51,7 +51,34 @@ _MANDATE_COLUMN_BACKFILL = (
     ("team_size", "INTEGER NOT NULL DEFAULT 1"),
     ("destination_label", "TEXT NOT NULL DEFAULT ''"),
     ("trip_purpose", "TEXT NOT NULL DEFAULT ''"),
+    # Waybot lifecycle-gate columns (S1). Constant defaults so an old
+    # 3-added-column DB self-heals with today's behavior (lifecycle
+    # 'released'). SQLite ADD COLUMN cannot attach the invite_token index;
+    # create_all builds it on fresh DBs, and the token lookup is correct
+    # (just unindexed) on a backfilled one.
+    ("lifecycle", "TEXT NOT NULL DEFAULT 'released'"),
+    ("invite_token", "TEXT"),
+    ("confirmation_code_hash", "TEXT"),
+    ("approved_offer_id", "TEXT"),
+    ("policy_json", "TEXT"),
+    ("reapproval_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("code_attempts", "INTEGER NOT NULL DEFAULT 0"),
 )
+
+
+def _ensure_invite_token_index() -> None:
+    """S2 (L4 fix): the invite_token index only exists on fresh DBs built
+    by create_all. Shim-upgraded DBs (ALTER TABLE ADD COLUMN) never got
+    it — SQLite ADD COLUMN cannot attach an index. Now that S2's
+    bind_chat does a token→desk lookup, the missing index would cause a
+    full table scan. Idempotent: IF NOT EXISTS."""
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_mandate_invite_token "
+                "ON mandate (invite_token)"
+            )
+        )
 
 
 def _backfill_mandate_columns() -> None:
@@ -116,3 +143,4 @@ def init_db() -> None:
     # PRAGMA-based backfill shim is SQLite-only; skip on other dialects.
     if engine.dialect.name == "sqlite":
         _backfill_mandate_columns()
+        _ensure_invite_token_index()

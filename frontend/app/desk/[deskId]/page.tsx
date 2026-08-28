@@ -26,9 +26,15 @@ import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 
 import WaypointField from "../../WaypointField";
-import { deskStreamUrl, getDeskSnapshot, postEscalationDecision } from "@/lib/api";
+import {
+  confirmDesk,
+  deskStreamUrl,
+  getDeskSnapshot,
+  postEscalationDecision,
+} from "@/lib/api";
 import { money } from "@/lib/format";
 import type {
+  DeskLifecycle,
   DeskResult,
   EscalationOption,
   Mandate,
@@ -344,6 +350,16 @@ export default function DeskPage() {
   const [recordOpen, setRecordOpen] = useState(false);
   const ixRef = useRef(0);
 
+  // Waybot invite gate (S1). A gated desk in 'awaiting_travelers' has no
+  // running cycle yet — so before the stream we show a code-entry panel.
+  // Read from the desk snapshot; null until the first fetch resolves.
+  const [lifecycle, setLifecycle] = useState<DeskLifecycle | null>(null);
+  const [verifiedCount, setVerifiedCount] = useState<number>(0);
+  const [code, setCode] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [confirmMsg, setConfirmMsg] = useState<string | null>(null);
+  const awaiting = lifecycle === "awaiting_travelers";
+
   useEffect(() => {
     const source = new EventSource(deskStreamUrl(deskId));
 
@@ -432,6 +448,10 @@ export default function DeskPage() {
           ...Object.fromEntries(snap.positions.map((p) => [p.id, p])),
         }));
         setBudgetFigures(extractBudgetFigures(snap.budgets));
+        // Waybot gate (S1): drive the pre-stream code panel from the
+        // persisted lifecycle. Additive fields — default to released/0.
+        setLifecycle(snap.lifecycle ?? "released");
+        setVerifiedCount(snap.verified_count ?? 0);
       })
       .catch(() => {
         // silent — cards keep the "Trip N" fallback, the bar stays empty
@@ -652,6 +672,27 @@ export default function DeskPage() {
             ? { state: "gone" }
             : { state: "failed", detail: outcome.detail },
     }));
+  }
+
+  // ---------- Waybot release (S1): enter the code, start the cycle --------
+  async function submitCode() {
+    if (!code.trim() || confirming) return;
+    setConfirming(true);
+    setConfirmMsg(null);
+    const outcome = await confirmDesk(deskId, code.trim());
+    if (outcome.kind === "released") {
+      // The cycle is now running — reload so the stream connects fresh.
+      window.location.reload();
+      return;
+    }
+    setConfirming(false);
+    setConfirmMsg(
+      outcome.kind === "wrong_code"
+        ? "That code didn't match — check it and try again."
+        : outcome.kind === "not_found"
+          ? "This desk isn't available."
+          : outcome.detail
+    );
   }
 
   // ---------- derived, plain-language readouts (counts of real events) ----
@@ -1126,7 +1167,42 @@ export default function DeskPage() {
         </div>
       </div>
 
-      {streamDead && (
+      {/* ---- Waybot pre-stream gate: awaiting travelers -> enter the code - */}
+      {awaiting && (
+        <div className="decide">
+          <div className="cap">● Waiting for your team</div>
+          <div className="decide-name">Enter your release code to start</div>
+          <p className="reason">
+            <b>{verifiedCount}</b> traveler{verifiedCount === 1 ? "" : "s"}{" "}
+            verified so far. When everyone's in, enter the private code from
+            your share card to release the booking.
+          </p>
+          <label className="constraint-field">
+            <span className="constraint-k">Release code</span>
+            <input
+              type="text"
+              value={code}
+              placeholder="e.g. 3F9A21BC"
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitCode();
+              }}
+            />
+          </label>
+          <div className="btns">
+            <button
+              className="btn primary"
+              onClick={submitCode}
+              disabled={confirming || !code.trim()}
+            >
+              {confirming ? "Releasing…" : "Release the booking →"}
+            </button>
+          </div>
+          {confirmMsg && <div className="decide-note">{confirmMsg}</div>}
+        </div>
+      )}
+
+      {streamDead && !awaiting && (
         <div className="status err">
           We can't reach this booking — it may have ended or the link is
           wrong.

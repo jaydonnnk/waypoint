@@ -6,8 +6,8 @@
 - Gate 4 — Slice plan: APPROVED 2026-08-28 (9 slices; MVP = S1–S5; build not yet started)
 
 ## Slices (finalized at Gate 4 — see 04-slices.md)
-- [ ] S1 — TRACER: seed-without-start → code → cycle fires (schema+sink+_start_cycle+confirm+share card)
-- [ ] S2 — Waybot skeleton + deep-link bind (bot in lifespan, subscribes to sink)
+- [x] S1 — TRACER: seed-without-start → code → cycle fires (schema+sink+_start_cycle+confirm+share card) — built 2026-08-28; 3 lifecycle tests + full suite (175) green, frontend type-check clean
+- [x] S2 — Waybot skeleton + deep-link bind (bot in lifespan, subscribes to sink) — built 2026-08-28; 17 new tests + full suite (193) green, frontend type-check clean; L4 invite_token index fix landed; Qoder cross-check: H1+8M+3L all fixed (see MISTAKES.md §Slice 2)
 - [ ] S3 — Passport extraction + MRZ gate + G1 write-path swap (G1 CLOSED)
 - [ ] S4 — Security guard module (7 guards → failing tests)
 - [ ] S5 — Pre-trip approval, pinned resume (G4 CLOSED) ← MVP complete here
@@ -37,6 +37,12 @@ Passport photo = NEW untrusted LLM-input channel feeding a WRITE. The "injection
 3. Anyone with the link can upload ANY passport — manager reviews the NAMED verified list before entering the release code (not just the N/N count).
 4. Telegram retains the uploaded photo server-side regardless of local delete — must call bot deleteMessage on the upload, not only purge the temp file.
 5. invite_token: desk-scoped, single-purpose, expires on desk close, upload rate-limit.
+
+## Known-open holes after S1 (Qoder cross-check 2026-08-28 — see MISTAKES.md)
+- **Confirmation code has NO attempt cap and NO TTL yet** (plan defers to S4). Because `page.tsx` now seeds every desk `gated:true`, `/confirm` is the LIVE path, not dormant. The `code_attempts` column exists but is not yet incremented/read; no expiry column. The 32-bit code (`secrets.token_hex(4)`) is only adequate *with* a cap — pull the cap/TTL/one-shot-410 forward in S4 and treat this as a live security gap until then.
+- **Code hash is single-round salted SHA-256** (S1). Constant-time compare is in place; storage strength is not — swap for a slow KDF when S4 lands.
+- ~~**`invite_token` index only exists on fresh DBs**~~ — FIXED in S2: `_ensure_invite_token_index()` adds `CREATE INDEX IF NOT EXISTS` in `init_db`, so shim-upgraded DBs get the index too.
+- H1 (confirm double-start race) — FIXED in S1 via atomic CAS `DeskStore.try_release` (test_release_cas_is_single_winner).
 
 ## Notes for a fresh session
 Read every doc in this folder before continuing. The full 7-gap plan the user supplied is the source; it is code-accurate. Caveman chat mode is on (docs stay normal prose).

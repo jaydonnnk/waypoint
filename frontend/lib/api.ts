@@ -1,4 +1,4 @@
-import type { CloseReport, DeskResult, DeskSnapshot } from "./types";
+import type { CloseReport, DeskResult, DeskSnapshot, SeedResult } from "./types";
 
 // The backend origin. Overridable via NEXT_PUBLIC_API_URL.
 export const API_URL =
@@ -17,7 +17,11 @@ export async function seedDesk(constraints: {
   team_size: number;
   destination_label: string;
   trip_purpose: string;
-}): Promise<string> {
+  // Waybot invite gate (S1). Omitted/false = the pre-S1 path (cycle starts
+  // server-side, only { desk_id } comes back). True holds the desk in
+  // 'awaiting_travelers' and returns the invite token + one-time code.
+  gated?: boolean;
+}): Promise<SeedResult> {
   const res = await fetch(`${API_URL}/api/desk/seed`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -26,8 +30,35 @@ export async function seedDesk(constraints: {
   if (!res.ok) {
     throw new Error(`POST /api/desk/seed failed (${res.status})`);
   }
-  const body = await res.json();
-  return body.desk_id as string;
+  return (await res.json()) as SeedResult;
+}
+
+export type ConfirmOutcome =
+  | { kind: "released" }
+  | { kind: "wrong_code" } // 403 — the code did not match; still awaiting
+  | { kind: "not_found" } // 404 — unknown desk_id
+  | { kind: "failed"; detail: string };
+
+/** POST /api/desk/{desk_id}/confirm — the manager's release code. On a
+ * match the backend flips the desk to 'released' and starts the cycle. */
+export async function confirmDesk(
+  deskId: string,
+  code: string
+): Promise<ConfirmOutcome> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/api/desk/${deskId}/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+  } catch {
+    return { kind: "failed", detail: "the desk backend is not reachable" };
+  }
+  if (res.ok) return { kind: "released" };
+  if (res.status === 403) return { kind: "wrong_code" };
+  if (res.status === 404) return { kind: "not_found" };
+  return { kind: "failed", detail: `unexpected response (${res.status})` };
 }
 
 /** The SSE endpoint URL for a desk's live stream. The server buffers and

@@ -16,6 +16,7 @@ import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 
 import { seedDesk } from "@/lib/api";
+import type { SeedResult } from "@/lib/types";
 import WaypointField from "./WaypointField";
 
 gsap.registerPlugin(useGSAP);
@@ -24,6 +25,10 @@ export default function MandatePage() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Waybot share card (S1). Once a gated seed lands, we DON'T navigate —
+  // we show the share link + confirmation code + a static 0/N progress
+  // line here, so the manager can drop the link in the team chat.
+  const [share, setShare] = useState<SeedResult | null>(null);
 
   // ---- ops-manager budget constraints (set BEFORE "Start booking") ----
   const [budgetTotal, setBudgetTotal] = useState(12000);
@@ -90,7 +95,7 @@ export default function MandatePage() {
       // Contingency convention: the form takes a PERCENT (e.g. 5); the
       // wire format is the FRACTION the backend expects (pct / 100),
       // matching Mandate.contingency_pct / SeedRequest (0.05 default).
-      const deskId = await seedDesk({
+      const result = await seedDesk({
         budget_total: budgetTotal,
         authority_cap: authorityCap,
         contingency_pct: contingencyPct / 100,
@@ -100,8 +105,22 @@ export default function MandatePage() {
         team_size: Number.isInteger(teamSize) ? Math.min(Math.max(teamSize, 1), 50) : 1,
         destination_label: destination.trim(),
         trip_purpose: tripPurpose.trim(),
+        // Waybot: seed with the invite gate so we get a share link + code
+        // and the cycle waits for the manager's confirm.
+        gated: true,
       });
-      router.push(`/desk/${deskId}`);
+      // Backward-compat guard (M2): a pre-S1 backend ignores `gated` and
+      // starts the cycle server-side, returning only { desk_id }. With no
+      // invite_token there's nothing to share and a live desk is already
+      // running — navigate straight to it instead of showing a blank card.
+      if (!result.invite_token) {
+        router.push(`/desk/${result.desk_id}`);
+        return;
+      }
+      // Show the share card instead of navigating — the manager shares the
+      // link, then opens the desk to enter the code once travelers are in.
+      setBusy(false);
+      setShare(result);
     } catch (err) {
       setBusy(false);
       setError(
@@ -152,8 +171,59 @@ export default function MandatePage() {
         </div>
       </section>
 
-      {/* ---- RIGHT: the start card --------------------------------------- */}
+      {/* ---- RIGHT: the start card (or the share card after a gated seed) - */}
       <section className="hero-form">
+        {share ? (
+          <div className="start share-card">
+            <h2 className="start-title">Share with your team</h2>
+            <p className="start-sub">
+              Drop this link in your team chat. Each traveler opens it and
+              sends their passport — nothing to type by hand.
+            </p>
+
+            <label className="constraint-field">
+              <span className="constraint-k">Invite link</span>
+              <input
+                type="text"
+                readOnly
+                value={
+                  share.invite_token
+                    ? `https://t.me/WaypointBot?start=${share.invite_token}`
+                    : ""
+                }
+                onFocus={(e) => e.currentTarget.select()}
+              />
+            </label>
+
+            <label className="constraint-field">
+              <span className="constraint-k">Your release code (keep private)</span>
+              <input
+                type="text"
+                readOnly
+                value={share.confirmation_code ?? ""}
+                onFocus={(e) => e.currentTarget.select()}
+              />
+            </label>
+
+            <div className="note-soft">
+              Travelers verified:{" "}
+              <b>
+                0 /{" "}
+                {Number.isInteger(teamSize)
+                  ? Math.min(Math.max(teamSize, 1), 50)
+                  : 1}
+              </b>{" "}
+              — you'll enter the code on the desk once everyone's in.
+            </div>
+
+            <button
+              className="btn primary start-btn"
+              onClick={() => router.push(`/desk/${share.desk_id}`)}
+            >
+              Open the desk →
+            </button>
+          </div>
+        ) : (
         <div className="start">
         <h2 className="start-title">
           Set your limits
@@ -244,6 +314,7 @@ export default function MandatePage() {
           live — you'll watch every check and booking as it happens.
         </div>
         </div>
+        )}
       </section>
     </main>
   );

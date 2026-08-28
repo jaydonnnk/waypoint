@@ -14,9 +14,13 @@ agent started still sees every event.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import math
 import os
+import re
+import secrets
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Literal
@@ -92,6 +96,54 @@ HUMAN_WAIVER_MARKER = "human waiver"
 # One store + one agent for the process. AGENT must stay a module-level
 # attribute so tests can monkeypatch it (stub-client DI).
 STORE = DeskStore()
+
+# ---- Waybot invite gate (S1) --------------------------------------------
+# The deep-link token is desk-scoped and single-purpose (binds chat->desk;
+# it can NOT release — release needs the code). 16 random bytes -> a
+# ~22-char URL-safe [A-Za-z0-9_-] string, well under Telegram's 64-char
+# deep-link limit. The confirmation code is a short human string the
+# manager types; only a salted hash is stored (plaintext never persisted).
+_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _new_invite_token() -> str:
+    token = secrets.token_urlsafe(16)
+    # Guard the contract at the source: URL-safe alphabet, <=64 chars.
+    assert _TOKEN_RE.fullmatch(token), f"non-url-safe token: {token!r}"
+    return token
+
+
+def _new_confirmation_code() -> str:
+    """A short, unambiguous release code (8 hex chars, uppercased)."""
+    return secrets.token_hex(4).upper()
+
+
+def _hash_code(code: str) -> str:
+    """Salted SHA-256 of the code -> 'salt$digest'. Plaintext never stored."""
+    salt = secrets.token_hex(16)
+    digest = hashlib.sha256(f"{salt}{code}".encode()).hexdigest()
+    return f"{salt}${digest}"
+
+
+def _verify_code(code: str, stored: str | None) -> bool:
+    """Constant-time check of a plaintext code against the stored hash."""
+    if not stored or "$" not in stored:
+        return False
+    salt, digest = stored.split("$", 1)
+    candidate = hashlib.sha256(f"{salt}{code}".encode()).hexdigest()
+    return hmac.compare_digest(candidate, digest)
+
+
+def _start_cycle(desk_id: str) -> DeskState:
+    """THE shared resume primitive: register a DeskState and fire the cycle
+    task (the pre-S1 two-liner, extracted). Persistence has already
+    preceded this, so the cycle's first re-read of the world finds its
+    data. Retains the task handle on DeskState so it isn't GC'd mid-flight.
+    Called by the ungated seed path AND by confirm (and later approve)."""
+    state = DeskState(desk_id=desk_id)
+    DESKS[desk_id] = state
+    state.task = asyncio.create_task(_run_desk(state))
+    return state
 
 
 def build_atlas():
@@ -280,6 +332,19 @@ class SeedRequest(BaseModel):
     team_size: int = Field(default=1, ge=1, le=50)
     destination_label: str = Field(default="")
     trip_purpose: str = Field(default="")
+    # Waybot invite gate (S1). Default False keeps the pre-S1 seed EXACTLY:
+    # lifecycle 'released', no token/code, cycle starts immediately. When
+    # True, the seed holds the desk in 'awaiting_travelers' with an invite
+    # token + hashed release code and does NOT start the cycle — /confirm
+    # starts it once the manager enters the code.
+    gated: bool = Field(default=False)
+
+
+class ConfirmRequest(BaseModel):
+    """The manager's release code (plaintext, checked against the stored
+    hash). Body of POST /desk/{id}/confirm."""
+
+    code: str
 
 
 @router.post("/desk/seed")
@@ -293,6 +358,12 @@ async def seed_desk(request: SeedRequest | None = None) -> dict:
 
     The body is OPTIONAL: no body (or a partial one) falls back to the
     historical defaults, keeping pre-constraint callers byte-compatible.
+
+    Invite gate (S1): `gated=False` (default) is the pre-S1 path EXACTLY —
+    lifecycle 'released', no token/code, cycle started here. `gated=True`
+    holds the desk in 'awaiting_travelers' with an invite token + hashed
+    release code and does NOT start the cycle (the /confirm route starts
+    it), returning the token + one-time plaintext code alongside the id.
     """
     req = request or SeedRequest()
     mandate, positions, budgets = fixture.seeded_portfolio(
@@ -304,14 +375,66 @@ async def seed_desk(request: SeedRequest | None = None) -> dict:
         destination_label=req.destination_label,
         trip_purpose=req.trip_purpose,
     )
+
+    if not req.gated:
+        # Pre-S1 path, byte-unchanged: persist 'released', start the cycle,
+        # return only the desk_id.
+        desk_id = await asyncio.to_thread(
+            STORE.seed_desk, mandate, positions, budgets
+        )
+        _start_cycle(desk_id)
+        return {"desk_id": desk_id}
+
+    # Gated path: hold in 'awaiting_travelers' with token + code hash; do
+    # NOT start the cycle. The plaintext code is returned exactly once —
+    # only its hash is stored.
+    invite_token = _new_invite_token()
+    confirmation_code = _new_confirmation_code()
     desk_id = await asyncio.to_thread(
-        STORE.seed_desk, mandate, positions, budgets
+        STORE.seed_desk,
+        mandate,
+        positions,
+        budgets,
+        "awaiting_travelers",
+        invite_token,
+        _hash_code(confirmation_code),
     )
-    state = DeskState(desk_id=desk_id)
-    DESKS[desk_id] = state
-    # Retain the handle on DeskState so the task isn't GC'd mid-flight.
-    state.task = asyncio.create_task(_run_desk(state))
-    return {"desk_id": desk_id}
+    return {
+        "desk_id": desk_id,
+        "invite_token": invite_token,
+        "confirmation_code": confirmation_code,
+    }
+
+
+@router.post("/desk/{desk_id}/confirm")
+async def confirm(desk_id: str, body: ConfirmRequest) -> dict:
+    """Release a gated desk: check the plaintext code against the stored
+    hash (constant-time). Wrong code -> 403, no state change. Right code
+    -> lifecycle 'released' + start the cycle via the shared resume
+    primitive. Unknown desk -> 404; an already-released desk -> 409 (the
+    gate is single-use in spirit — the cycle is already running)."""
+    try:
+        lifecycle = await asyncio.to_thread(STORE.get_lifecycle, desk_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="unknown desk")
+    if lifecycle != "awaiting_travelers":
+        # Already released/closed — nothing to confirm; do not restart.
+        raise HTTPException(status_code=409, detail="desk not awaiting confirm")
+
+    _token, code_hash = await asyncio.to_thread(STORE.get_invite, desk_id)
+    if not _verify_code(body.code, code_hash):
+        raise HTTPException(status_code=403, detail="wrong code")
+
+    # Atomic release (H1): the lifecycle flip IS the race guard. Two
+    # concurrent correct-code confirms both pass the checks above, but the
+    # CAS lets exactly one win — only the winner starts the cycle, so
+    # DESKS is never overwritten and no second _run_desk (double booking)
+    # is spawned. The loser is treated as a late/duplicate confirm (409).
+    released = await asyncio.to_thread(STORE.try_release, desk_id)
+    if not released:
+        raise HTTPException(status_code=409, detail="desk not awaiting confirm")
+    _start_cycle(desk_id)
+    return {"desk_id": desk_id, "lifecycle": "released"}
 
 
 @router.get("/desk/{desk_id}/stream")
@@ -345,11 +468,24 @@ async def stream(desk_id: str) -> StreamingResponse:
 
 @router.get("/desk/{desk_id}")
 async def desk_snapshot(desk_id: str) -> dict:
-    """Desk state snapshot: positions/ledger/budgets + the search meter."""
-    state = _get_state(desk_id)
-    snapshot = await asyncio.to_thread(STORE.desk_state, desk_id)
-    snapshot["meter"] = {"used": state.meter_used, "max": METER_MAX}
-    snapshot["done"] = state.done
+    """Desk state snapshot: positions/ledger/budgets + lifecycle + meter.
+
+    A gated desk in 'awaiting_travelers' has no live DeskState yet (the
+    cycle hasn't started), so fall back to a persisted-only snapshot with
+    a zeroed meter and done=False. This lets the share card / code-entry
+    panel render before release without a 404. An unknown desk still 404s.
+    """
+    state = DESKS.get(desk_id)
+    try:
+        snapshot = await asyncio.to_thread(STORE.desk_state, desk_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="unknown desk")
+    if state is not None:
+        snapshot["meter"] = {"used": state.meter_used, "max": METER_MAX}
+        snapshot["done"] = state.done
+    else:
+        snapshot["meter"] = {"used": 0, "max": METER_MAX}
+        snapshot["done"] = False
     return snapshot
 
 

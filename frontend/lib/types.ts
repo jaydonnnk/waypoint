@@ -42,6 +42,24 @@ export interface Budget {
   contingency: string;
 }
 
+// Waybot desk lifecycle (S1). Default 'released' == today's behavior: an
+// ungated desk seeds straight to 'released' and the cycle runs. A gated
+// desk holds in 'awaiting_travelers' until the manager enters the code.
+export type DeskLifecycle =
+  | "awaiting_travelers"
+  | "released"
+  | "pending_approval"
+  | "closed";
+
+// POST /api/desk/seed response. An ungated seed returns only { desk_id }
+// (byte-unchanged); a gated seed also returns the invite token + the
+// one-time plaintext confirmation code (the code is never returned again).
+export interface SeedResult {
+  desk_id: string;
+  invite_token?: string;
+  confirmation_code?: string;
+}
+
 export type DeskStatus = "closed" | "escalated" | "budget_exhausted" | "failed";
 
 export interface DeskResult {
@@ -94,6 +112,10 @@ export interface DeskSnapshot {
   budgets: Budget[];
   meter: { used: number; max: number };
   done: boolean;
+  // Waybot gate (S1) — additive. A gated desk reports 'awaiting_travelers'
+  // and a running verified count; an ungated desk reports 'released'/0.
+  lifecycle?: DeskLifecycle;
+  verified_count?: number;
 }
 
 // Per-rail provenance row on the meta event (S12, ADR 0006). ADDITIVE:

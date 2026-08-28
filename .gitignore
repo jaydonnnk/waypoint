@@ -16,6 +16,7 @@ npm-debug.log*
 # Databases (local dev)
 *.db
 *.sqlite3
+*.db.review-backup
 
 # OS / editor
 .DS_Store

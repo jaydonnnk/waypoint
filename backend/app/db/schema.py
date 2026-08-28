@@ -20,6 +20,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -48,6 +49,26 @@ class MandateRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )
+    # Waybot lifecycle gate (S1). DEFAULT 'released' so every pre-existing
+    # desk — and every ungated seed — keeps today's behavior exactly.
+    # awaiting_travelers | released | pending_approval | closed.
+    lifecycle: Mapped[str] = mapped_column(String, default="released")
+    # URL-safe [A-Za-z0-9_-] deep-link token (<=64); indexed for token->desk.
+    invite_token: Mapped[str | None] = mapped_column(
+        String, nullable=True, index=True
+    )
+    # Salted hash of the release code — plaintext is NEVER stored.
+    confirmation_code_hash: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
+    # G4 (S5): the offer the manager signed off, pinned for the resumed cycle.
+    approved_offer_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # G2 (S7): {airlines:[IATA], cabin, depart_after, arrive_by}; absent -> no filter.
+    policy_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # G4 re-approval cap (1) for the unbookable-pin edge (S5).
+    reapproval_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Confirmation-code attempt cap (5 -> reissue) (S4).
+    code_attempts: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class PositionRow(Base):
@@ -90,6 +111,46 @@ class LedgerRow(Base):
     )
     ref: Mapped[str | None] = mapped_column(String, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class TravelerRow(Base):
+    """One captured traveler on a desk (S3 write path). MRZ-derived fields
+    only — the raw passport image is never persisted. Purged at desk close."""
+
+    __tablename__ = "travelers"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    desk_id: Mapped[str] = mapped_column(ForeignKey("mandate.id"), index=True)
+    slot: Mapped[int] = mapped_column(Integer)  # 1..team_size
+    family_name: Mapped[str] = mapped_column(String)
+    given_name: Mapped[str] = mapped_column(String)
+    gender: Mapped[str] = mapped_column(String)          # "M"/"F"
+    birthday: Mapped[str] = mapped_column(String)        # "YYYY-MM-DD"
+    nationality: Mapped[str] = mapped_column(String)     # ISO-2
+    doc_type: Mapped[str] = mapped_column(String, default="PP")
+    doc_number: Mapped[str] = mapped_column(String)
+    issuing_country: Mapped[str] = mapped_column(String)
+    doc_expiry: Mapped[str] = mapped_column(String)      # "YYYY-MM-DD"
+    contact_email: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact_mobile: Mapped[str | None] = mapped_column(String, nullable=True)
+    verified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+
+
+class ChatBindingRow(Base):
+    """Binds one private Telegram chat to one traveler slot on one desk (S2),
+    so a re-sent photo updates the same slot rather than a new row."""
+
+    __tablename__ = "chat_bindings"
+    __table_args__ = (
+        # No two chats may claim the same slot on the same desk (M3 fix).
+        UniqueConstraint("desk_id", "slot", name="uq_chat_bindings_desk_slot"),
+    )
+
+    telegram_chat_id: Mapped[str] = mapped_column(String, primary_key=True)
+    desk_id: Mapped[str] = mapped_column(ForeignKey("mandate.id"), index=True)
+    slot: Mapped[int] = mapped_column(Integer)
 
 
 class BudgetRow(Base):

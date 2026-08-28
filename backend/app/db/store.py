@@ -14,10 +14,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 
 from app.db import database
-from app.db.schema import BudgetRow, LedgerRow, MandateRow, PositionRow
+from app.db.schema import (
+    BudgetRow,
+    ChatBindingRow,
+    LedgerRow,
+    MandateRow,
+    PositionRow,
+    TravelerRow,
+)
 from app.models import Budget, Mandate, Position
 
 # How much of the blotter `reload_desk` pulls back (newest-first tail).
@@ -111,11 +118,22 @@ class DeskStore:
         mandate: Mandate,
         positions: list[Position],
         budgets: list[Budget],
+        lifecycle: str = "released",
+        invite_token: str | None = None,
+        code_hash: str | None = None,
+        policy_json: str | None = None,
     ) -> str:
         """Persist the seeded portfolio. Returns the desk_id (= mandate.id).
 
         Honesty: one `adjust` ledger entry discloses that the cost bases are
         demo seeds, so the blotter itself carries the provenance note.
+
+        The gate args default to today's behavior EXACTLY: `lifecycle`
+        'released' (matching the schema default), no invite token, no code
+        hash. An ungated seed (no gate args) is byte-identical to the
+        pre-S1 write. A gated seed (Waybot) passes lifecycle
+        'awaiting_travelers' + token + code_hash so the cycle is held for
+        the confirm step.
         """
         with database.SessionLocal() as session:
             session.add(
@@ -130,6 +148,10 @@ class DeskStore:
                     destination_label=mandate.destination_label,
                     trip_purpose=mandate.trip_purpose,
                     created_at=mandate.created_at,
+                    lifecycle=lifecycle,
+                    invite_token=invite_token,
+                    confirmation_code_hash=code_hash,
+                    policy_json=policy_json,
                 )
             )
             for pos in positions:
@@ -322,11 +344,137 @@ class DeskStore:
             row.ticket_asserted = ticket_asserted
             session.commit()
 
+    def set_lifecycle(self, desk_id: str, lifecycle: str) -> None:
+        """Flip the desk lifecycle state. Raises KeyError for an unknown desk."""
+        with database.SessionLocal() as session:
+            row = session.get(MandateRow, desk_id)
+            if row is None:
+                raise KeyError(f"unknown desk: {desk_id}")
+            row.lifecycle = lifecycle
+            session.commit()
+
+    def try_release(self, desk_id: str) -> bool:
+        """Atomic compare-and-set: flip 'awaiting_travelers' -> 'released' in
+        ONE UPDATE and report whether THIS caller won. Returns True exactly
+        once per gated desk; a concurrent second correct-code confirm gets
+        rowcount 0 -> False, so only one caller ever reaches _start_cycle
+        (closes the check-then-act double-start race). An unknown or
+        already-released desk returns False (no exception — the caller has
+        already 404'd/409'd on the prior lifecycle read)."""
+        with database.SessionLocal() as session:
+            result = session.execute(
+                update(MandateRow)
+                .where(
+                    MandateRow.id == desk_id,
+                    MandateRow.lifecycle == "awaiting_travelers",
+                )
+                .values(lifecycle="released")
+            )
+            session.commit()
+            return result.rowcount == 1
+
+    def get_lifecycle(self, desk_id: str) -> str:
+        """Read the desk lifecycle state. Raises KeyError for an unknown desk."""
+        with database.SessionLocal() as session:
+            row = session.get(MandateRow, desk_id)
+            if row is None:
+                raise KeyError(f"unknown desk: {desk_id}")
+            return row.lifecycle
+
+    def get_invite(self, desk_id: str) -> tuple[str | None, str | None]:
+        """(invite_token, confirmation_code_hash) for a desk. Raises KeyError
+        for an unknown desk. The hash is the gate the confirm route checks;
+        the plaintext code is never stored, so it cannot be read back."""
+        with database.SessionLocal() as session:
+            row = session.get(MandateRow, desk_id)
+            if row is None:
+                raise KeyError(f"unknown desk: {desk_id}")
+            return row.invite_token, row.confirmation_code_hash
+
+    def verified_count(self, desk_id: str) -> int:
+        """How many travelers have been captured on this desk (S3 populates
+        the rows; S1 always reads 0)."""
+        with database.SessionLocal() as session:
+            return int(
+                session.execute(
+                    select(func.count())
+                    .select_from(TravelerRow)
+                    .where(TravelerRow.desk_id == desk_id)
+                ).scalar_one()
+            )
+
+    def bind_chat(
+        self, chat_id: str, token: str
+    ) -> tuple[str, int] | None:
+        """Resolve an invite token→desk and upsert a chat_bindings row.
+
+        Returns (desk_id, slot) on success; None if:
+        - token is unknown
+        - desk lifecycle is not 'awaiting_travelers' (already released/closed)
+        - desk has reached team_size bindings (full)
+
+        Slot assignment: if the chat already has a binding for this desk,
+        reuse the same slot (idempotent re-bind); otherwise assign the
+        next free slot (max existing slot + 1, or 1 if none).
+        """
+        with database.SessionLocal() as session:
+            # Look up the desk by invite_token.
+            mandate = session.execute(
+                select(MandateRow).where(MandateRow.invite_token == token)
+            ).scalar_one_or_none()
+            if mandate is None:
+                return None
+            desk_id = mandate.id
+
+            # Gate: only accept bindings while the desk is awaiting travelers.
+            if mandate.lifecycle != "awaiting_travelers":
+                return None
+
+            # Check for an existing binding (re-bind = same slot).
+            existing = session.get(ChatBindingRow, chat_id)
+            if existing is not None and existing.desk_id == desk_id:
+                return (desk_id, existing.slot)
+
+            # Gate: team_size cap — don't assign more slots than the desk allows.
+            bound_count = session.execute(
+                select(func.count())
+                .select_from(ChatBindingRow)
+                .where(ChatBindingRow.desk_id == desk_id)
+            ).scalar_one()
+            if bound_count >= mandate.team_size:
+                return None
+
+            # Assign next free slot for this desk.
+            max_slot = session.execute(
+                select(func.max(ChatBindingRow.slot)).where(
+                    ChatBindingRow.desk_id == desk_id
+                )
+            ).scalar()
+            slot = (max_slot or 0) + 1
+
+            # Upsert: if the chat was bound to a DIFFERENT desk, replace.
+            if existing is not None:
+                existing.desk_id = desk_id
+                existing.slot = slot
+            else:
+                session.add(
+                    ChatBindingRow(
+                        telegram_chat_id=chat_id,
+                        desk_id=desk_id,
+                        slot=slot,
+                    )
+                )
+            session.commit()
+            return (desk_id, slot)
+
     def desk_state(self, desk_id: str) -> dict:
         """Snapshot for GET /api/desk/{desk_id} (positions/ledger/budgets)."""
         mandate, positions, budgets, ledger_tail = self.reload_desk(desk_id)
+        lifecycle = self.get_lifecycle(desk_id)
         return {
             "desk_id": desk_id,
+            "lifecycle": lifecycle,
+            "verified_count": self.verified_count(desk_id),
             "mandate": mandate.model_dump(mode="json"),
             "positions": [p.model_dump(mode="json") for p in positions],
             "budgets": [b.model_dump(mode="json") for b in budgets],
