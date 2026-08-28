@@ -3,11 +3,11 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-08-21T17:47:41Z"
+exported_at: "2026-08-28T03:19:12Z"
 modules:
     "":
-        dir_name: Waypoint Workspace Root
-        title: Waypoint Workspace Root
+        dir_name: Waypoint Repository Root
+        title: Waypoint Repository Root
         scope:
             - .gitignore
             - skills-lock.json
@@ -17,8 +17,8 @@ modules:
         depends_on: []
         related_to: []
     docs:
-        dir_name: Waypoint Project Documentation & ADRs
-        title: Waypoint Project Documentation & ADRs
+        dir_name: Waypoint Project Documentation & Architecture Decision Records
+        title: Waypoint Project Documentation & Architecture Decision Records
         scope:
             - docs/
         source_files: []

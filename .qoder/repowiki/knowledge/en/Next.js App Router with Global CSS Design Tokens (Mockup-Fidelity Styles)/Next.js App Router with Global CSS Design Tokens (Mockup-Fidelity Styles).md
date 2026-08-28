@@ -8,8 +8,8 @@ source_files:
     - frontend/app/globals.css
     - frontend/app/layout.tsx
     - frontend/app/page.tsx
-    - frontend/app/recovering/[tripId]/page.tsx
-    - frontend/app/recovered/[tripId]/page.tsx
+    - frontend/app/desk/[deskId]/page.tsx
+    - frontend/app/close/[deskId]/page.tsx
     - frontend/package.json
 ---
 
@@ -22,8 +22,8 @@ The frontend is a Next.js 15 application using the App Router and React Server/C
 - `frontend/app/globals.css` — the sole source of visual style for the entire app (114 lines).
 - `frontend/app/layout.tsx` — imports `./globals.css` at the root so styles apply to every page.
 - `frontend/app/page.tsx` — Screen 1: "Trip disrupted" (mockup 01).
-- `frontend/app/recovering/[tripId]/page.tsx` — Screen 2: "Agent recovering" live stream (mockup 02).
-- `frontend/app/recovered/[tripId]/page.tsx` — Screen 3: "Recovery confirmed" outcome (mockup 03).
+- `frontend/app/desk/[deskId]/page.tsx` — Screen 2: "Agent recovering" live stream (mockup 02).
+- `frontend/app/close/[deskId]/page.tsx` — Screen 3: "Recovery confirmed" outcome (mockup 03).
 - `frontend/package.json` — confirms no styling framework dependencies beyond Next/React.
 - `docs/plans/waypoint/mockups/` — HTML mockup files that the CSS was ported from (see comment on line 1 of `globals.css`).
 

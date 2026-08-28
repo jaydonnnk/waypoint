@@ -3,8 +3,8 @@
 <cite>
 **Referenced Files in This Document**
 - [page.tsx](file://frontend/app/page.tsx)
-- [page.tsx](file://frontend/app/recovering/[tripId]/page.tsx)
-- [page.tsx](file://frontend/app/recovered/[tripId]/page.tsx)
+- [page.tsx](file://frontend/app/desk/[deskId]/page.tsx)
+- [page.tsx](file://frontend/app/close/[deskId]/page.tsx)
 - [types.ts](file://frontend/lib/types.ts)
 - [api.ts](file://frontend/lib/api.ts)
 - [format.ts](file://frontend/lib/format.ts)
@@ -68,12 +68,12 @@ API --> DB["SQLite"]
 **Diagram sources**
 - [routes.py:1-10](file://backend/app/api/routes.py#L1-L10)
 - [loop.py:1-9](file://backend/app/agent/loop.py#L1-L9)
-- [page.tsx:1-10](file://frontend/app/recovering/[tripId]/page.tsx#L1-L10)
+- [page.tsx:1-10](file://frontend/app/desk/[deskId]/page.tsx#L1-L10)
 
 **Section sources**
 - [routes.py:1-10](file://backend/app/api/routes.py#L1-L10)
 - [loop.py:1-9](file://backend/app/agent/loop.py#L1-L9)
-- [page.tsx:1-10](file://frontend/app/recovering/[tripId]/page.tsx#L1-L10)
+- [page.tsx:1-10](file://frontend/app/desk/[deskId]/page.tsx#L1-L10)
 
 ## Core Components
 - **RecoveryAgent**: Orchestrates the end-to-end recovery loop with guards (step budget, re-read/verify, assert outcome) and emits each step to the SSE stream.
@@ -96,8 +96,8 @@ Event phases mapped to agent steps:
 **Section sources**
 - [loop.py:35-176](file://backend/app/agent/loop.py#L35-L176)
 - [page.tsx:13-62](file://frontend/app/page.tsx#L13-L62)
-- [page.tsx:17-172](file://frontend/app/recovering/[tripId]/page.tsx#L17-L172)
-- [page.tsx:19-193](file://frontend/app/recovered/[tripId]/page.tsx#L19-L193)
+- [page.tsx:17-172](file://frontend/app/desk/[deskId]/page.tsx#L17-L172)
+- [page.tsx:19-193](file://frontend/app/close/[deskId]/page.tsx#L19-L193)
 
 ## Architecture Overview
 The SSE stream exposes the agent's live reasoning to the UI through a complete three-screen user journey. The flow begins when a disruption is injected or received via webhook, triggering the agent loop. Each step is emitted as an SSE event; the frontend consumes these events to update the UI incrementally across all three screens.
@@ -117,7 +117,7 @@ participant DB as "SQLite"
 U->>S1 : View cancelled trip
 S1->>API : POST /api/disruptions
 API-->>S1 : {trip_id}
-S1->>S2 : Navigate to /recovering/{tripId}
+S1->>S2 : Navigate to /desk/{deskId}
 S2->>API : GET /api/trips/{id}/stream (SSE)
 API->>AG : run(trip_id, emit)
 AG->>AT : search(broken leg)
@@ -139,8 +139,8 @@ API-->>S3 : Final RecoveryResult
 
 **Diagram sources**
 - [page.tsx:18-30](file://frontend/app/page.tsx#L18-L30)
-- [page.tsx:30-69](file://frontend/app/recovering/[tripId]/page.tsx#L30-L69)
-- [page.tsx:26-38](file://frontend/app/recovered/[tripId]/page.tsx#L26-L38)
+- [page.tsx:30-69](file://frontend/app/desk/[deskId]/page.tsx#L30-L69)
+- [page.tsx:26-38](file://frontend/app/close/[deskId]/page.tsx#L26-L38)
 - [routes.py:80-138](file://backend/app/api/routes.py#L80-L138)
 - [loop.py:42-167](file://backend/app/agent/loop.py#L42-L167)
 
@@ -169,8 +169,8 @@ API-->>S3 : Final RecoveryResult
 
 **Section sources**
 - [page.tsx:13-62](file://frontend/app/page.tsx#L13-L62)
-- [page.tsx:17-172](file://frontend/app/recovering/[tripId]/page.tsx#L17-L172)
-- [page.tsx:19-193](file://frontend/app/recovered/[tripId]/page.tsx#L19-L193)
+- [page.tsx:17-172](file://frontend/app/desk/[deskId]/page.tsx#L17-L172)
+- [page.tsx:19-193](file://frontend/app/close/[deskId]/page.tsx#L19-L193)
 
 ### SSE Stream Contract and Event Types
 - **Connection**:
@@ -204,12 +204,12 @@ Error["Emit 'error' event<br/>handle failure"] --> End
 ```
 
 **Diagram sources**
-- [page.tsx:30-69](file://frontend/app/recovering/[tripId]/page.tsx#L30-L69)
+- [page.tsx:30-69](file://frontend/app/desk/[deskId]/page.tsx#L30-L69)
 - [types.ts:92-100](file://frontend/lib/types.ts#L92-L100)
 - [loop.py:42-176](file://backend/app/agent/loop.py#L42-L176)
 
 **Section sources**
-- [page.tsx:30-69](file://frontend/app/recovering/[tripId]/page.tsx#L30-L69)
+- [page.tsx:30-69](file://frontend/app/desk/[deskId]/page.tsx#L30-L69)
 - [types.ts:92-100](file://frontend/lib/types.ts#L92-L100)
 - [routes.py:95-121](file://backend/app/api/routes.py#L95-L121)
 
@@ -253,12 +253,12 @@ end
 ```
 
 **Diagram sources**
-- [page.tsx:30-69](file://frontend/app/recovering/[tripId]/page.tsx#L30-L69)
+- [page.tsx:30-69](file://frontend/app/desk/[deskId]/page.tsx#L30-L69)
 - [api.ts:17-20](file://frontend/lib/api.ts#L17-L20)
 
 **Section sources**
-- [page.tsx:30-69](file://frontend/app/recovering/[tripId]/page.tsx#L30-L69)
-- [page.tsx:26-38](file://frontend/app/recovered/[tripId]/page.tsx#L26-L38)
+- [page.tsx:30-69](file://frontend/app/desk/[deskId]/page.tsx#L30-L69)
+- [page.tsx:26-38](file://frontend/app/close/[deskId]/page.tsx#L26-L38)
 - [api.ts:1-30](file://frontend/lib/api.ts#L1-L30)
 
 ### Message Schema for Agent Progress Updates
@@ -304,8 +304,8 @@ These shapes align with the domain models and provide compile-time safety throug
 
 **Section sources**
 - [page.tsx:18-30](file://frontend/app/page.tsx#L18-L30)
-- [page.tsx:30-69](file://frontend/app/recovering/[tripId]/page.tsx#L30-L69)
-- [page.tsx:26-38](file://frontend/app/recovered/[tripId]/page.tsx#L26-L38)
+- [page.tsx:30-69](file://frontend/app/desk/[deskId]/page.tsx#L30-L69)
+- [page.tsx:26-38](file://frontend/app/close/[deskId]/page.tsx#L26-L38)
 - [routes.py:124-138](file://backend/app/api/routes.py#L124-L138)
 
 ### Performance Optimization Techniques
@@ -405,15 +405,15 @@ API --> DB["SQLite"]
 
 **Diagram sources**
 - [page.tsx:13-62](file://frontend/app/page.tsx#L13-L62)
-- [page.tsx:17-172](file://frontend/app/recovering/[tripId]/page.tsx#L17-L172)
-- [page.tsx:19-193](file://frontend/app/recovered/[tripId]/page.tsx#L19-L193)
+- [page.tsx:17-172](file://frontend/app/desk/[deskId]/page.tsx#L17-L172)
+- [page.tsx:19-193](file://frontend/app/close/[deskId]/page.tsx#L19-L193)
 - [routes.py:80-138](file://backend/app/api/routes.py#L80-L138)
 - [loop.py:35-176](file://backend/app/agent/loop.py#L35-L176)
 
 **Section sources**
 - [page.tsx:13-62](file://frontend/app/page.tsx#L13-L62)
-- [page.tsx:17-172](file://frontend/app/recovering/[tripId]/page.tsx#L17-L172)
-- [page.tsx:19-193](file://frontend/app/recovered/[tripId]/page.tsx#L19-L193)
+- [page.tsx:17-172](file://frontend/app/desk/[deskId]/page.tsx#L17-L172)
+- [page.tsx:19-193](file://frontend/app/close/[deskId]/page.tsx#L19-L193)
 - [routes.py:80-138](file://backend/app/api/routes.py#L80-L138)
 - [loop.py:35-176](file://backend/app/agent/loop.py#L35-L176)
 
@@ -460,8 +460,8 @@ API --> DB["SQLite"]
   - Test navigation between all three screens
 
 **Section sources**
-- [page.tsx:30-69](file://frontend/app/recovering/[tripId]/page.tsx#L30-L69)
-- [page.tsx:26-38](file://frontend/app/recovered/[tripId]/page.tsx#L26-L38)
+- [page.tsx:30-69](file://frontend/app/desk/[deskId]/page.tsx#L30-L69)
+- [page.tsx:26-38](file://frontend/app/close/[deskId]/page.tsx#L26-L38)
 - [routes.py:95-138](file://backend/app/api/routes.py#L95-L138)
 
 ## Conclusion
@@ -486,13 +486,13 @@ E --> G["Screen 3: Recovery confirmed"]
 
 **Diagram sources**
 - [page.tsx:13-62](file://frontend/app/page.tsx#L13-L62)
-- [page.tsx:17-172](file://frontend/app/recovering/[tripId]/page.tsx#L17-L172)
-- [page.tsx:19-193](file://frontend/app/recovered/[tripId]/page.tsx#L19-L193)
+- [page.tsx:17-172](file://frontend/app/desk/[deskId]/page.tsx#L17-L172)
+- [page.tsx:19-193](file://frontend/app/close/[deskId]/page.tsx#L19-L193)
 
 **Section sources**
 - [page.tsx:13-62](file://frontend/app/page.tsx#L13-L62)
-- [page.tsx:17-172](file://frontend/app/recovering/[tripId]/page.tsx#L17-L172)
-- [page.tsx:19-193](file://frontend/app/recovered/[tripId]/page.tsx#L19-L193)
+- [page.tsx:17-172](file://frontend/app/desk/[deskId]/page.tsx#L17-L172)
+- [page.tsx:19-193](file://frontend/app/close/[deskId]/page.tsx#L19-L193)
 
 ### Build Slices and SSE Scope
 - **Slice 1**: Establishes the SSE pipe with canned steps to prove the front-to-back streaming path

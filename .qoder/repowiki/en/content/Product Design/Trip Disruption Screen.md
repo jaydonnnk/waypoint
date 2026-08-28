@@ -7,8 +7,8 @@
 - [03-recovery-confirmed.html](file://docs/plans/waypoint/mockups/03-recovery-confirmed.html)
 - [routes.py](file://backend/app/api/routes.py)
 - [page.tsx](file://frontend/app/page.tsx)
-- [recovering page.tsx](file://frontend/app/recovering/[tripId]/page.tsx)
-- [recovered page.tsx](file://frontend/app/recovered/[tripId]/page.tsx)
+- [desk page.tsx](file://frontend/app/desk/[deskId]/page.tsx)
+- [close page.tsx](file://frontend/app/close/[deskId]/page.tsx)
 - [api.ts](file://frontend/lib/api.ts)
 - [02-architecture.md](file://docs/plans/waypoint/02-architecture.md)
 - [03-program-design.md](file://docs/plans/waypoint/03-program-design.md)
@@ -205,7 +205,7 @@ Extensibility:
 
 **Section sources**
 - [02-agent-recovering.html:1-64](file://docs/plans/waypoint/mockups/02-agent-recovering.html#L1-L64)
-- [recovering page.tsx:17-172](file://frontend/app/recovering/[tripId]/page.tsx#L17-L172)
+- [desk page.tsx](file://frontend/app/desk/[deskId]/page.tsx)
 - [routes.py:142-168](file://backend/app/api/routes.py#L142-L168)
 
 ### Recovered Screen
@@ -243,7 +243,7 @@ Extensibility:
 
 **Section sources**
 - [03-recovery-confirmed.html:1-63](file://docs/plans/waypoint/mockups/03-recovery-confirmed.html#L1-L63)
-- [recovered page.tsx:19-193](file://frontend/app/recovered/[tripId]/page.tsx#L19-L193)
+- [close page.tsx](file://frontend/app/close/[deskId]/page.tsx)
 
 ## Dependency Analysis
 **Updated**: The Trip Disruption Screen now depends on desk-based architecture:

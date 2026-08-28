@@ -12,16 +12,18 @@
 - [models.py](file://backend/app/models.py)
 - [fixture.py](file://backend/app/fixture.py)
 - [routes.py](file://backend/app/api/routes.py)
+- [schema.py](file://backend/app/db/schema.py)
+- [store.py](file://backend/app/db/store.py)
+- [brain.py](file://backend/app/agent/brain.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated core mental model from visa recovery to corporate travel treasury with money management
-- Added curated volatility priors and search budget metering concepts
-- Enhanced risk management with authority caps and sophisticated escalation mechanisms
-- Expanded two-gates pattern application to financial operations
-- Added new components: DeskBrain, Auditor, and enhanced Atlas write path
-- Updated architecture to reflect first real database writes and settlement operations
+- Enhanced budget management with configurable authority caps and contingency percentages
+- Added trip context fields (team_size, destination_label, trip_purpose) for better portfolio tracking
+- Improved database schema with idempotent backfill functionality and enhanced audit trail
+- Updated seed API to support dynamic budget configuration and trip metadata
+- Enhanced DeskStore with persistent budget consumption tracking across cycles
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -38,7 +40,7 @@
 ## Introduction
 This document describes the program design for Waypoint's evolution from visa-aware trip recovery to a corporate travel treasury system with sophisticated money management capabilities. The system applies the proven two-gates architecture to financial operations, combining open AI reasoning with fail-closed execution safety.
 
-**Updated** The system now orchestrates portfolio-level discretionary timing calls over trips, managing book-now-vs-hold decisions with curated volatility priors, authority caps, and search budget metering while maintaining strict separation between advice and execution.
+**Updated** The system now orchestrates portfolio-level discretionary timing calls over trips, managing book-now-vs-hold decisions with curated volatility priors, authority caps, and search budget metering while maintaining strict separation between advice and execution. Enhanced budget management now supports configurable caps and contingency percentages, while trip context fields provide better portfolio organization and reporting.
 
 The core mental model extends ADR 0003's split to money: the desk brain sees every position (marks, priors, meter state, remaining budget, contingency) while deterministic code owns all mechanical settlement operations with re-checked authority caps after LLM picks.
 
@@ -49,7 +51,7 @@ The core mental model extends ADR 0003's split to money: the desk brain sees eve
 ## Project Structure
 Waypoint has evolved into a dual-purpose system supporting both trip recovery and corporate travel treasury operations within one repository:
 
-**Updated** The backend now hosts the desk loop, desk brain (judgment), Atlas write path, and first real database writes for mandate management, positions tracking, ledger accounting, and budget allocation.
+**Updated** The backend now hosts the desk loop, desk brain (judgment), Atlas write path, and first real database writes for mandate management, positions tracking, ledger accounting, and budget allocation with enhanced idempotent backfill functionality.
 
 ```mermaid
 graph TB
@@ -64,6 +66,7 @@ Auditor["Risk Officer<br/>blotter analysis"]
 Rules["Rules Engine<br/>Rule protocol + registry"]
 Atlas["AtlasClient<br/>search/verify/order/pay/query"]
 Store["Store<br/>SQLite persistence<br/>mandate/positions/ledger/budgets"]
+DB["Database<br/>Enhanced schema<br/>Idempotent backfill"]
 end
 FE --> API
 API --> DeskAgent
@@ -72,6 +75,7 @@ DeskAgent --> Rules
 DeskAgent --> Auditor
 DeskAgent --> Atlas
 DeskAgent --> Store
+Store --> DB
 ```
 
 **Diagram sources**
@@ -91,7 +95,7 @@ DeskAgent --> Store
 - **Risk Officer (Auditor)**: Reads blotter to challenge trades during weekly close; provides compliance oversight.
 - **Enhanced Rules Engine**: Protocol-based Rule interface returning 3-state verdicts with reason and provenance; now includes financial rules.
 - **Expanded AtlasClient**: Wraps forked skill for search, verify, order creation, payment, seat selection, and order status retrieval with conditional confirm-price logic.
-- **Database Store**: Typed persistence for mandate, positions, ledger entries, budgets, rule_verdicts, decisions, and orders.
+- **Database Store**: Typed persistence for mandate, positions, ledger entries, budgets, rule_verdicts, decisions, and orders with idempotent backfill support.
 
 Key types now include Mandate, Position, DeskAction, DeskResult, VerifyResult, and OrderRef that enforce the execute wall for financial operations.
 
@@ -115,7 +119,10 @@ participant Rules as "Rules Engine"
 participant Auditor as "Risk Officer"
 participant Atlas as "AtlasClient"
 participant Store as "Store"
+participant DB as "Database"
 User->>API : POST /api/desk/seed
+API->>Store : seed_desk(mandate, positions, budgets)
+Store->>DB : persist with idempotent backfill
 API->>Agent : run(desk_id, emit)
 Agent->>Store : reload_desk(desk_id)
 loop For each position (meter-gated)
@@ -185,6 +192,34 @@ Settle --> End(["End Cycle"])
 - [0004-two-gates-and-curated-priors-applied-to-money.md:12-17](file://docs/adr/0004-two-gates-and-curated-priors-applied-to-money.md#L12-L17)
 - [03-program-design.md:3-5](file://docs/plans/waypoint/03-program-design.md#L3-L5)
 
+### Enhanced Budget Management and Trip Context
+**Updated** The system now supports sophisticated budget management with configurable parameters and enhanced trip context:
+
+- **Configurable Authority Caps**: Dynamic authority limits per desk cycle, allowing different risk profiles for different portfolios
+- **Contingency Percentage Management**: Configurable contingency funds (default 5%, range 0-25%) for handling price increases
+- **Trip Context Fields**: Team size, destination labels, and trip purposes for better portfolio organization and reporting
+- **Persistent Budget Tracking**: Budget consumption persists across cycles through idempotent backfill functionality
+
+```mermaid
+flowchart TD
+SeedRequest["Seed Request<br/>budget_total, authority_cap,<br/>contingency_pct, team_size,<br/>destination_label, trip_purpose"] --> Validate["Validate Parameters<br/>Bounds checking<br/>Type validation"]
+Validate --> GeneratePortfolio["Generate Portfolio<br/>Seeded positions<br/>Curated priors"]
+GeneratePortfolio --> Persist["Persist to Database<br/>Idempotent backfill<br/>Budget allocation"]
+Persist --> StartCycle["Start Desk Cycle<br/>Load mandate<br/>Calculate remainders"]
+StartCycle --> Monitor["Monitor Budget Usage<br/>Track spent amounts<br/>Update contingency"]
+Monitor --> Report["Report Status<br/>P&L calculation<br/>Loss admission"]
+```
+
+**Diagram sources**
+- [routes.py:269-314](file://backend/app/api/routes.py#L269-L314)
+- [fixture.py:60-190](file://backend/app/fixture.py#L60-L190)
+- [store.py:109-178](file://backend/app/db/store.py#L109-L178)
+
+**Section sources**
+- [routes.py:269-314](file://backend/app/api/routes.py#L269-L314)
+- [fixture.py:60-190](file://backend/app/fixture.py#L60-L190)
+- [store.py:109-178](file://backend/app/db/store.py#L109-L178)
+
 ### DeskAgent Orchestration with Enhanced Guards
 **Updated** The DeskAgent now manages portfolio-level operations with sophisticated risk controls:
 
@@ -210,7 +245,7 @@ class DeskAgent {
 -atlas AtlasClient
 -brain DeskBrain
 -auditor RiskOfficer
--store Store
+-store DeskStore
 -step_budget int
 }
 class DeskResult {
@@ -236,16 +271,17 @@ class AtlasClient {
 +order_status(...)
 +seat_select(...)
 }
-class Store {
+class DeskStore {
 +reload_desk(desk_id)
-+update_mark(position, offers)
-+record_trade(...)
-+reconcile(...)
++update_marks(desk_id, marks)
++settle(desk_id, entries, spend, contingency_used)
++mark_booked(position_id, order_no, ticket_asserted)
++seed_desk(mandate, positions, budgets)
 }
 DeskAgent --> DeskBrain : "uses"
 DeskAgent --> RiskOfficer : "uses"
 DeskAgent --> AtlasClient : "uses"
-DeskAgent --> Store : "uses"
+DeskAgent --> DeskStore : "uses"
 DeskAgent --> DeskResult : "returns"
 ```
 
@@ -270,7 +306,6 @@ CheckMeter --> |Yes| Search["AtlasClient.search(route, date)"]
 CheckMeter --> |No| StaleMark["Use stale mark<br/>Flag uncertainty<br/>in UI"]
 Search --> UpdateMeter["meter--<br/>Update position mark"]
 UpdateMeter --> Process["Process offers<br/>for judgment"]
-StaleMark --> Process
 Process --> Judge["DeskBrain.judge()<br/>With priors + meter state"]
 Judge --> Decision{"Book/Hold/Escalate?"}
 Decision --> |Book| Execute["Execute with authority cap check"]
@@ -332,15 +367,18 @@ Agent-->>Agent : Emit P&L, losses admitted
 - [03-program-design.md:96-108](file://docs/plans/waypoint/03-program-design.md#L96-L108)
 - [02-architecture.md:38-41](file://docs/plans/waypoint/02-architecture.md#L38-L41)
 
-### Database Schema and Audit Trail
-**Updated** First real database writes provide comprehensive audit trail for financial operations:
+### Enhanced Database Schema and Audit Trail
+**Updated** First real database writes provide comprehensive audit trail for financial operations with idempotent backfill:
 
 - **Tables**: mandate, positions, ledger, budgets, plus existing rule_verdicts, decisions, and orders.
+- **Enhanced Mandate Schema**: Added team_size, destination_label, trip_purpose fields for trip context
+- **Idempotent Backfill**: Seed operations are idempotent, preventing duplicate entries on restarts
 - **Purpose**: Persist mandate constraints, position tracking, complete transaction history, and budget allocation to provide comprehensive audit trail of agent reasoning and outcomes.
 - **Queries**: Seed mandate and portfolio; update position marks; record trades, allocations, reconciliations, and losses; track budget consumption.
 
 **Section sources**
 - [02-architecture.md:25-31](file://docs/plans/waypoint/02-architecture.md#L25-L31)
+- [schema.py:33-107](file://backend/app/db/schema.py#L33-L107)
 
 ### Risk Officer and Weekly Close
 **Updated** New auditor component provides compliance oversight:
@@ -377,7 +415,7 @@ Agent["DeskAgent"] --> Brain["DeskBrain"]
 Agent --> Auditor["Risk Officer"]
 Agent --> Rules["Rules Engine"]
 Agent --> Atlas["AtlasClient"]
-Agent --> Store["Store"]
+Agent --> Store["DeskStore"]
 Brain --> Priors["Curated Priors"]
 Auditor --> Blotter["Blotter Data"]
 Rules --> Data["Curated Data<br/>YAML/CSV"]
@@ -401,7 +439,7 @@ Store --> DB["SQLite Database"]
 - **Minimal AI usage**: Only judgment uses LLM; deterministic steps (rules, math, booking) avoid unnecessary latency.
 - **Conditional operations**: Confirm-price only on price increases; seat selection only when savings available.
 - **Data freshness**: Curated data freshness windows reduce uncertainty and prevent costly mistakes from stale entries.
-- **Database efficiency**: First real writes optimized for audit trail without impacting performance.
+- **Database efficiency**: First real writes optimized for audit trail without impacting performance; idempotent operations prevent redundant work.
 
 ## Troubleshooting Guide
 **Updated** Common failure modes now include financial operations:
@@ -413,6 +451,7 @@ Store --> DB["SQLite Database"]
 - **Step budget exceeded**: Loop stopped early; increase budget or optimize search/rules.
 - **Price change handling**: PRICE_CHANGED → absorb-from-contingency vs re-quote; never create second order.
 - **Seat selection failures**: SEAT_UNAVAILABLE → degrade to ledger-only allocation; continue with order creation.
+- **Database backfill issues**: Idempotent seed operations should handle restarts gracefully; check for duplicate entries.
 
 **Section sources**
 - [03-program-design.md:113-131](file://docs/plans/waypoint/03-program-design.md#L113-L131)
@@ -424,7 +463,9 @@ Store --> DB["SQLite Database"]
 - **Advise gate**: Open reasoning over all positions with transparent labeling, curated priors, and comprehensive narration including admitted losses.
 - **Execute gate**: Fail-closed enforcement ensuring only fully allowed offers within authority caps are auto-booked, with sophisticated escalation mechanisms.
 - **Enhanced Risk Management**: Authority caps, search budget metering, and curated volatility priors provide robust financial controls.
-- **First Real Database Writes**: Comprehensive audit trail through mandate, positions, ledger, and budgets tables.
+- **First Real Database Writes**: Comprehensive audit trail through mandate, positions, ledger, and budgets tables with idempotent backfill support.
+- **Configurable Budget Management**: Dynamic authority caps and contingency percentages allow flexible portfolio management.
+- **Enhanced Trip Context**: Team size, destination labels, and trip purposes improve portfolio organization and reporting.
 
 The DeskAgent orchestrates discovery, validation, judgment, and booking with strong guards, while the desk brain and curated data provide sophisticated financial intelligence. This design balances agentic flexibility with deterministic safety, delivering reliable portfolio management under real-world constraints.
 
@@ -437,11 +478,18 @@ The DeskAgent orchestrates discovery, validation, judgment, and booking with str
   - DASHSCOPE_API_KEY: Qwen access key.
   - WAYPOINT_PUBLIC_URL: Public URL for Atlas webhook callback.
   - Atlas sandbox credentials via OS keyring; env configured for sandbox mode.
+  - WAYPOINT_LIVE_BOOKING: Controls live booking mode.
+  - WAYPOINT_INJECT_SCENARIO: Controls demo scenario injection.
+  - WAYPOINT_ESCALATION_WAIT: Configures escalation timeout.
 - **Financial Parameters**:
-  - authority_cap: Maximum single transaction amount
-  - budget_total: Total portfolio budget
-  - contingency_pct: Contingency fund percentage
+  - authority_cap: Maximum single transaction amount (configurable per seed)
+  - budget_total: Total portfolio budget (configurable per seed)
+  - contingency_pct: Contingency fund percentage (0-25%, default 5%)
   - search_meter_limit: 20 searches per cycle
+- **Trip Context Fields**:
+  - team_size: Number of travelers (1-50, default 1)
+  - destination_label: Free-text destination description
+  - trip_purpose: Business purpose classification
 - **Data files**:
   - Curated volatility priors per route type in fixture.py
   - IATA mappings for geography
@@ -453,6 +501,7 @@ The DeskAgent orchestrates discovery, validation, judgment, and booking with str
 **Section sources**
 - [02-architecture.md:92-95](file://docs/plans/waypoint/02-architecture.md#L92-L95)
 - [03-program-design.md:31-34](file://docs/plans/waypoint/03-program-design.md#L31-L34)
+- [routes.py:269-283](file://backend/app/api/routes.py#L269-L283)
 
 ### Key Function Signatures and Return Values
 **Updated** Enhanced function signatures for financial operations:
@@ -471,19 +520,30 @@ The DeskAgent orchestrates discovery, validation, judgment, and booking with str
   - Returns payment_confirmation_id and order_no (single-use)
 - **RiskOfficer.read(blotter) -> TradeChallenge**
   - Generates compliance narrative for weekly close
+- **DeskStore.seed_desk(mandate, positions, budgets) -> str**
+  - Persists portfolio with idempotent backfill
+  - Returns desk_id (= mandate.id)
+- **DeskStore.settle(desk_id, entries, spend, contingency_used) -> None**
+  - Updates budget consumption persistently
+  - Applies spend and contingency used to budget lines
 
 **Section sources**
 - [03-program-design.md:60-80](file://docs/plans/waypoint/03-program-design.md#L60-L80)
+- [store.py:109-178](file://backend/app/db/store.py#L109-L178)
+- [store.py:257-311](file://backend/app/db/store.py#L257-L311)
 
 ### Call Stack Summary
 **Updated** Enhanced call stack for desk cycles:
 
 - **POST /api/desk/seed**
-  - DeskAgent.run(desk_id, emit)
+  - Validate request parameters (budget_total, authority_cap, contingency_pct, team_size, destination_label, trip_purpose)
+  - fixture.seeded_portfolio(inject_scenario, budget_total, authority_cap, contingency_pct, team_size, destination_label, trip_purpose)
+  - STORE.seed_desk(mandate, positions, budgets)
+  - AGENT.run(desk_id, emit)
     - Store.reload_desk(desk_id)
     - For each position (meter-gated):
       - AtlasClient.search(route, date) -> offers
-      - Store.update_mark(position, offers)
+      - Store.update_marks(desk_id, marks)
     - DeskBrain.judge(positions, priors, meter_left, budget_left) -> actions
     - For each action:
       - Authority cap check -> escalate if over cap
@@ -496,3 +556,4 @@ The DeskAgent orchestrates discovery, validation, judgment, and booking with str
 
 **Section sources**
 - [03-program-design.md:82-111](file://docs/plans/waypoint/03-program-design.md#L82-L111)
+- [routes.py:285-314](file://backend/app/api/routes.py#L285-L314)

@@ -15,8 +15,8 @@
 - [test_slice1_pipe.py](file://backend/tests/test_slice1_pipe.py)
 - [test_atlas_mapping.py](file://backend/tests/test_atlas_mapping.py)
 - [page.tsx](file://frontend/app/page.tsx)
-- [recovering_page.tsx](file://frontend/app/recovering/[tripId]/page.tsx)
-- [recovered_page.tsx](file://frontend/app/recovered/[tripId]/page.tsx)
+- [desk_page.tsx](file://frontend/app/desk/[deskId]/page.tsx)
+- [close_page.tsx](file://frontend/app/close/[deskId]/page.tsx)
 - [fixture.py](file://backend/app/fixture.py)
 </cite>
 

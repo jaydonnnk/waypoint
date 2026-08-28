@@ -2,28 +2,30 @@
 
 <cite>
 **Referenced Files in This Document**
-- [01-product.md](file://docs/plans/waypoint/01-product.md)
-- [02-architecture.md](file://docs/plans/waypoint/02-architecture.md)
-- [03-program-design.md](file://docs/plans/waypoint/03-program-design.md)
-- [04-slices.md](file://docs/plans/waypoint/04-slices.md)
-- [00-status.md](file://docs/plans/waypoint/00-status.md)
 - [page.tsx](file://frontend/app/page.tsx)
-- [recovering page.tsx](file://frontend/app/recovering/[tripId]/page.tsx)
-- [recovered page.tsx](file://frontend/app/recovered/[tripId]/page.tsx)
+- [desk page.tsx](file://frontend/app/desk/[deskId]/page.tsx)
+- [close page.tsx](file://frontend/app/close/[deskId]/page.tsx)
+- [api.ts](file://frontend/lib/api.ts)
+- [types.ts](file://frontend/lib/types.ts)
+- [format.ts](file://frontend/lib/format.ts)
+- [WaypointField.tsx](file://frontend/app/WaypointField.tsx)
 - [routes.py](file://backend/app/api/routes.py)
 - [loop.py](file://backend/app/agent/loop.py)
+- [models.py](file://backend/app/models.py)
 - [main.py](file://backend/app/main.py)
+- [globals.css](file://frontend/app/globals.css)
+- [presentation.css](file://frontend/app/presentation.css)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated product positioning from trip disruption recovery to corporate travel treasury
-- Revised three-screen UX to reflect mandate → desk → close workflow
-- Updated architecture to show desk-based operations with portfolio management
-- Modified component descriptions to focus on financial trading desk metaphor
-- Updated API endpoints and data models for treasury operations
-- Enhanced real-time streaming interface description for desk cycle events
-- Added risk-officer auditor agent and P&L tracking components
+- Complete treasury desk frontend overhaul replacing visa-recovery interfaces with mandate management, live SSE-driven screens, and weekly close workflows
+- Implemented three-screen UX: Mandate Screen → Desk Screen → Weekly Close Screen
+- Added real-time streaming interface using Server-Sent Events (SSE) for live agent reasoning process
+- Integrated risk-officer auditor agent with P&L tracking components
+- Enhanced responsive design with immersive teal background and animated waypoint field
+- Updated API endpoints for treasury operations including seed, stream, snapshot, and close endpoints
+- Added comprehensive error handling and accessibility compliance throughout all screens
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -48,8 +50,8 @@ The user experience centers on three screens that map 1:1 to **mandate → desk 
 The design emphasizes transparency, trust, and accountability: every decision is evaluated against the mandate constraints, and only fully authorized actions are executed. The interface communicates progress via Server-Sent Events (SSE) so users can watch trading decisions unfold in real time.
 
 **Section sources**
-- [01-product.md:8-27](file://docs/plans/waypoint/01-product.md#L8-L27)
-- [02-architecture.md:3-11](file://docs/plans/waypoint/02-architecture.md#L3-L11)
+- [page.tsx:23-113](file://frontend/app/page.tsx#L23-L113)
+- [routes.py:285-314](file://backend/app/api/routes.py#L285-L314)
 
 ## Project Structure
 The repository organizes product planning, architecture, and mockups under docs/plans/waypoint, with additional skill documentation for Atlas integration. The three-screen UX is defined by HTML mockups and supported by architectural and program design documents that specify endpoints, data models, and the desk agent loop.
@@ -64,12 +66,12 @@ B --> F["SQLite Store<br/>Mandate, Positions, Ledger, Budgets"]
 ```
 
 **Diagram sources**
-- [02-architecture.md:6-11](file://docs/plans/waypoint/02-architecture.md#L6-L11)
-- [03-program-design.md:11-21](file://docs/plans/waypoint/03-program-design.md#L11-L21)
+- [routes.py:173-187](file://backend/app/api/routes.py#L173-L187)
+- [loop.py:118-146](file://backend/app/agent/loop.py#L118-L146)
 
 **Section sources**
-- [02-architecture.md:6-11](file://docs/plans/waypoint/02-architecture.md#L6-L11)
-- [03-program-design.md:11-21](file://docs/plans/waypoint/03-program-design.md#L11-L21)
+- [routes.py:1-13](file://backend/app/api/routes.py#L1-L13)
+- [main.py:36-55](file://backend/app/main.py#L36-L55)
 
 ## Core Components
 - **Mandate Screen**: Displays budget configuration, authority caps, and contingency settings; serves as the entry point for desk operations.
@@ -92,8 +94,9 @@ Responsive behavior:
 - Touch-friendly buttons and readable typography across devices.
 
 **Section sources**
-- [02-architecture.md:18-23](file://docs/plans/waypoint/02-architecture.md#L18-L23)
-- [03-program-design.md:133-137](file://docs/plans/waypoint/03-program-design.md#L133-L137)
+- [page.tsx:115-251](file://frontend/app/page.tsx#L115-L251)
+- [desk page.tsx:330-677](file://frontend/app/desk/[deskId]/page.tsx#L330-L677)
+- [close page.tsx:57-547](file://frontend/app/close/[deskId]/page.tsx#L57-L547)
 
 ## Architecture Overview
 The system comprises a Next.js/React frontend and a Python FastAPI backend. The backend orchestrates the desk agent loop, runs judgment logic, integrates with Atlas for search/verify/order/pay, and streams progress via SSE to drive the Desk Screen.
@@ -126,8 +129,8 @@ FE-->>U : Weekly Close Screen (P&L, losses, auditor)
 ```
 
 **Diagram sources**
-- [02-architecture.md:33-41](file://docs/plans/waypoint/02-architecture.md#L33-L41)
-- [03-program-design.md:82-111](file://docs/plans/waypoint/03-program-design.md#L82-L111)
+- [routes.py:317-403](file://backend/app/api/routes.py#L317-L403)
+- [loop.py:153-486](file://backend/app/agent/loop.py#L153-L486)
 
 ## Detailed Component Analysis
 
@@ -151,9 +154,12 @@ Responsive behavior:
 - Form layout adapts to mobile widths with stacked fields.
 - Buttons are full-width for easy tapping.
 
+**Updated** Enhanced with immersive teal background and animated waypoint field for visual appeal while maintaining accessibility standards.
+
 **Section sources**
-- [01-product.md:11-14](file://docs/plans/waypoint/01-product.md#L11-L14)
-- [02-architecture.md:18-23](file://docs/plans/waypoint/02-architecture.md#L18-L23)
+- [page.tsx:23-113](file://frontend/app/page.tsx#L23-L113)
+- [page.tsx:115-251](file://frontend/app/page.tsx#L115-L251)
+- [routes.py:285-314](file://backend/app/api/routes.py#L285-L314)
 
 ### Desk Screen
 Purpose:
@@ -180,9 +186,12 @@ Responsive behavior:
 - Scrollable stream area with fixed header showing mandate and meter.
 - Blotter table adapts to narrow screens with horizontal scrolling if needed.
 
+**Updated** Enhanced with real-time position identity from snapshots, budget bar visualization, and improved toast notifications for better user feedback.
+
 **Section sources**
-- [02-architecture.md:43-55](file://docs/plans/waypoint/02-architecture.md#L43-L55)
-- [03-program-design.md:133-137](file://docs/plans/waypoint/03-program-design.md#L133-L137)
+- [desk page.tsx:330-677](file://frontend/app/desk/[deskId]/page.tsx#L330-L677)
+- [desk page.tsx:680-800](file://frontend/app/desk/[deskId]/page.tsx#L680-L800)
+- [routes.py:317-353](file://backend/app/api/routes.py#L317-L353)
 
 ### Weekly Close Screen
 Purpose:
@@ -203,9 +212,11 @@ Responsive behavior:
 - Multi-column layout collapses to single column on small screens.
 - Cards stack vertically with clear spacing.
 
+**Updated** Enhanced with dry-run distinction ("Would have saved" vs "Saved"), improved auditor line presentation, and better error handling for various close outcomes.
+
 **Section sources**
-- [02-architecture.md:22-23](file://docs/plans/waypoint/02-architecture.md#L22-L23)
-- [03-program-design.md:133-137](file://docs/plans/waypoint/03-program-design.md#L133-L137)
+- [close page.tsx:57-547](file://frontend/app/close/[deskId]/page.tsx#L57-L547)
+- [routes.py:356-403](file://backend/app/api/routes.py#L356-L403)
 
 ### Two-Gate System and Execute Wall
 Design:
@@ -222,8 +233,8 @@ Integration points:
 - All decisions persisted for auditability and compliance.
 
 **Section sources**
-- [03-program-design.md:3-6](file://docs/plans/waypoint/03-program-design.md#L3-L6)
-- [03-program-design.md:31-35](file://docs/plans/waypoint/03-program-design.md#L31-L35)
+- [loop.py:153-486](file://backend/app/agent/loop.py#L153-L486)
+- [loop.py:576-634](file://backend/app/agent/loop.py#L576-L634)
 
 ### Atlas Integration and Write Path
 Scope:
@@ -238,8 +249,8 @@ Safety and checkpoints:
 - Never retry write operations; handle failures gracefully with query-only follow-ups.
 
 **Section sources**
-- [02-architecture.md:57-68](file://docs/plans/waypoint/02-architecture.md#L57-L68)
-- [03-program-design.md:71-80](file://docs/plans/waypoint/03-program-design.md#L71-L80)
+- [loop.py:648-800](file://backend/app/agent/loop.py#L648-L800)
+- [models.py:175-244](file://backend/app/models.py#L175-L244)
 
 ## Dependency Analysis
 The UI depends on backend REST endpoints and an SSE stream. The backend depends on Atlas, desk brain, auditor agent, and SQLite store.
@@ -254,12 +265,12 @@ BE --> |Persist| DB["SQLite"]
 ```
 
 **Diagram sources**
-- [02-architecture.md:6-11](file://docs/plans/waypoint/02-architecture.md#L6-L11)
-- [03-program-design.md:11-21](file://docs/plans/waypoint/03-program-design.md#L11-L21)
+- [routes.py:173-187](file://backend/app/api/routes.py#L173-L187)
+- [loop.py:118-146](file://backend/app/agent/loop.py#L118-L146)
 
 **Section sources**
-- [02-architecture.md:6-11](file://docs/plans/waypoint/02-architecture.md#L6-L11)
-- [03-program-design.md:11-21](file://docs/plans/waypoint/03-program-design.md#L11-L21)
+- [api.ts:7-110](file://frontend/lib/api.ts#L7-L110)
+- [routes.py:1-13](file://backend/app/api/routes.py#L1-L13)
 
 ## Performance Considerations
 - SSE streaming should be lightweight; batch or throttle events if necessary to avoid UI jank.
@@ -268,6 +279,8 @@ BE --> |Persist| DB["SQLite"]
 - Cache static assets and use efficient CSS variables for theming to reduce repaint costs.
 - On mobile, ensure scroll performance remains smooth with long streams.
 - Search meter enforcement prevents excessive API calls and maintains responsiveness.
+
+**Updated** Enhanced with GSAP animations that respect reduced motion preferences, optimized event replay handling, and efficient state management to prevent unnecessary re-renders.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -282,12 +295,17 @@ Accessibility and cross-browser notes:
 - Ensure live regions announce updates to assistive technologies.
 - Validate color contrast and keyboard navigation across devices.
 
+**Updated** Enhanced error handling with specific error codes, improved connection state management, and better fallback mechanisms for network issues.
+
 **Section sources**
-- [02-architecture.md:70-78](file://docs/plans/waypoint/02-architecture.md#L70-L78)
-- [03-program-design.md:145-155](file://docs/plans/waypoint/03-program-design.md#L145-L155)
+- [desk page.tsx:347-390](file://frontend/app/desk/[deskId]/page.tsx#L347-L390)
+- [close page.tsx:302-381](file://frontend/app/close/[deskId]/page.tsx#L302-L381)
+- [routes.py:231-249](file://backend/app/api/routes.py#L231-L249)
 
 ## Conclusion
 The three-screen Waypoint interface delivers a transparent, trustworthy corporate travel treasury experience. By combining live streaming of desk agent reasoning, strict mandate enforcement, and clear P&L reporting, it builds confidence and reduces the risk of unauthorized or impractical bookings. Adhering to accessibility guidelines, responsive design principles, and robust error handling ensures a reliable experience across devices and browsers. Future extensions can add more rules and integrations while preserving the advise/execute split and fail-closed execution model.
+
+**Updated** The complete frontend overhaul provides a professional, enterprise-grade interface with immersive visual design, real-time feedback, and comprehensive error handling that scales from individual users to large corporate deployments.
 
 ## Appendices
 
@@ -299,7 +317,8 @@ The three-screen Waypoint interface delivers a transparent, trustworthy corporat
 - POST /api/desk/{desk_id}/escalations/{esc_id}/decision — human approval for mandate edge cases.
 
 **Section sources**
-- [02-architecture.md:18-23](file://docs/plans/waypoint/02-architecture.md#L18-L23)
+- [routes.py:285-425](file://backend/app/api/routes.py#L285-L425)
+- [api.ts:7-110](file://frontend/lib/api.ts#L7-L110)
 
 ### Data Models and Persistence
 - Mandate, positions, ledger, budgets stored in SQLite for audit trail and compliance.
@@ -307,7 +326,8 @@ The three-screen Waypoint interface delivers a transparent, trustworthy corporat
 - Ledger records trades, allocations, reconciliations, and losses for full transparency.
 
 **Section sources**
-- [02-architecture.md:25-31](file://docs/plans/waypoint/02-architecture.md#L25-L31)
+- [models.py:83-173](file://backend/app/models.py#L83-L173)
+- [types.ts:5-175](file://frontend/lib/types.ts#L5-L175)
 
 ### Build Slices and Milestones
 - Slice 1: Data foundation with mandate, positions, ledger tables + desk SSE route.
@@ -320,4 +340,16 @@ The three-screen Waypoint interface delivers a transparent, trustworthy corporat
 - Slice 8: Demo rehearsal + video production.
 
 **Section sources**
-- [04-slices.md:24-80](file://docs/plans/waypoint/04-slices.md#L24-L80)
+- [loop.py:1-15](file://backend/app/agent/loop.py#L1-L15)
+- [routes.py:1-13](file://backend/app/api/routes.py#L1-L13)
+
+### Visual Design System
+- Color palette: Deep teal brand (#0F766E), warm coral accent (#F2764B), semantic colors for status indicators.
+- Typography: Figtree sans-serif for body text, IBM Plex Mono for numerical data and technical information.
+- Spacing system: Consistent 8px grid with semantic spacing tokens for cards, buttons, and content areas.
+- Animation system: GSAP-powered animations with reduced motion support for accessibility.
+
+**Section sources**
+- [globals.css:10-52](file://frontend/app/globals.css#L10-L52)
+- [presentation.css:1-34](file://frontend/app/presentation.css#L1-L34)
+- [WaypointField.tsx:18-106](file://frontend/app/WaypointField.tsx#L18-L106)

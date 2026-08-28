@@ -1,1 +1,0 @@
-Repository root for the Waypoint autonomous flight disruption-recovery agent, anchoring shared gitignore rules and a skills-lock manifest that pins external skill sources consumed by child modules.

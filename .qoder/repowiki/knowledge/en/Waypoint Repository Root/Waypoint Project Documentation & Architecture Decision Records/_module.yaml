@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: docs
-title: Waypoint Project Documentation & ADRs
+title: Waypoint Project Documentation & Architecture Decision Records
 scope:
     - docs/
 source_files: []
