@@ -17,6 +17,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The live bot's Telegram username, captured from application.bot.username
+# after the supervised startup initializes it (main.py _supervised_bot).
+# The API exposes this via GET /api/waybot so the frontend can build the
+# t.me share/deep link from the REAL identity instead of a hardcoded name.
+# None = bot-less (no token, build failed, or not initialized yet).
+_bot_username: str | None = None
+
+
+def set_bot_username(username: str | None) -> None:
+    """Record the live bot's Telegram username (None clears it)."""
+    global _bot_username
+    _bot_username = username
+
+
+def get_bot_username() -> str | None:
+    """The captured bot username, or None when the bot is not live."""
+    return _bot_username
+
 
 def build_application(
     token: str | None,

@@ -110,6 +110,23 @@ export function deskStreamUrl(deskId: string): string {
   return `${API_URL}/api/desk/${deskId}/stream`;
 }
 
+/** GET /api/waybot -> the live Waybot's Telegram username, derived from
+ * the backend's WAYPOINT_BOT_TOKEN via getMe at bot startup. Returns null
+ * when the backend runs bot-less (no token) OR is unreachable — callers
+ * must then NOT build a t.me link rather than fall back to a guess. */
+export async function getWaybotUsername(): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/waybot`);
+    if (!res.ok) return null;
+    const body = (await res.json()) as { username: string | null };
+    return typeof body.username === "string" && body.username
+      ? body.username
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** GET /api/desk/{desk_id} -> snapshot (positions, ledger, budgets, meter). */
 export async function getDeskSnapshot(deskId: string): Promise<DeskSnapshot> {
   const res = await fetch(`${API_URL}/api/desk/${deskId}`);
