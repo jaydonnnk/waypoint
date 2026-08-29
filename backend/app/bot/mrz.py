@@ -15,6 +15,7 @@ curated CSV (never free text).
 """
 from __future__ import annotations
 
+import itertools
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -32,6 +33,14 @@ for _i in range(10):
     _CHAR_VALUES[str(_i)] = _i
 for _i, _c in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ", start=10):
     _CHAR_VALUES[_c] = _i
+
+# Hard cap on filler-insertion repair candidates per line 2 (boundedness).
+_MAX_FILLER_REPAIR_CANDIDATES = 150
+
+# Earliest 0-based insertion index for filler repair: personal-number field
+# starts at column 28 on line 2.  Insertions BEFORE 28 would fabricate
+# content in the doc-number/nationality/DOB/expiry zones — forbidden.
+_FILLER_REPAIR_WINDOW_START = 28
 
 
 @dataclass(frozen=True)
@@ -113,6 +122,12 @@ def _normalize_line(raw: str) -> str:
     PII where no check digits gate it).  Lines still longer than 44 after
     mapping are returned UNTRUNCATED — the caller decides whether a
     trailing-filler trim is safe (fail-closed).
+
+    DROPPED interior filler (a short line 2 missing '<' inside the
+    personal-number run) is NOT handled here — padding at the end would
+    shift the trailing check digits into the wrong columns.  That
+    deviation is handled by _filler_repair_forms(), which proposes
+    '<'-insertion candidates gated entirely by the ICAO check digits.
     """
     collapsed = "".join("<" if ch.isspace() else ch for ch in raw).upper()
     if len(collapsed) < 44:
@@ -120,14 +135,83 @@ def _normalize_line(raw: str) -> str:
     return collapsed
 
 
-def _candidate_forms(raw: str) -> list[str]:
+def _filler_repair_forms(raw: str) -> list[str]:
+    """Propose 44-char repair candidates for a SHORT LINE 2 by inserting
+    '<' filler that a vision model dropped from the interior filler run.
+
+    LINE 2 ONLY (validate() never calls this for line 1): line 2 carries
+    five ICAO check digits, so every proposal here is gated by real
+    arithmetic before acceptance.  Line 1 has NO check digits — inserting
+    fabricated filler there could silently corrupt name PII with nothing
+    to catch it, so line 1 must never receive fabricated content.
+
+    Applies only when len(raw) is 42 or 43 (k = 44 - len ∈ {1, 2}).
+    Insertion positions are restricted to 0-based indices in
+    [_FILLER_REPAIR_WINDOW_START, len(raw)] of the current string — the
+    personal-number/tail window.  The doc number, nationality, DOB, sex
+    and expiry zones (columns 0–27) are never touched, so a missing REAL
+    content character in those zones cannot be "repaired" (fail-closed).
+    Result is deduped (inserting '<' at several spots inside a homogeneous
+    filler run yields identical strings), length-checked, and capped at
+    _MAX_FILLER_REPAIR_CANDIDATES for boundedness.  Seeds are enumerated
+    mapped-first, raw-second: whitespace-bearing raw forms can never pass
+    the check-digit gate, so letting them consume the cap first could
+    truncate the mapped seed's valid proposals on a short line that mixes
+    spaces-for-filler with dropped '<'.  These forms only ever PROPOSE
+    candidates — acceptance remains the sole property of the full parse
+    gate (all five check digits + date/ISO gates).  Note that acceptance
+    guarantees correctness of the stored MrzFields (derived from the
+    untouched columns 0–27), not byte-reconstruction of the true line 2 —
+    '<' vs '0' (both value 0) ambiguity inside the non-stored
+    personal-number zone is inherent to ICAO 7-3-1 weights.
+    """
+    forms: list[str] = []
+    seen: set[str] = set()
+    # Repair the whitespace→'<' mapped form FIRST, then the as-given raw
+    # string (skipped when identical): space-bearing seeds can never pass
+    # the check-digit gate, so enumerating them first would burn the
+    # 150-candidate cap and truncate the mapped seed's valid proposals.
+    mapped = "".join("<" if ch.isspace() else ch for ch in raw).upper()
+    seeds = ([mapped] if mapped != raw else []) + [raw]
+    for seed in seeds:
+        if len(seed) not in (42, 43):
+            continue
+        k = 44 - len(seed)
+        window = range(_FILLER_REPAIR_WINDOW_START, len(seed) + 1)
+        position_sets = (
+            itertools.combinations(window, k)
+            if k == 2
+            else ((i,) for i in window)
+        )
+        for positions in position_sets:
+            repaired = seed
+            # Insert right-to-left so earlier indices stay valid.
+            for pos in sorted(positions, reverse=True):
+                repaired = repaired[:pos] + "<" + repaired[pos:]
+            if len(repaired) != 44 or repaired in seen:
+                continue
+            seen.add(repaired)
+            forms.append(repaired)
+            if len(forms) >= _MAX_FILLER_REPAIR_CANDIDATES:
+                return forms
+    return forms
+
+
+def _candidate_forms(raw: str, allow_filler_repair: bool = False) -> list[str]:
     """All per-line forms validate() should attempt, in priority order.
 
-    (a) the stripped/uppercased form as given; (b) the whitespace→'<'
-    mapped + '<'-padded normalized form; (c) trim-to-44 variants of BOTH
-    (a) and (b), but ONLY when the excess beyond 44 is purely trailing
-    '<' filler.  Anything else over-length is left long so it fails closed
-    at the length gate.
+    (a) the stripped/uppercased form as given; (b) trim-to-44 when the
+    excess is purely trailing '<'; (c) the whitespace→'<' mapped +
+    '<'-padded normalized form; (d) the trim variant of (c) — again only
+    for pure trailing-filler excess.  Anything else over-length is left
+    long so it fails closed at the length gate.
+
+    When allow_filler_repair is True (LINE 2 ONLY — validate() never sets
+    it for line 1, which has no check digits to gate fabricated content),
+    the _filler_repair_forms() '<'-insertion candidates are APPENDED
+    after all of the above, so normal paths keep priority.  Repair forms
+    only propose; the five-check-digit parse gate remains the sole
+    acceptance criterion.
     """
     forms = [raw]
     if len(raw) > 44 and set(raw[44:]) == {"<"}:
@@ -137,6 +221,10 @@ def _candidate_forms(raw: str) -> list[str]:
         forms.append(norm)
     if len(norm) > 44 and set(norm[44:]) == {"<"} and norm[:44] not in forms:
         forms.append(norm[:44])
+    if allow_filler_repair:
+        for repaired in _filler_repair_forms(raw):
+            if repaired not in forms:
+                forms.append(repaired)
     return forms
 
 
@@ -297,11 +385,22 @@ def validate(fields_raw: dict) -> MrzFields | None:
     # (whitespace mapped to '<' + '<' padded, optional trailing-filler
     # trim).  Check digits remain the gate — normalization only rescues
     # FILLER deviations, never content errors.
+    # Line 2 additionally gets '<'-insertion repair forms for short lines
+    # (a dropped interior filler char); line 1 never does — it has no
+    # check digits, so nothing could gate fabricated content there.
+    forms2_base = _candidate_forms(line2)
+    forms2 = _candidate_forms(line2, allow_filler_repair=True)
+    repair_forms2 = set(forms2[len(forms2_base):])
     for cand1 in _candidate_forms(line1):
-        for cand2 in _candidate_forms(line2):
+        for cand2 in forms2:
             result = parse_td3(cand1, cand2)
             if result is not None:
-                if (cand1, cand2) != (line1, line2):
+                if cand2 in repair_forms2:
+                    logger.debug(
+                        "mrz validate: recovered via filler-insertion"
+                        " repair (len2=%d)", len(line2),
+                    )
+                elif (cand1, cand2) != (line1, line2):
                     logger.debug(
                         "mrz validate: recovered via normalized form"
                         " (len1=%d len2=%d)", len(cand1), len(cand2),
