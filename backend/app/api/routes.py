@@ -21,6 +21,10 @@ import math
 import os
 import re
 import secrets
+import threading
+import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Literal
@@ -30,6 +34,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import fixture
+from app.config import int_env
 from app.agent.auditor import (
     SOURCE_FALLBACK,
     RiskAuditor,
@@ -118,17 +123,53 @@ def _new_confirmation_code() -> str:
     return secrets.token_hex(4).upper()
 
 
+_KDF_ITERATIONS = 260_000  # OWASP 2023 PBKDF2-SHA256 minimum
+
+
 def _hash_code(code: str) -> str:
-    """Salted SHA-256 of the code -> 'salt$digest'. Plaintext never stored."""
+    """Slow KDF hash of the code -> 'pbkdf2$<iters>$salt$digest'. Plaintext
+    never stored. The iteration count is stored IN the string (L3) so tuning
+    _KDF_ITERATIONS later never makes an at-rest hash unverifiable. Scheme-
+    tagged so old hashes still verify (back-compat): the S1 single-round
+    'salt$digest' SHA-256 form."""
     salt = secrets.token_hex(16)
-    digest = hashlib.sha256(f"{salt}{code}".encode()).hexdigest()
-    return f"{salt}${digest}"
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", code.encode(), salt.encode(), _KDF_ITERATIONS
+    ).hex()
+    return f"pbkdf2${_KDF_ITERATIONS}${salt}${digest}"
 
 
 def _verify_code(code: str, stored: str | None) -> bool:
-    """Constant-time check of a plaintext code against the stored hash."""
+    """Constant-time check of a plaintext code against the stored hash.
+
+    Scheme-tagged, back-compat across the at-rest formats:
+    - 'pbkdf2$<iters>$salt$digest' (current) — iterations parsed FROM the
+      stored value, never trusted from the module constant, and fail-closed
+      on any out-of-range stored count (M-new1).
+    - 'salt$digest' (legacy S1 single-round SHA-256).
+    All paths use hmac.compare_digest for constant-time comparison."""
     if not stored or "$" not in stored:
         return False
+    if stored.startswith("pbkdf2$"):
+        parts = stored.split("$")
+        if len(parts) != 4:
+            return False
+        # pbkdf2$<iters>$salt$digest — iterations FROM the stored value.
+        _, iters_raw, salt, digest = parts
+        try:
+            iters = int(iters_raw)
+        except ValueError:
+            return False
+        # M-new1: fail closed on an out-of-range stored iteration count —
+        # 0/negative would verify at zero cost (a forged hash beats the KDF),
+        # and a huge count is a CPU bomb pointed at the verify path.
+        if not (1 <= iters <= 1_000_000):
+            return False
+        candidate = hashlib.pbkdf2_hmac(
+            "sha256", code.encode(), salt.encode(), iters
+        ).hex()
+        return hmac.compare_digest(candidate, digest)
+    # Legacy S1 scheme: salt$digest (single-round SHA-256, back-compat)
     salt, digest = stored.split("$", 1)
     candidate = hashlib.sha256(f"{salt}{code}".encode()).hexdigest()
     return hmac.compare_digest(candidate, digest)
@@ -390,6 +431,9 @@ async def seed_desk(request: SeedRequest | None = None) -> dict:
     # only its hash is stored.
     invite_token = _new_invite_token()
     confirmation_code = _new_confirmation_code()
+    # L2: PBKDF2 (260k rounds) is ~50-150ms of CPU — run it in a thread so
+    # the single-worker event loop (and its live SSE streams) never stalls.
+    code_hash = await asyncio.to_thread(_hash_code, confirmation_code)
     desk_id = await asyncio.to_thread(
         STORE.seed_desk,
         mandate,
@@ -397,7 +441,7 @@ async def seed_desk(request: SeedRequest | None = None) -> dict:
         budgets,
         "awaiting_travelers",
         invite_token,
-        _hash_code(confirmation_code),
+        code_hash,
     )
     return {
         "desk_id": desk_id,
@@ -406,33 +450,178 @@ async def seed_desk(request: SeedRequest | None = None) -> dict:
     }
 
 
+# Shared tolerant int env read (app.config, M-new2 consolidation): a
+# malformed OR below-minimum override falls back to the default instead of
+# crashing app import (config-typo DoS) or disabling the guard it tunes.
+
+# Confirmation-code attempt cap (S4 guard 1). ENV-tunable. minimum=1: a
+# negative/zero override falls back to 5 rather than disabling the throttle.
+CODE_ATTEMPT_CAP = int_env("WAYPOINT_CODE_ATTEMPT_CAP", 5, minimum=1)
+# Confirmation-code TTL in seconds (S4 guard 1): how long after seed a code
+# stays valid, anchored to mandate.created_at (== code issue time at seed).
+# 0 = no TTL (dev). Default 24h (H2): roster collection over Telegram can
+# realistically exceed an hour, and there is no reissue path, so a code that
+# died at 1h would strand the desk in awaiting_travelers permanently.
+CODE_TTL_SECONDS = int_env("WAYPOINT_CODE_TTL", 86400, minimum=0)
+
+# H-new1: BOUNDED KDF concurrency for /confirm. Chosen: a dedicated small
+# ThreadPoolExecutor over a module-level asyncio.Semaphore. The Semaphore
+# was rejected because asyncio primitives bind to the first event loop that
+# awaits them and then RAISE on any other loop — a module-level Semaphore
+# would break across TestClient loops/process restarts. The executor is
+# loop-agnostic, and its internal queue bounds concurrency to 2 verify KDFs
+# at a time WITHOUT ever rejecting — excess confirms simply queue, so the
+# correct-code-always-releases contract is preserved (throttle = queue,
+# never refusal). A /confirm flood now pins at most 2 threads, not the
+# whole default executor of the single-worker app.
+_KDF_VERIFY_EXECUTOR = ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="kdf-verify"
+)
+
+# ---- Sliding-window request-volume limiter on /confirm (task #8) --------
+# Request-VOLUME layer, keyed by desk_id — distinct from the attempt cap
+# above (which throttles wrong-CODE volume). Semantics, honestly stated:
+#
+# - BURST GUARD, NOT AN AUTH LAYER. It limits how many /confirm requests
+#   one desk_id may consume per window; it never authenticates anything.
+# - TRANSIENT AND BOUNDED: a desk under flood may delay even a CORRECT
+#   code by at most one window (default 60s). NEVER permanent — unlike a
+#   lockout, the throttle fully clears as old timestamps slide out.
+# - FIRST CHECK in /confirm: a throttled request never reaches the TTL
+#   check or the KDF, so a flood burns zero KDF CPU and zero DB writes.
+# - EXACT under this deployment: one pinned uvicorn worker (--workers 1 in
+#   both Dockerfiles) means per-process memory IS the global state. If the
+#   app is ever scaled to N workers, the limit degrades to limit×instances
+#   (each worker keeps its own window) — still a throttle, never a bypass.
+# - MEMORY HYGIENE: expired timestamps are pruned on every access, and a
+#   desk whose deque empties drops its dict entry (lazy eviction), so the
+#   map only ever holds desks active within the last window.
+# - The time source is a module attribute so tests can monkeypatch it and
+#   slide the window without sleeping (same DI pattern as AGENT/AUDITOR).
+CONFIRM_RATE_WINDOW_SECONDS = 60.0
+CONFIRM_RATE_LIMIT_CAP = int_env("WAYPOINT_CONFIRM_RATE_LIMIT", 10, minimum=1)
+
+_CONFIRM_HITS: dict[str, deque] = {}
+# Hygiene lock: the route body runs single-threaded on the 1-worker event
+# loop, but the KDF verify path runs in executor threads — keep mutations
+# guarded anyway.
+_CONFIRM_HITS_LOCK = threading.Lock()
+
+# Time source for the window. monotonic: immune to wall-clock jumps.
+_confirm_clock = time.monotonic
+
+
+def _confirm_allowed(desk_id: str) -> bool:
+    """Sliding-window admission for /confirm. True + recorded timestamp =
+    proceed; False = the desk already consumed CONFIRM_RATE_LIMIT_CAP
+    requests inside CONFIRM_RATE_WINDOW_SECONDS — answer 429 without
+    recording (throttled requests must not extend their own throttle)."""
+    now = _confirm_clock()
+    cutoff = now - CONFIRM_RATE_WINDOW_SECONDS
+    with _CONFIRM_HITS_LOCK:
+        hits = _CONFIRM_HITS.get(desk_id)
+        if hits is not None:
+            # Prune expired timestamps on EVERY access.
+            while hits and hits[0] <= cutoff:
+                hits.popleft()
+            if not hits:
+                # Lazy eviction: the window drained -> drop the dict entry so
+                # the map only holds desks active within the last window.
+                del _CONFIRM_HITS[desk_id]
+                hits = None
+        if hits is None:
+            hits = deque()
+        if len(hits) >= CONFIRM_RATE_LIMIT_CAP:
+            return False
+        hits.append(now)
+        _CONFIRM_HITS[desk_id] = hits
+        return True
+
+
 @router.post("/desk/{desk_id}/confirm")
 async def confirm(desk_id: str, body: ConfirmRequest) -> dict:
     """Release a gated desk: check the plaintext code against the stored
-    hash (constant-time). Wrong code -> 403, no state change. Right code
-    -> lifecycle 'released' + start the cycle via the shared resume
-    primitive. Unknown desk -> 404; an already-released desk -> 409 (the
-    gate is single-use in spirit — the cycle is already running)."""
+    hash (constant-time). Wrong code -> 403, attempt counter bumped. The
+    correct code -> lifecycle 'released' + start the cycle via the shared
+    resume primitive. Unknown desk -> 404; an already-released desk -> 410
+    (one-shot semantics — the gate fires exactly once). Code past TTL -> 410
+    (expired).
+
+    Request-volume throttle (task #8): the FIRST check — before the
+    lifecycle read, the TTL check, and the KDF. If this desk_id already
+    consumed its window of confirms, answer 429 immediately (distinct
+    from the wrong-attempt 429 below). Burst guard, not an auth layer:
+    transient for at most one window, never permanent — see the limiter
+    comment block above the route.
+
+    Attempt cap (S4 guard 1) — the throttle targets GUESSERS, not the
+    code-holder: 5 wrong codes are 403, the 6th is 429. But the check is
+    verify-FIRST, so the correct code ALWAYS releases regardless of how many
+    wrong attempts preceded it. This closes the DoS where an attacker who
+    only knows the shared desk_id could spam wrong codes and permanently
+    brick the release gate (there is no reissue endpoint to unlock it)."""
+    if not _confirm_allowed(desk_id):
+        raise HTTPException(
+            status_code=429, detail="rate limited — try again shortly"
+        )
+
     try:
         lifecycle = await asyncio.to_thread(STORE.get_lifecycle, desk_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="unknown desk")
     if lifecycle != "awaiting_travelers":
-        # Already released/closed — nothing to confirm; do not restart.
-        raise HTTPException(status_code=409, detail="desk not awaiting confirm")
+        # Already released/closed — one-shot semantics (L7 reconciled to 410).
+        raise HTTPException(status_code=410, detail="desk already released")
 
+    # TTL check (S4 guard 1): the code expires CODE_TTL_SECONDS after seed.
+    if CODE_TTL_SECONDS > 0:
+        from datetime import datetime, timezone
+
+        mandate_row = await asyncio.to_thread(
+            lambda: STORE.reload_desk(desk_id)[0]
+        )
+        created = mandate_row.created_at
+        # SQLite may return timezone-naive datetimes; coerce to UTC.
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - created).total_seconds()
+        if age > CODE_TTL_SECONDS:
+            raise HTTPException(status_code=410, detail="code expired")
+
+    # Verify FIRST (L2: PBKDF2 off the event loop, on the BOUNDED KDF
+    # executor — H-new1 — so a /confirm flood can't starve the app). The
+    # correct code is never blocked by the attempt cap — only wrong guesses
+    # are throttled.
     _token, code_hash = await asyncio.to_thread(STORE.get_invite, desk_id)
-    if not _verify_code(body.code, code_hash):
+    correct = await asyncio.get_running_loop().run_in_executor(
+        _KDF_VERIFY_EXECUTOR, _verify_code, body.code, code_hash
+    )
+    if not correct:
+        # H-new1: read the counter FIRST — if it is already at/over the cap,
+        # answer 429 WITHOUT the bump UPDATE, so a /confirm flood stops
+        # producing one DB write per attack request. Verify-first ordering
+        # above still lets a correct code release at any time.
+        attempts = await asyncio.to_thread(STORE.get_code_attempts, desk_id)
+        if attempts >= CODE_ATTEMPT_CAP:
+            raise HTTPException(
+                status_code=429, detail="too many wrong attempts"
+            )
+        # Bump the guesser's counter atomically; the 6th wrong try -> 429.
+        attempts = await asyncio.to_thread(STORE.bump_code_attempts, desk_id)
+        if attempts > CODE_ATTEMPT_CAP:
+            raise HTTPException(
+                status_code=429, detail="too many wrong attempts"
+            )
         raise HTTPException(status_code=403, detail="wrong code")
 
-    # Atomic release (H1): the lifecycle flip IS the race guard. Two
+    # Atomic release (H1 double-start race): the lifecycle flip IS the race guard. Two
     # concurrent correct-code confirms both pass the checks above, but the
     # CAS lets exactly one win — only the winner starts the cycle, so
     # DESKS is never overwritten and no second _run_desk (double booking)
-    # is spawned. The loser is treated as a late/duplicate confirm (409).
+    # is spawned. The loser gets 410 (one-shot — already released).
     released = await asyncio.to_thread(STORE.try_release, desk_id)
     if not released:
-        raise HTTPException(status_code=409, detail="desk not awaiting confirm")
+        raise HTTPException(status_code=410, detail="desk already released")
     _start_cycle(desk_id)
     return {"desk_id": desk_id, "lifecycle": "released"}
 

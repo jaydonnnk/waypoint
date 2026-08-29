@@ -40,9 +40,13 @@ what was done about each. One section per slice review.
   expiry. Plan defers cap/TTL/one-shot-410 to Slice 4, but since `page.tsx`
   seeds every desk `gated:true`, `/confirm` is live now. Recorded as a live
   security gap in `00-status.md`; pull the cap/TTL forward in S4.
+  **RESOLVED in Slice 4** — see §Slice 4 (H1 verify-first cap, H2 TTL 86400s,
+  one-shot reconciled to 410).
 - **L1 (Low) — single-round salted SHA-256 over a 32-bit code space.** If the
   DB leaks, the keyspace is exhaustible offline. Compare is constant-time;
   storage strength is the gap. Swap for a slow KDF in S4. Noted in status.
+  **RESOLVED in Slice 4** — see §Slice 4 (H4: pbkdf2 for new codes;
+  transitional legacy path retained).
 - **L4 (Low) — `invite_token` index missing on shim-upgraded DBs.** Harmless
   in S1 (PK lookups only); becomes a full scan when S2's token→desk lookup
   lands. Add `CREATE INDEX IF NOT EXISTS` to the shim in S2. Noted in status.
@@ -62,6 +66,8 @@ what was done about each. One section per slice review.
 - **L7** — second `/confirm` returns 409 vs the design doc's 410. Effectively
   single-use today; reconcile with 03-program-design.md when S4 lands formal
   one-shot semantics.
+  **RESOLVED in Slice 4** — see §Slice 4 (one-shot confirm/approve semantics
+  reconciled to 410).
 
 ### Process note
 - Branch had zero commits over `main` at review time (whole diff in the
@@ -264,3 +270,102 @@ invariant holds at the write wall). 12 Medium + 7 Low.
 ### Post-fix proof
 - Full suite: 219 passed (193 + 26 new/updated across test_mrz,
   test_pax_builder, test_desk_lifecycle), 4 deselected, frontend tsc clean.
+
+## Slice 4 — Security guards (reviewed 2026-08-29, two rounds)
+
+Round 1: 4 High + 6 Medium + 5 Low, all dispositioned below. Round 2
+re-review: 1 High + 3 Medium + 4 Low, all fixed. Slice-1's deferred items
+M1/L1/L7 were delegated to S4 and are resolved here (pointers added to
+§Slice 1). Security file is now 29 tests (27 pass + 2 xfail approve stubs
+for S5).
+
+### Round 1 findings (H1–L5)
+
+- **H1 (High) — attempt cap was a lockout DoS.** A check-then-cap ordering
+  let anyone who knows the shared `desk_id` burn the cap and brick the
+  release gate. **Fix:** `/confirm` is VERIFY-FIRST — the hash check runs
+  before the cap, so the cap throttles wrong-code guessers only (5 wrong →
+  429) and the correct code ALWAYS releases. **Design call: no reissue
+  endpoint.** No auth layer exists, so a reissue endpoint would hand a
+  fresh working code to anyone with the desk_id — strictly worse than the
+  bug. Counter freezes past cap (see round-2 H-new1).
+- **H2 (High) — TTL too short / anchor imprecise.** **Fix:** TTL default
+  raised 3600s → **86400s (24h)** (env-tunable `WAYPOINT_CODE_TTL`; roster
+  collection over Telegram can exceed an hour, and an expired code cannot
+  be reissued — see H1). Still anchored to `mandate.created_at` (== code-
+  issue time at seed); a dedicated `code_issued_at` column is DEFERRED as
+  the more-correct long-term anchor if reissue ever lands.
+- **H3 (High) — attempt bump was a read-modify-write race.** **Fix:**
+  atomic single-UPDATE bump in `store.bump_code_attempts`.
+- **H4 (High) — single-round salted SHA-256 over a 32-bit code space.**
+  **FIXED for NEW codes — NOT an unqualified close.** New hashes are
+  `hashlib.pbkdf2_hmac` (260k iters, OWASP 2023), scheme-tagged
+  `pbkdf2$<iters>$salt$digest` with the iteration count stored IN the
+  string. The transitional legacy `salt$digest` path is RETAINED: it still
+  verifies indefinitely (back-compat) and is never upgraded-on-verify —
+  pointless here because release codes are single-use. Only pre-S4 DB rows
+  carry it; every new seed is pbkdf2.
+- **M1 — no assertion on the KDF iteration floor.** **Fix:** regression
+  guard asserts the pbkdf2 iteration floor so a silent tune-down fails the
+  suite.
+- **M2/M3 — oversized-photo + no-image-on-disk tests were grep-only.**
+  **Fix:** functional rewrites — both tests now exercise the real paths
+  (bite-proven RED/GREEN), not string scans.
+- **M4 — hostile-name containment docstring overscoped.** **Fix:** docstring
+  scoped to the real guarantee (MRZ-derived strings flow only into pax
+  JSON, never a brain prompt or CLI arg).
+- **M5 — frontend had no rendering for gone/throttled outcomes.** **Fix:**
+  frontend renders 410 (gone) and 429 (throttled) outcomes.
+- **M6 — guard-4 docs claimed explicit malformed-photo rejection.** Honest
+  doc disposition: wording NARROWED to what shipped — oversized photos are
+  rejected (pre-download `file_size` gate + post-download check); malformed
+  blobs are NOT explicitly rejected, they fail closed through
+  `extract_passport`'s exception into the typed-entry fallback. Explicit
+  malformed rejection remains a feature not done.
+- **L1 — photo size checked only post-download.** **Fix:** pre-download
+  `file_size` gate.
+- **L2 — PBKDF2 ran on the event loop.** **Fix:** moved off-loop (further
+  bounded in round 2, see H-new1).
+- **L3 — iteration count absent from stored hash.** **Fix:** iters stored
+  in-hash so future tuning never orphans an at-rest hash.
+- **L4 — env parsers crashed on odd values.** **Fix:** tolerant env parses
+  (strengthened in round 2, see M-new2).
+- **L5 — two "new" tests passed pre-change code.** Honest doc disposition:
+  RELABELED as explicit regression/back-compat guards —
+  `test_constant_time_compare` and `test_legacy_sha256_still_verifies` pass
+  pre-change BY DESIGN; the 03-program-design.md test rule now exempts
+  labeled guards of this kind.
+
+### Round 2 re-review findings (all fixed)
+
+- **H-new1 (High) — KDF verify unbounded + counter still bumped past cap.**
+  **Fix:** verify moved to a dedicated bounded `ThreadPoolExecutor(2)`
+  (not the shared default pool); wrong codes past the cap no longer bump
+  the counter — it freezes, and 429 is returned.
+- **M-new1 — stored iteration count trusted blindly.** **Fix:** iters
+  outside `[1, 1_000_000]` fail closed.
+- **M-new2 — int env parsing duplicated + unbounded.** **Fix:** shared
+  `int_env` in `app/config.py` with minimum validation — TTL min=0 keeps
+  "0 = no TTL" opt-out; cap min=1; max-photo min=1.
+- **M-new3 — no-disk test scanned only slice-created files.** **Fix:** it
+  also scans CHANGED pre-existing files + the test DB for the image marker.
+- **Low — frontend throttled copy reworded** (429 outcome reads accurately).
+- **Low — local `_int_env` consolidated into shared `app/config.py`**
+  (pairs with M-new2's minimums; one parser, one place).
+- **Low — dead 3-part `pbkdf2$salt$digest` verify branch deleted.** A DB
+  check proved no such hashes can exist — the mandate table had no
+  `confirmation_code_hash` column pre-backfill. Only the legacy 2-part
+  `salt$digest` and the current 4-part formats remain.
+- **Low — `schema.py` comment fixed** to match the shipped contract.
+
+### Post-fix proof
+- Backend full suite: 248 passed, 4 deselected, 2 xfailed (250 collected);
+  security file: 29 tests (27 pass + 2 xfail approve stubs for S5).
+  Frontend `npx tsc --noEmit` exit 0.
+- Task #8 (2026-08-29): the earlier deployment-side proxy rate-limit
+  recommendation was replaced by an IN-APP sliding-window limiter on
+  `/confirm` (10 requests/60s per `desk_id`, env-tunable
+  `WAYPOINT_CONFIRM_RATE_LIMIT`) because Render's edge offers no per-path
+  rate limiting — the request-volume layer now closes in-process, first
+  check before TTL/KDF, transient by construction (clears as the window
+  slides; never a lockout).

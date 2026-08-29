@@ -79,10 +79,10 @@ New table **`chat_bindings`** (created fresh):
 3. **Security = code, not a slide.** The 7-guard list below becomes a test module in the style of `tests/test_injection_containment.py` (assert the guarantee holds when the attack succeeds). Enumerated in Gate 3 §Test plan and §Files.
 
 ### The 7 security guards (→ `tests/test_waybot_security.py`)
-1. Confirmation code: hashed-only storage, constant-time compare, attempt cap (5) → forced reissue, TTL expiry.
+1. Confirmation code: hashed-only storage (PBKDF2, iterations stored in-hash), constant-time compare, attempt cap (5) that throttles wrong-code guessers (6th → 429) **without ever locking out the code-holder** — the check is verify-first, so the correct code always releases (no reissue endpoint exists; verify-first is the anti-lockout design, not reissue). TTL expiry (default 24h, anchored to seed time).
 2. Invite token: random 128-bit, single-purpose (binds chat→desk only). Leaked link cannot release — release requires the code.
 3. Role separation: traveler (bot) sessions submit passports only; release/approve authority lives only on the code path. A traveler session cannot call confirm/approve.
-4. Submission integrity: checksum gate before storage; `team_size` cap; duplicate doc numbers rejected (also a sandbox rule); malformed/oversized photos rejected.
+4. Submission integrity: checksum gate before storage; `team_size` cap; duplicate doc numbers rejected (also a sandbox rule); **oversized** photos rejected before extraction (pre-download `file_size` gate + authoritative post-download check). Malformed/non-image blobs are not explicitly rejected — they fail closed through `extract_passport`'s exception into the typed-entry fallback.
 5. PII minimization: image bytes never touch DB or disk (memory-only, deleted post-extract, `deleteMessage` on Telegram); traveler rows purged at desk close; events/logs masked — a test scans emitted events for doc-number/DOB patterns and fails on a hit.
 6. Untrusted-text containment: MRZ-derived strings flow only into structured pax JSON (stdin), never into brain prompts or CLI args. Mirrored injection test with hostile names.
 7. One-shot semantics: confirm and approve are single-use (second call → 410, like escalation slots), so approvals cannot replay.

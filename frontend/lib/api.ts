@@ -37,6 +37,8 @@ export type ConfirmOutcome =
   | { kind: "released" }
   | { kind: "wrong_code" } // 403 — the code did not match; still awaiting
   | { kind: "not_found" } // 404 — unknown desk_id
+  | { kind: "gone" } // 410 — desk already released/closed, or the code expired
+  | { kind: "throttled" } // 429 — too many wrong attempts; slow down
   | { kind: "failed"; detail: string };
 
 /** POST /api/desk/{desk_id}/confirm — the manager's release code. On a
@@ -58,6 +60,8 @@ export async function confirmDesk(
   if (res.ok) return { kind: "released" };
   if (res.status === 403) return { kind: "wrong_code" };
   if (res.status === 404) return { kind: "not_found" };
+  if (res.status === 410) return { kind: "gone" };
+  if (res.status === 429) return { kind: "throttled" };
   return { kind: "failed", detail: `unexpected response (${res.status})` };
 }
 
