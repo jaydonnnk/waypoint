@@ -27,6 +27,7 @@ import { useGSAP } from "@gsap/react";
 
 import WaypointField from "../../WaypointField";
 import {
+  approveDesk,
   confirmDesk,
   deskStreamUrl,
   getDeskSnapshot,
@@ -34,6 +35,7 @@ import {
 } from "@/lib/api";
 import { money } from "@/lib/format";
 import type {
+  ApprovedItinerary,
   DeskLifecycle,
   DeskResult,
   EscalationOption,
@@ -360,6 +362,15 @@ export default function DeskPage() {
   const [confirmMsg, setConfirmMsg] = useState<string | null>(null);
   const awaiting = lifecycle === "awaiting_travelers";
 
+  // Waybot pre-trip approval (S5). The cycle stops on the first book pick
+  // of a gated desk and persists what it wants to buy; the panel below
+  // renders that snapshot and posts the manager's Approve/Hold.
+  const [approval, setApproval] = useState<ApprovedItinerary | null>(null);
+  const [approveCode, setApproveCode] = useState("");
+  const [approving, setApproving] = useState(false);
+  const [approveMsg, setApproveMsg] = useState<string | null>(null);
+  const pendingApproval = lifecycle === "pending_approval";
+
   useEffect(() => {
     const source = new EventSource(deskStreamUrl(deskId));
 
@@ -452,6 +463,7 @@ export default function DeskPage() {
         // persisted lifecycle. Additive fields — default to released/0.
         setLifecycle(snap.lifecycle ?? "released");
         setVerifiedCount(snap.verified_count ?? 0);
+        setApproval(snap.approval ?? null);
       })
       .catch(() => {
         // silent — cards keep the "Trip N" fallback, the bar stays empty
@@ -475,6 +487,14 @@ export default function DeskPage() {
           ...Object.fromEntries(snap.positions.map((p) => [p.id, p])),
         }));
         setBudgetFigures(extractBudgetFigures(snap.budgets));
+        // Mirror the on-mount setters exactly (fix M2): the live stream
+        // can land the terminal result while lifecycle/approval still hold
+        // the stale on-mount values — an approval checkpoint fired live
+        // would stay invisible until a manual reload. Same additive
+        // defaults as the on-mount fetch: released/0/null.
+        setLifecycle(snap.lifecycle ?? "released");
+        setVerifiedCount(snap.verified_count ?? 0);
+        setApproval(snap.approval ?? null);
       })
       .catch(() => {
         // silent — the on-mount copy (or "Trip N") stays on screen
@@ -697,6 +717,39 @@ export default function DeskPage() {
               ? "Too many wrong attempts — only the correct code releases this desk."
               : outcome.detail
     );
+  }
+
+  // ---------- Waybot pre-trip approval (S5): sign off, or hold ----------
+  async function submitApproval(choice: "approve" | "hold") {
+    if (!approveCode.trim() || approving) return;
+    // Invalidate any in-flight snapshot (same seq guard the fetches use): a
+    // late refetch must never write its stale lifecycle/approval back over
+    // the local decision this submission is about to set. Covers both the
+    // approve and hold outcomes.
+    snapSeq.current++;
+    setApproving(true);
+    setApproveMsg(null);
+    const outcome = await approveDesk(deskId, choice, approveCode.trim());
+    if (outcome.kind === "approved") {
+      // The cycle is running again, pinned to the approved offer.
+      window.location.reload();
+      return;
+    }
+    setApproving(false);
+    setApproveMsg(
+      outcome.kind === "held"
+        ? "Held — nothing was booked. This trip is judged again from scratch on the next run."
+        : outcome.kind === "not_authorized"
+          ? "That code can't approve this trip — use the release code from your share card."
+          : outcome.kind === "not_found"
+            ? "This desk isn't available."
+            : outcome.kind === "gone"
+              ? "This approval was already decided — nothing more to do."
+              : outcome.detail
+    );
+    if (outcome.kind === "held" || outcome.kind === "gone") {
+      setLifecycle("released");
+    }
   }
 
   // ---------- derived, plain-language readouts (counts of real events) ----
@@ -1203,6 +1256,77 @@ export default function DeskPage() {
             </button>
           </div>
           {confirmMsg && <div className="decide-note">{confirmMsg}</div>}
+        </div>
+      )}
+
+      {/* ---- Waybot pre-trip approval: sign off before anything is bought */}
+      {pendingApproval && (
+        <div className="decide">
+          <div className="cap">● Waiting for your approval</div>
+          <div className="decide-name">
+            {approval
+              ? `Approve ${approval.trip_label} — ${money(approval.price, approval.currency)}`
+              : "Approve this trip before it books"}
+          </div>
+          <p className="reason">
+            Nothing has been booked. We stopped here so you can see exactly
+            what we want to buy. Approving books this same flight — and
+            the price, your budget and your per-trip cap are re-checked in
+            code first, so a price move beyond them comes back to you
+            instead of booking.
+          </p>
+          {approval && (
+            <ul className="reason">
+              {(approval.segments.length > 0
+                ? approval.segments.map(
+                    (seg) =>
+                      `${seg.dep_airport} → ${seg.arr_airport}` +
+                      (seg.carrier || seg.flight_number
+                        ? `  ${[seg.carrier, seg.flight_number]
+                            .filter(Boolean)
+                            .join(" ")}`
+                        : "") +
+                      (seg.dep_time
+                        ? `  dep ${seg.dep_time.slice(0, 16).replace("T", " ")}`
+                        : "")
+                  )
+                : [
+                    `${approval.origin} → ${approval.dest} on ${approval.depart_date}`,
+                  ]
+              ).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          )}
+          <label className="constraint-field">
+            <span className="constraint-k">Release code</span>
+            <input
+              type="text"
+              value={approveCode}
+              placeholder="e.g. 3F9A21BC"
+              onChange={(e) => setApproveCode(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitApproval("approve");
+              }}
+            />
+          </label>
+          <div className="btns">
+            <button
+              className="btn primary"
+              onClick={() => submitApproval("approve")}
+              disabled={approving || !approveCode.trim()}
+            >
+              {approving ? "Approving…" : "Approve — book this flight"}
+            </button>
+            <button
+              className="btn"
+              onClick={() => submitApproval("hold")}
+              disabled={approving || !approveCode.trim()}
+            >
+              Hold — don't book
+            </button>
+          </div>
+          {approveMsg && <div className="decide-note">{approveMsg}</div>}
         </div>
       )}
 

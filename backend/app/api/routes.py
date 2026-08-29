@@ -14,8 +14,6 @@ agent started still sees every event.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import json
 import math
 import os
@@ -34,6 +32,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import fixture
+from app.approval import apply_decision
+from app.codes import KDF_ITERATIONS, hash_code, verify_code
 from app.config import int_env
 from app.agent.auditor import (
     SOURCE_FALLBACK,
@@ -43,6 +43,7 @@ from app.agent.auditor import (
 )
 from app.agent.loop import DEFAULT_ESCALATION_WAIT, METER_MAX, DeskAgent
 from app.db.store import DeskStore
+from app.events import SINK
 from app.models import CloseReport, DeskResult
 
 router = APIRouter(prefix="/api", tags=["waypoint"])
@@ -123,56 +124,15 @@ def _new_confirmation_code() -> str:
     return secrets.token_hex(4).upper()
 
 
-_KDF_ITERATIONS = 260_000  # OWASP 2023 PBKDF2-SHA256 minimum
-
-
-def _hash_code(code: str) -> str:
-    """Slow KDF hash of the code -> 'pbkdf2$<iters>$salt$digest'. Plaintext
-    never stored. The iteration count is stored IN the string (L3) so tuning
-    _KDF_ITERATIONS later never makes an at-rest hash unverifiable. Scheme-
-    tagged so old hashes still verify (back-compat): the S1 single-round
-    'salt$digest' SHA-256 form."""
-    salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac(
-        "sha256", code.encode(), salt.encode(), _KDF_ITERATIONS
-    ).hex()
-    return f"pbkdf2${_KDF_ITERATIONS}${salt}${digest}"
-
-
-def _verify_code(code: str, stored: str | None) -> bool:
-    """Constant-time check of a plaintext code against the stored hash.
-
-    Scheme-tagged, back-compat across the at-rest formats:
-    - 'pbkdf2$<iters>$salt$digest' (current) — iterations parsed FROM the
-      stored value, never trusted from the module constant, and fail-closed
-      on any out-of-range stored count (M-new1).
-    - 'salt$digest' (legacy S1 single-round SHA-256).
-    All paths use hmac.compare_digest for constant-time comparison."""
-    if not stored or "$" not in stored:
-        return False
-    if stored.startswith("pbkdf2$"):
-        parts = stored.split("$")
-        if len(parts) != 4:
-            return False
-        # pbkdf2$<iters>$salt$digest — iterations FROM the stored value.
-        _, iters_raw, salt, digest = parts
-        try:
-            iters = int(iters_raw)
-        except ValueError:
-            return False
-        # M-new1: fail closed on an out-of-range stored iteration count —
-        # 0/negative would verify at zero cost (a forged hash beats the KDF),
-        # and a huge count is a CPU bomb pointed at the verify path.
-        if not (1 <= iters <= 1_000_000):
-            return False
-        candidate = hashlib.pbkdf2_hmac(
-            "sha256", code.encode(), salt.encode(), iters
-        ).hex()
-        return hmac.compare_digest(candidate, digest)
-    # Legacy S1 scheme: salt$digest (single-round SHA-256, back-compat)
-    salt, digest = stored.split("$", 1)
-    candidate = hashlib.sha256(f"{salt}{code}".encode()).hexdigest()
-    return hmac.compare_digest(candidate, digest)
+# The release-credential KDF now lives in app/codes.py (S5): the agent
+# loop mints a SECOND manager credential — the per-round approval token —
+# and it cannot import this module (routes imports the loop). Behavior is
+# unchanged; these private aliases keep every existing call site and the
+# S4 security tests (`routes._hash_code` / `routes._verify_code` /
+# `routes._KDF_ITERATIONS`) pointing at the same functions.
+_KDF_ITERATIONS = KDF_ITERATIONS
+_hash_code = hash_code
+_verify_code = verify_code
 
 
 def _start_cycle(desk_id: str) -> DeskState:
@@ -271,6 +231,9 @@ AGENT = DeskAgent(
     escalation_clear=_clear_escalation,
     meter_report=_report_meter,
     escalation_wait=_escalation_wait(),
+    # G4 (S5): the loop announces pending_approval / pinned_resume on the
+    # one in-process sink the Waybot subscribes to.
+    sink=SINK,
 )
 
 # The S7 risk auditor — routes-layer placement (DECISION 4): it runs ONCE
@@ -385,6 +348,23 @@ class ConfirmRequest(BaseModel):
     """The manager's release code (plaintext, checked against the stored
     hash). Body of POST /desk/{id}/confirm."""
 
+    code: str
+
+
+class ApproveRequest(BaseModel):
+    """The manager's pre-trip Approve/Hold, body of POST /desk/{id}/approve.
+
+    `code` is the MANAGER credential and mirrors /confirm exactly — role
+    separation is enforced by holding a secret a traveler never receives.
+    Two values verify, both manager-only:
+      - the desk's release code (what the manager typed at /confirm), or
+      - the per-round approval token, which rides the pending_approval
+        event into the manager's Telegram chat and nowhere else.
+    A bot-path/traveler identity holds neither (the invite token is a
+    different value and verifies against neither hash), so it gets a 403.
+    """
+
+    choice: Literal["approve", "hold"]
     code: str
 
 
@@ -624,6 +604,95 @@ async def confirm(desk_id: str, body: ConfirmRequest) -> dict:
         raise HTTPException(status_code=410, detail="desk already released")
     _start_cycle(desk_id)
     return {"desk_id": desk_id, "lifecycle": "released"}
+
+
+@router.post("/desk/{desk_id}/approve")
+async def approve(desk_id: str, body: ApproveRequest) -> dict:
+    """G4 pre-trip approval: the manager signs off the priced itinerary the
+    cycle stopped on, or holds it.
+
+    Shape mirrors /confirm deliberately:
+    - unknown desk -> 404;
+    - a desk that is not `pending_approval` -> 410 (ONE-SHOT: a second
+      approve on the same slot always lands here, because the first one's
+      compare-and-set already moved the lifecycle — same semantics as an
+      escalation slot);
+    - wrong/absent manager credential -> 403 (role separation: a traveler
+      holds the invite token, which verifies against neither hash);
+    - approve -> ledger note + lifecycle `released` + `_start_cycle`, THE
+      shared resume primitive, and the resumed cycle runs the offer
+      PINNED (no re-judgment; the execute wall's invariants still fire).
+    - hold -> ledger note + lifecycle `released` with the pin DROPPED. The
+      write is skipped and the position is judged normally whenever a
+      cycle next runs; hold deliberately does NOT start one, since that
+      would immediately re-ask for the approval just declined.
+
+    No attempt cap / rate limiter here: unlike /confirm this route is only
+    reachable inside the narrow `pending_approval` window, the credential
+    is single-round, and the very first successful call closes the slot.
+
+    L3: the approval token is PER-ROUND. When it is the credential that
+    verified, the approval state is re-read immediately before the
+    decision and the hash must still match — a new approval round opened
+    in between mints a new token and supersedes this one (410). The
+    release-code path is exempt: it is not round-scoped.
+    """
+    try:
+        lifecycle = await asyncio.to_thread(STORE.get_lifecycle, desk_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="unknown desk")
+    if lifecycle != "pending_approval":
+        raise HTTPException(
+            status_code=410, detail="no approval is pending on this desk"
+        )
+
+    approval = await asyncio.to_thread(STORE.get_approval, desk_id)
+    _token, code_hash = await asyncio.to_thread(STORE.get_invite, desk_id)
+    loop = asyncio.get_running_loop()
+    # PBKDF2 off the event loop, on the SAME bounded executor /confirm uses
+    # (H-new1) so an approve flood cannot starve the app either.
+    authorized = await loop.run_in_executor(
+        _KDF_VERIFY_EXECUTOR, _verify_code, body.code, code_hash
+    )
+    via_token = False
+    if not authorized and approval.approval_token_hash:
+        via_token = await loop.run_in_executor(
+            _KDF_VERIFY_EXECUTOR,
+            _verify_code,
+            body.code,
+            approval.approval_token_hash,
+        )
+        authorized = authorized or via_token
+    if not authorized:
+        raise HTTPException(status_code=403, detail="not authorized to approve")
+
+    if via_token:
+        # L3 cross-round TOCTOU: between the hash read above and this
+        # decision, a new approval round may have opened (new pin, new
+        # token). Re-read and require the SAME hash to still be pinned;
+        # otherwise this token belongs to a superseded round -> 410.
+        fresh = await asyncio.to_thread(STORE.get_approval, desk_id)
+        if fresh.approval_token_hash != approval.approval_token_hash:
+            raise HTTPException(
+                status_code=410,
+                detail="approval round superseded \u2014 re-fetch the latest",
+            )
+
+    outcome = await apply_decision(STORE, desk_id, body.choice)
+    if outcome == "gone":
+        # Lost the compare-and-set: another caller already decided this slot.
+        raise HTTPException(
+            status_code=410, detail="approval already decided"
+        )
+    resumed = outcome == "approved"
+    if resumed:
+        _start_cycle(desk_id)
+    return {
+        "desk_id": desk_id,
+        "choice": body.choice,
+        "lifecycle": "released",
+        "resumed": resumed,
+    }
 
 
 @router.get("/desk/{desk_id}/stream")

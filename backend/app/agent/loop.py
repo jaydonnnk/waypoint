@@ -17,17 +17,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Awaitable, Callable
 
 from app.agent.brain import DeskBrain
+from app.approval import REAPPROVAL_CAP, request_approval
 from app.atlas.client import AtlasError, AtlasQueryOnly, AtlasUnknownOrder
-from app.db.store import DeskStore, LedgerInput, MarkUpdate
+from app.db.store import ApprovalState, DeskStore, LedgerInput, MarkUpdate
+from app.events import DeskEvent, EventSink
 from app.fixture import VOLATILITY_PRIORS
-from app.models import DeskResult, Position
+from app.models import DeskAction, DeskResult, Position
 from app.provenance import build_rails
+
+logger = logging.getLogger(__name__)
 
 # emit takes a JSON-serializable dict event and returns an awaitable.
 Emit = Callable[[dict], Awaitable[None]]
@@ -55,6 +60,20 @@ FANOUT_CONCURRENCY = 4
 
 # Bounded wait for the ONE human click on an escalation.
 DEFAULT_ESCALATION_WAIT = 300.0
+
+# G4 (S5): the write-path failures that mean the APPROVED offer can no
+# longer be bought at all — as opposed to merely costing more (which the
+# budget/cap/contingency invariants already own). Only these buy the
+# position its one re-judgment + fresh approval round. BOOKING_EXPIRED is
+# treated identically to OFFER_EXPIRED by the Atlas error-handling
+# reference (L11).
+UNBOOKABLE_CODES = frozenset({"OFFER_EXPIRED", "BOOKING_EXPIRED"})
+
+# Sentinel: a write NOT covered by an approval pin. The pinned-write
+# contingency invariant in `_write_position` keys on identity with this
+# object, so a MISSING approved price (None) on a pinned write stays
+# distinguishable from "not pinned at all" and can fail closed (H1b).
+_NOT_PINNED: object = object()
 
 # The escalation slot seam: (desk_id, esc_id) -> {"event": asyncio.Event,
 # "choice": None} registered on the desk state, or None when no human is
@@ -127,6 +146,7 @@ class DeskAgent:
         meter_report: MeterReport | None = None,
         escalation_wait: float = DEFAULT_ESCALATION_WAIT,
         pace: float = 0.5,
+        sink: EventSink | None = None,
     ):
         # Guard: bounded loop. Exceeding the budget gives up gracefully.
         self.step_budget = step_budget
@@ -143,6 +163,11 @@ class DeskAgent:
         self.escalation_wait = escalation_wait
         # Paced step emit so the stream reads live (0 in tests).
         self.pace = pace
+        # The typed domain-event sink (G4/S5): pending_approval and the
+        # pinned_resume provenance moment are announced here so the Waybot
+        # can reach the manager. None in bare tests — publishing is
+        # always optional, never load-bearing for the cycle.
+        self.sink = sink
 
     @staticmethod
     def _default_atlas():
@@ -270,8 +295,54 @@ class DeskAgent:
                 contingency_left=contingency_left,
             )
 
+        # --- G4 (S5): read the pin ONCE per cycle, in one transaction.
+        # DESK KIND decides, exactly like the pax builder: only a GATED
+        # desk (invite_token set) ever stops for pre-trip approval, so
+        # ungated/legacy/recorded desks keep today's behavior byte-for-byte
+        # and this gate makes zero Atlas calls. A read failure FAILS
+        # CLOSED on a gated desk (L13): silently continuing would run the
+        # desk ungated past its own gate, so the cycle ends with a code.
+        # Ungated desks keep the approval=None degradation.
+        try:
+            approval: ApprovalState | None = await asyncio.to_thread(
+                self.store.get_approval, desk_id
+            )
+        except Exception:  # noqa: BLE001 — probe the desk kind, then decide
+            # L13 observability: the fail-closed posture below is the
+            # behavior; this is the trace of WHY the desk stopped.
+            logger.exception("approval state unreadable for desk %s", desk_id)
+            approval = None
+            gated_probe = False
+            try:
+                invite_token, _code_hash = await asyncio.to_thread(
+                    self.store.get_invite, desk_id
+                )
+                gated_probe = bool(invite_token)
+            except Exception:  # noqa: BLE001 — cannot even read the kind
+                logger.warning(
+                    "invite probe failed for desk %s \u2014 kind unknown, "
+                    "posture decided assuming ungated", desk_id,
+                )
+                gated_probe = False
+            if gated_probe:
+                await emit({"type": "error", "code": "DESK_STATE_INVALID"})
+                return await self._give_up(
+                    desk_id, emit, step,
+                    status="failed",
+                    text="Approval state unreadable on a gated desk "
+                         "\u2014 failing closed instead of running "
+                         "past its own gate",
+                    positions=positions, losses_admitted=0,
+                    comparison_mode=comparison, settle=[],
+                    budget_start=budget_start, budget_left=budget_left,
+                    contingency_start=contingency_start,
+                    contingency_left=contingency_left,
+                )
+
         held = [p for p in positions if p.status == "held"]
-        meter_used = await self._reprice_fan_out(desk_id, emit, held)
+        meter_used, offers_by_pos = await self._reprice_fan_out(
+            desk_id, emit, held
+        )
         await emit_step(
             f"Repriced {len(held)} positions \u2014 meter at "
             f"{meter_used}/{METER_MAX}; stale marks carry disclosed "
@@ -310,12 +381,60 @@ class DeskAgent:
                 "disclosure": "injected demo scenario \u2014 labeled",
             })
 
+        # --- MARK CONSTRUCTION (G4, Gate 3 decision 1). THE pin branch
+        # --- lives here and ONLY here: an approved position becomes a
+        # --- PINNED mark, every other position is judged normally, and the
+        # --- single execute wall below runs over both together. There is
+        # --- no second wall and no scattered `if pinned` past this point.
+        pinned_pos: Position | None = None
+        pinned_pos_id = approval.pinned_position_id if approval else None
+        if pinned_pos_id is not None:
+            pinned_pos = next(
+                (p for p in held if p.id == pinned_pos_id), None
+            )
+
+        pinned_actions: list[DeskAction] = []
+        pinned_approved_price: Decimal | None = None
+        if pinned_pos is not None and approval is not None:
+            pinned_mark, pinned_approved_price = self._pinned_mark(
+                approval, pinned_pos, budget_left, contingency_left,
+                mandate.authority_cap,
+                fresh_offer=offers_by_pos.get(pinned_pos.id),
+            )
+            pinned_actions = [pinned_mark]
+            # The fan-out above just persisted whatever offer the fresh
+            # search returned. Put the APPROVED one back on the row so the
+            # blotter records the offer this desk is actually pinned to —
+            # otherwise the persisted evidence would name an offer the
+            # write path never touches. No Atlas call, pinned desks only.
+            await asyncio.to_thread(
+                self.store.update_marks, desk_id,
+                [MarkUpdate(
+                    position_id=pinned_pos.id,
+                    mark_price=pinned_pos.mark_price,
+                    mark_at=datetime.now(timezone.utc),
+                    mark_stale=pinned_pos.mark_stale,
+                    atlas_offer_id=pinned_pos.atlas_offer_id,
+                )],
+            )
+            await self._announce_pinned_resume(
+                desk_id, emit, approval, pinned_pos, pinned_actions[0]
+            )
+
         # --- JUDGE: advise gate. ONE batched call per cycle; the brain
-        # --- never raises (degrades to the deterministic fallback).
-        actions = await self.brain.judge(
-            held, VOLATILITY_PRIORS, METER_MAX - meter_used,
+        # --- never raises (degrades to the deterministic fallback). The
+        # --- pinned position is NOT judged — that is what "pinned" means,
+        # --- and it is why a resumed cycle makes zero judgment calls on a
+        # --- single-position desk.
+        to_judge = [
+            p for p in held
+            if pinned_pos is None or p.id != pinned_pos.id
+        ]
+        judged = await self.brain.judge(
+            to_judge, VOLATILITY_PRIORS, METER_MAX - meter_used,
             budget_left, contingency_left,
-        )
+        ) if to_judge else []
+        actions = pinned_actions + list(judged)
         for action in actions:
             await emit({
                 "type": "trade",
@@ -358,6 +477,80 @@ class DeskAgent:
                     ))
                 continue
 
+            # --- G4 APPROVAL CHECKPOINT (S5). The FIRST book pick on a
+            # NORMAL (unapproved) position of a GATED desk stops the desk:
+            # pin the offer, snapshot its identity, flip to
+            # 'pending_approval', announce it, and END the cycle. NEVER a
+            # wait inside the cycle — the process-wide CYCLE_LOCK is held,
+            # so the human beat is persist-and-resume (POST /approve →
+            # _start_cycle → the pinned branch above).
+            # Two conditions keep the blast radius exactly where it belongs:
+            #   - GATED desk only (ungated/legacy/recorded are untouched);
+            #   - LIVE write path only — in comparison mode nothing books,
+            #     so there is nothing to approve and the logged-decision
+            #     path below stays byte-identical.
+            if (
+                action.kind == "book"
+                and approval is not None
+                and approval.gated
+                and not comparison
+                and (pinned_pos is None or pos.id != pinned_pos.id)
+            ):
+                opened = await request_approval(
+                    self.store, self.sink, desk_id, pos,
+                    offers_by_pos.get(pos.id), pos.mark_price,
+                    reason=(
+                        "first book pick on this position \u2014 pre-trip "
+                        "approval required"
+                    ),
+                    reapproval_count=approval.reapproval_count,
+                    # L12: a fresh FIRST-TIME approval round starts a
+                    # fresh re-approval allowance.
+                    reset_reapproval=True,
+                )
+                if opened:
+                    await emit_step(
+                        f"Pre-trip approval requested for {pos.id} at "
+                        f"{pos.mark_price} \u2014 the desk stops here; nothing "
+                        "books until the manager approves"
+                    )
+                    give_up_text = (
+                        "Cycle ended awaiting pre-trip approval \u2014 the "
+                        "desk resumes on the approved offer, pinned, when "
+                        "the manager clicks Approve"
+                    )
+                else:
+                    # L10: honor the return value — the CAS lost (the desk
+                    # is already pending or closed), so NO approval round
+                    # was opened by this cycle. The wire must not claim
+                    # one was; the desk stayed 'released'.
+                    logger.warning(
+                        "pre-trip approval round NOT opened for desk %s "
+                        "position %s \u2014 the desk stayed released",
+                        desk_id, pos.id,
+                    )
+                    await emit_step(
+                        f"Pre-trip approval could not be opened for "
+                        f"{pos.id} \u2014 the desk stayed released; "
+                        "nothing books this cycle"
+                    )
+                    give_up_text = (
+                        "Cycle ended \u2014 the pre-trip approval round "
+                        "could not be opened (the desk stayed released); "
+                        "nothing booked"
+                    )
+                return await self._give_up(
+                    desk_id, emit, step,
+                    status="escalated",
+                    text=give_up_text,
+                    positions=positions,
+                    losses_admitted=losses_admitted,
+                    comparison_mode=comparison, settle=settle,
+                    budget_start=budget_start, budget_left=budget_left,
+                    contingency_start=contingency_start,
+                    contingency_left=contingency_left,
+                )
+
             # book (or an escalate pick) meets the wall.
             amount = pos.mark_price
             over_cap = amount > mandate.authority_cap
@@ -366,9 +559,18 @@ class DeskAgent:
             # authority cap for THIS position; the normal path never does.
             cap_waived = False
             if action.kind == "escalate" or over_cap or over_budget:
+                # L4: a pinned escalate mark carries the mark's own
+                # rationale onto the wire instead of the generic fallback;
+                # brain-flagged escalations keep today's behavior.
+                escalate_reason = (
+                    action.rationale
+                    if action.kind == "escalate"
+                    and pinned_pos is not None and pos.id == pinned_pos.id
+                    else None
+                )
                 choice = await self._escalation_beat(
                     desk_id, emit, pos, amount, over_cap, over_budget,
-                    comparison,
+                    comparison, escalate_reason=escalate_reason,
                 )
                 if comparison:
                     # Decisions logged, nothing waits and nothing executes.
@@ -420,10 +622,73 @@ class DeskAgent:
                 continue
 
             budget_before = budget_left
+            write_outcome: dict = {}
             budget_left, contingency_left = await self._write_position(
                 desk_id, emit, pos, budget_left, contingency_left, settle,
                 authority_cap=mandate.authority_cap, cap_waived=cap_waived,
+                outcome=write_outcome,
+                # H1b: thread the approved price into the PINNED write so
+                # the wall can enforce contingency against the offer the
+                # manager signed off (not whatever the mark measured).
+                approved_price=(
+                    pinned_approved_price
+                    if pinned_pos is not None and pos.id == pinned_pos.id
+                    else _NOT_PINNED
+                ),
             )
+            # --- G4 unbookable-pin edge (Gate 2 decision 1). The approved
+            # offer can no longer be bought AT ALL (not merely pricier —
+            # budget/cap/contingency own that). Exactly ONE re-judgment +
+            # one fresh approval round is allowed; after that the desk
+            # holds and discloses. The reapproval_count (cap 1) bounds the
+            # ping-pong.
+            if (
+                pinned_pos is not None
+                and approval is not None
+                and pos.id == pinned_pos.id
+                and pos.status != "booked"
+                and write_outcome.get("code") in UNBOOKABLE_CODES
+            ):
+                resumed = await self._reapprove_pinned(
+                    desk_id, emit, approval, pos, offers_by_pos,
+                    budget_left, contingency_left, meter_used,
+                    # L11 follow-up: the ACTUAL unbookable code (either
+                    # OFFER_EXPIRED or BOOKING_EXPIRED) rides the wire/
+                    # disclosure text — never a hardcoded one.
+                    unbookable_code=write_outcome["code"],
+                )
+                if resumed == "requested":
+                    unbookable_text = (
+                        "Approved offer expired \u2014 re-judged once and "
+                        "asked the manager to approve the replacement; "
+                        "nothing booked on a guess"
+                    )
+                elif resumed == "held":
+                    unbookable_text = (
+                        "Approved offer expired again \u2014 the one "
+                        "re-approval is spent, so the desk HOLDS and "
+                        "discloses instead of booking something the "
+                        "manager never saw"
+                    )
+                else:
+                    # L10: request_approval lost its CAS — no fresh round
+                    # was opened; the wire must not claim one was.
+                    unbookable_text = (
+                        "Approved offer expired and the replacement "
+                        "could not open a fresh approval round (the desk "
+                        "stayed released) \u2014 nothing booked on a guess"
+                    )
+                return await self._give_up(
+                    desk_id, emit, step,
+                    status="escalated",
+                    text=unbookable_text,
+                    positions=positions,
+                    losses_admitted=losses_admitted,
+                    comparison_mode=comparison, settle=settle,
+                    budget_start=budget_start, budget_left=budget_left,
+                    contingency_start=contingency_start,
+                    contingency_left=contingency_left,
+                )
             if pos.status == "booked":
                 # Disclose the booking as a COUNTED step (S6): a booked
                 # position is real progress the step budget must see —
@@ -486,6 +751,215 @@ class DeskAgent:
         ))
 
     # ------------------------------------------------------------------
+    # G4 pinned resume (S5) — mark construction, provenance, and the
+    # one-shot re-approval for an expired pin.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _pinned_mark(
+        approval: ApprovalState,
+        pos: Position,
+        budget_left: Decimal,
+        contingency_left: Decimal,
+        authority_cap: Decimal,
+        fresh_offer=None,
+    ) -> tuple[DeskAction, Decimal | None]:
+        """Build the PINNED mark for an approved position.
+
+        Returns (action, approved_price) — the approved price rides along
+        so the execute wall can enforce it at WRITE time too (H1b).
+
+        The offer id is forced back to the APPROVED one: this same cycle
+        just repriced the position and may have found a different cheapest
+        offer, but "pinned" means the desk buys what the manager signed
+        off — not what the search happened to return afterwards.
+    
+        The mark degrades to `escalate` when:
+        - the fresh search's best offer is NOT the approved one (H1a) —
+          the mark price then belongs to a DIFFERENT offer than the one
+          the manager signed off, so the contingency test below would be
+          measuring the wrong offer's price; re-confirm before booking;
+        - the approved price is absent/unparseable (L1) — never book
+          against a price we cannot verify; escalate instead;
+        - the fresh price has moved BEYOND what the approval covers.
+        The contingency test is the one this branch owns; the cap/budget
+        tests are stated too so the rationale names the real reason, and
+        the execute wall enforces them a second time regardless —
+        INCLUDING contingency: for pinned writes `_write_position`
+        re-checks the VERIFIED price against the approved price + the
+        contingency remainder (CONTINGENCY_EXCEEDED), belt and braces,
+        never a silent book on the pinned path.
+        """
+        pos.atlas_offer_id = approval.approved_offer_id
+        fresh = pos.mark_price
+        approved_price: Decimal | None = None
+        raw_price = approval.snapshot.get("price")
+        if raw_price is not None:
+            try:
+                approved_price = Decimal(str(raw_price))
+            except (ArithmeticError, ValueError):
+                approved_price = None
+
+        reasons: list[str] = []
+        if approved_price is None:
+            # L1: fail CLOSED — an unverifiable approved price escalates
+            # instead of skipping the contingency test and booking.
+            reasons.append(
+                "approved price unverifiable \u2014 escalating instead "
+                "of booking"
+            )
+        else:
+            move = fresh - approved_price
+            if move > contingency_left:
+                reasons.append(
+                    f"price moved {move} above the approved "
+                    f"{approved_price}, beyond the {contingency_left} "
+                    "contingency remainder"
+                )
+        # H1a: divergence — the fresh mark must BE the approved offer's
+        # price. When the fresh search priced a different offer, the
+        # contingency test above measured the wrong offer.
+        if (
+            fresh_offer is not None
+            and getattr(fresh_offer, "atlas_offer_id", None)
+            != approval.approved_offer_id
+        ):
+            reasons.append(
+                "approved offer no longer matches the fresh priced "
+                "mark \u2014 re-confirm before booking"
+            )
+        if fresh > authority_cap:
+            reasons.append("mark above the single-trade authority cap")
+        if fresh > budget_left:
+            reasons.append("mark above the remaining budget")
+
+        if reasons:
+            return DeskAction(
+                position_id=pos.id,
+                kind="escalate",
+                rationale=(
+                    "pinned_resume \u2014 " + "; ".join(reasons)
+                    + "; the manager's approval does not cover this move, "
+                    "so it escalates instead of booking"
+                ),
+            ), approved_price
+        return DeskAction(
+            position_id=pos.id,
+            kind="book",
+            rationale=(
+                "pinned_resume \u2014 executing the offer the manager "
+                "approved; no re-judgment, wall invariants still apply"
+            ),
+        ), approved_price
+
+    async def _announce_pinned_resume(
+        self,
+        desk_id: str,
+        emit: Emit,
+        approval: ApprovalState,
+        pos: Position,
+        action: DeskAction,
+    ) -> None:
+        """Provenance: this position executed the APPROVED offer and was
+        never re-judged.
+
+        The stream already carries it — the pinned mark rides the ordinary
+        `trade` emit with a `pinned_resume —` rationale, so no new SSE
+        event type is invented here. This adds the typed sink moment so
+        the Waybot can say the same thing to the manager.
+        """
+        del emit  # the stream side is the pinned mark's own trade event
+        if self.sink is not None:
+            self.sink.publish(DeskEvent(
+                type="pinned_resume",
+                desk_id=desk_id,
+                payload={
+                    "position_id": pos.id,
+                    "offer_id": approval.approved_offer_id,
+                    "mark_kind": action.kind,
+                    "approved_price": approval.snapshot.get("price"),
+                    "reapproval_count": approval.reapproval_count,
+                },
+            ))
+
+    async def _reapprove_pinned(
+        self,
+        desk_id: str,
+        emit: Emit,
+        approval: ApprovalState,
+        pos: Position,
+        offers_by_pos: dict,
+        budget_left: Decimal,
+        contingency_left: Decimal,
+        meter_used: int,
+        unbookable_code: str,
+    ) -> str:
+        """The approved offer is unbookable. Spend the ONE re-approval if
+        it is still available, otherwise hold and disclose.
+
+        Returns "requested" (a fresh approval round is open) or "held".
+        """
+        if approval.reapproval_count >= REAPPROVAL_CAP:
+            await emit({
+                "type": "error",
+                "code": "PIN_UNBOOKABLE_HELD",
+                "position_id": pos.id,
+                "disclosure": (
+                    "the approved offer expired a second time — the "
+                    "one allowed re-approval is spent, so the desk holds; "
+                    "nothing books that the manager never saw"
+                ),
+            })
+            return "held"
+
+        count = await asyncio.to_thread(self.store.bump_reapproval, desk_id)
+        # Exactly one re-judgment, scoped to THIS position.
+        rejudged = await self.brain.judge(
+            [pos], VOLATILITY_PRIORS, METER_MAX - meter_used,
+            budget_left, contingency_left,
+        )
+        pick = next(
+            (a for a in rejudged if a.position_id == pos.id), None
+        )
+        offer = offers_by_pos.get(pos.id)
+        if pick is None or pick.kind != "book" or offer is None:
+            await emit({
+                "type": "error",
+                "code": "PIN_UNBOOKABLE_HELD",
+                "position_id": pos.id,
+                "disclosure": (
+                    "the approved offer expired and the re-judgment did "
+                    "not produce a bookable replacement — holding"
+                ),
+            })
+            return "held"
+
+        # The replacement the manager will be asked to approve.
+        pos.atlas_offer_id = offer.atlas_offer_id
+        opened = await request_approval(
+            self.store, self.sink, desk_id, pos, offer, pos.mark_price,
+            reason=(
+                f"the approved offer is no longer bookable "
+                f"({unbookable_code}) \u2014 one re-judgment allowed, "
+                "fresh approval required"
+            ),
+            reapproval_count=count,
+            # L12: a re-approval NEVER resets the counter — the allowance
+            # is per pin lineage, and this is the lineage spending it.
+            reset_reapproval=False,
+        )
+        if not opened:
+            # L10: honor the return value — the CAS lost, so no fresh
+            # round was opened; the desk stayed 'released'.
+            logger.warning(
+                "re-approval round NOT opened for desk %s position %s "
+                "\u2014 the desk stayed released",
+                desk_id, pos.id,
+            )
+            return "not_opened"
+        return "requested"
+
+    # ------------------------------------------------------------------
     # Reprice fan-out — one search per position × candidate date,
     # meter-gated at 20 (hard stop; check BEFORE dispatch, adjacent to
     # decrement), bounded concurrency, skip-and-continue on failures.
@@ -493,7 +967,15 @@ class DeskAgent:
 
     async def _reprice_fan_out(
         self, desk_id: str, emit: Emit, held: list[Position]
-    ) -> int:
+    ) -> tuple[int, dict]:
+        """Returns (meter_used, {position_id: chosen Offer}).
+
+        The chosen offer is kept (S5) because the approval checkpoint has
+        to snapshot the offer's IDENTITY — segments, flight numbers, the
+        carrier/cabin once the mapper carries them — and re-deriving it
+        later would need a second Atlas call. Positions whose reprice
+        failed or returned nothing are simply absent from the map.
+        """
         meter_used = 0
         meter_lock = asyncio.Lock()
         semaphore = asyncio.Semaphore(FANOUT_CONCURRENCY)
@@ -521,10 +1003,12 @@ class DeskAgent:
         results = await asyncio.gather(*(reprice_one(p) for p in held))
 
         updates: list[MarkUpdate] = []
+        offers_by_pos: dict[str, object] = {}
         now = datetime.now(timezone.utc)
         for outcome, pos, offers in results:
             if outcome == "ok" and offers:
                 best = offers[0]  # AtlasClient sorts cheapest-first
+                offers_by_pos[pos.id] = best
                 old = pos.mark_price
                 pos.mark_price = best.price
                 pos.mark_stale = False
@@ -566,7 +1050,7 @@ class DeskAgent:
 
         if updates:
             await asyncio.to_thread(self.store.update_marks, desk_id, updates)
-        return meter_used
+        return meter_used, offers_by_pos
 
     # ------------------------------------------------------------------
     # Escalation beat — over cap / over budget → two priced options +
@@ -582,6 +1066,7 @@ class DeskAgent:
         over_cap: bool,
         over_budget: bool,
         comparison: bool,
+        escalate_reason: str | None = None,
     ) -> "str | None":
         esc_id = f"esc-{pos.id}"
         why = []
@@ -605,7 +1090,13 @@ class DeskAgent:
             "type": "escalate",
             "esc_id": esc_id,
             "position_id": pos.id,
-            "reason": "; ".join(why) or "brain flagged for review",
+            # L4: a pinned escalate mark names its own reasons here;
+            # brain-flagged escalations keep the generic fallback.
+            "reason": (
+                "; ".join(why)
+                or escalate_reason
+                or "brain flagged for review"
+            ),
             "options": options,
             "recommendation": "B",
             "disclosures": [
@@ -655,14 +1146,34 @@ class DeskAgent:
         settle: list[LedgerInput],
         authority_cap: Decimal,
         cap_waived: bool = False,
+        outcome: dict | None = None,
+        approved_price: Decimal | None | object = _NOT_PINNED,
     ) -> tuple[Decimal, Decimal]:
+        """`outcome` (S5, optional) is filled with {"code": ...} for the
+        failure that stopped this write, so the caller can tell an
+        UNBOOKABLE approved offer apart from a merely-too-expensive one.
+        The emitted error events are unchanged — this only records what
+        was already announced.
+
+        `approved_price` (H1b): for a PINNED write, the price the manager
+        approved — the wall enforces contingency against it a SECOND time
+        (the mark-time test measured the fresh mark, which may have been
+        a different offer's price). `_NOT_PINNED` for ordinary writes;
+        None on a pinned write fails closed (never book unpinned-priced).
+        CONTINGENCY_EXCEEDED is a money failure like BUDGET_EXCEEDED —
+        retryable classification, deliberately NOT in UNBOOKABLE_CODES."""
+
+        async def fail(code: str) -> None:
+            if outcome is not None:
+                outcome["code"] = code
+            await emit({
+                "type": "error", "code": code, "position_id": pos.id,
+            })
+
         try:
             offer_id = pos.atlas_offer_id
             if not offer_id:
-                await emit({
-                    "type": "error", "code": "OFFER_EXPIRED",
-                    "position_id": pos.id,
-                })
+                await fail("OFFER_EXPIRED")
                 return budget_left, contingency_left
 
             # GUARD #3: re-read the world before the write (fresh verify).
@@ -679,13 +1190,11 @@ class DeskAgent:
                 new_contingency = await self._reconcile(
                     desk_id, emit, pos, signal, verified=verified,
                     contingency_left=contingency_left, settle=settle,
+                    outcome=outcome,
                 )
                 return budget_left, new_contingency
             except AtlasError as exc:
-                await emit({
-                    "type": "error", "code": exc.code,
-                    "position_id": pos.id,
-                })
+                await fail(exc.code)
                 return budget_left, contingency_left
 
             # BUDGET INVARIANT (fix 1): the execute wall re-checks the REAL
@@ -696,11 +1205,7 @@ class DeskAgent:
             # (an escalated "A" click waives only the authority cap). Fail
             # closed: code-only error, position stays held, nothing written.
             if verified.current_price > budget_left:
-                await emit({
-                    "type": "error",
-                    "code": "BUDGET_EXCEEDED",
-                    "position_id": pos.id,
-                })
+                await fail("BUDGET_EXCEEDED")
                 return budget_left, contingency_left
 
             # AUTHORITY-CAP INVARIANT (BK1): re-check the REAL verified price
@@ -712,12 +1217,23 @@ class DeskAgent:
             # budget stays enforced above. Fail closed: code-only error,
             # position stays held, nothing written.
             if not cap_waived and verified.current_price > authority_cap:
-                await emit({
-                    "type": "error",
-                    "code": "AUTHORITY_CAP_EXCEEDED",
-                    "position_id": pos.id,
-                })
+                await fail("AUTHORITY_CAP_EXCEEDED")
                 return budget_left, contingency_left
+
+            # CONTINGENCY INVARIANT (H1b): a PINNED write is re-checked at
+            # WRITE time against the price the manager actually approved —
+            # the mark-time gate may have measured a different offer's
+            # price. Money failure, same class as BUDGET_EXCEEDED: the
+            # position stays held, nothing written, and the pin is NOT
+            # unbookable (a later cycle can re-run it). Fail closed when a
+            # pinned write somehow carries no approved price at all.
+            if approved_price is not _NOT_PINNED:
+                if approved_price is None:
+                    await fail("DESK_STATE_INVALID")
+                    return budget_left, contingency_left
+                if verified.current_price - approved_price > contingency_left:
+                    await fail("CONTINGENCY_EXCEEDED")
+                    return budget_left, contingency_left
 
             # order create — WRITE, NEVER retried. The pax payload is
             # built from THIS verify's travelers (traveler_id carried,
@@ -732,11 +1248,7 @@ class DeskAgent:
             if pax_build.hold:
                 # Gated desk missing/short roster → hold + escalate,
                 # NEVER silently book demo identities.
-                await emit({
-                    "type": "error",
-                    "code": "PAX_ROSTER_INCOMPLETE",
-                    "position_id": pos.id,
-                })
+                await fail("PAX_ROSTER_INCOMPLETE")
                 return budget_left, contingency_left
             pax_json = pax_build.pax_json
             pax_source = pax_build.pax_source
@@ -755,22 +1267,17 @@ class DeskAgent:
                     )
                 except AtlasError:
                     pass
-                await emit({
-                    "type": "error", "code": signal.code,
-                    "position_id": pos.id,
-                })
+                await fail(signal.code)
                 return budget_left, contingency_left
             except AtlasQueryOnly as signal:  # PRICE_CHANGED et al.
                 new_contingency = await self._reconcile(
                     desk_id, emit, pos, signal, verified=verified,
                     contingency_left=contingency_left, settle=settle,
+                    outcome=outcome,
                 )
                 return budget_left, new_contingency
             except AtlasError as exc:
-                await emit({
-                    "type": "error", "code": exc.code,
-                    "position_id": pos.id,
-                })
+                await fail(exc.code)
                 return budget_left, contingency_left
 
             # order pay — WRITE, single-use, NEVER retried. The
@@ -780,10 +1287,7 @@ class DeskAgent:
                     self.atlas.pay, ref.payment_confirmation_id
                 )
             except AtlasError as exc:
-                await emit({
-                    "type": "error", "code": exc.code,
-                    "position_id": pos.id,
-                })
+                await fail(exc.code)
                 return budget_left, contingency_left
             if payment.query_only:
                 # The ONLY follow-up is `order status` — never re-pay.
@@ -795,10 +1299,7 @@ class DeskAgent:
                     )
                 except AtlasError:
                     pass
-                await emit({
-                    "type": "error", "code": payment.code,
-                    "position_id": pos.id,
-                })
+                await fail(payment.code)
                 return budget_left, contingency_left
 
             # GUARD: assert the real outcome — TICKETED and only TICKETED.
@@ -806,11 +1307,7 @@ class DeskAgent:
                 self.atlas.poll_until_ticketed, ref.order_no
             )
             if not ticketed:
-                await emit({
-                    "type": "error",
-                    "code": status.code or "TICKETING_PENDING",
-                    "position_id": pos.id,
-                })
+                await fail(status.code or "TICKETING_PENDING")
                 return budget_left, contingency_left
 
             await asyncio.to_thread(
@@ -855,9 +1352,7 @@ class DeskAgent:
             })
             return budget_left, contingency_left
         except AtlasError as exc:
-            await emit({
-                "type": "error", "code": exc.code, "position_id": pos.id,
-            })
+            await fail(exc.code)
             return budget_left, contingency_left
 
     async def _reconcile(
@@ -869,11 +1364,17 @@ class DeskAgent:
         verified,
         contingency_left: Decimal,
         settle: list[LedgerInput],
+        outcome: dict | None = None,
     ) -> Decimal:
         """PRICE_CHANGED → absorb-from-contingency vs re-quote (judgment
         boundary in the brain, math in code). NEVER a second order.
-        Returns the updated contingency remainder."""
+        Returns the updated contingency remainder. `outcome` (S5) records
+        a non-PRICE_CHANGED signal code for the caller, same as the write
+        path's own failures — an OFFER_EXPIRED arriving as a query-only
+        signal must still register as "the pin is unbookable"."""
         if signal.code != "PRICE_CHANGED":
+            if outcome is not None:
+                outcome["code"] = signal.code
             await emit({
                 "type": "error", "code": signal.code, "position_id": pos.id,
             })

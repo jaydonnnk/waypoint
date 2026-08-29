@@ -116,6 +116,41 @@ export interface DeskSnapshot {
   // and a running verified count; an ungated desk reports 'released'/0.
   lifecycle?: DeskLifecycle;
   verified_count?: number;
+  // Waybot pre-trip approval (S5) — additive. The identity snapshot taken
+  // when the cycle stopped for sign-off; null whenever nothing is pinned.
+  approval?: ApprovedItinerary | null;
+}
+
+// One leg of the approved itinerary. `carrier` fills in once map_offer
+// carries it (S6); today it is "" and the UI simply omits it.
+export interface ApprovedSegment {
+  dep_airport: string;
+  arr_airport: string;
+  dep_time: string;
+  arr_time: string;
+  flight_number: string;
+  carrier?: string;
+  direction?: string;
+}
+
+// The offer identity frozen AT APPROVAL (backend app/approval.py). The S6
+// travel pack reads the same snapshot — identity is never re-derived after
+// sign-off, so what the manager approved is what the pack shows.
+export interface ApprovedItinerary {
+  position_id: string;
+  trip_label: string;
+  origin: string;
+  dest: string;
+  depart_date: string;
+  pax: number;
+  offer_id: string;
+  price: string;
+  currency: string;
+  total_minutes?: number;
+  carrier?: string;
+  cabin?: string;
+  segments: ApprovedSegment[];
+  captured_at?: string;
 }
 
 // Per-rail provenance row on the meta event (S12, ADR 0006). ADDITIVE:

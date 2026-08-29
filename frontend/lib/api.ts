@@ -65,6 +65,45 @@ export async function confirmDesk(
   return { kind: "failed", detail: `unexpected response (${res.status})` };
 }
 
+export type ApproveChoice = "approve" | "hold";
+
+export type ApproveOutcome =
+  | { kind: "approved" } // 200 + resumed — the desk is booking the pinned offer
+  | { kind: "held" } // 200, no resume — the write is skipped this cycle
+  | { kind: "not_authorized" } // 403 — that credential cannot approve
+  | { kind: "not_found" } // 404 — unknown desk_id
+  | { kind: "gone" } // 410 — no approval pending, or already decided (one-shot)
+  | { kind: "failed"; detail: string };
+
+/** POST /api/desk/{desk_id}/approve — the manager's pre-trip sign-off.
+ *
+ * `code` is the manager credential and mirrors confirmDesk: the desk's
+ * release code (or, from the Telegram button, that round's approval
+ * token). A traveler holds neither, which is why this is 403-able.
+ * Approve resumes the cycle with the offer PINNED — no re-judgment, but
+ * the execute wall still re-checks price, budget and cap in code. */
+export async function approveDesk(
+  deskId: string,
+  choice: ApproveChoice,
+  code: string
+): Promise<ApproveOutcome> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/api/desk/${deskId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ choice, code }),
+    });
+  } catch {
+    return { kind: "failed", detail: "the desk backend is not reachable" };
+  }
+  if (res.ok) return { kind: choice === "approve" ? "approved" : "held" };
+  if (res.status === 403) return { kind: "not_authorized" };
+  if (res.status === 404) return { kind: "not_found" };
+  if (res.status === 410) return { kind: "gone" };
+  return { kind: "failed", detail: `unexpected response (${res.status})` };
+}
+
 /** The SSE endpoint URL for a desk's live stream. The server buffers and
  * replays EVERY event from event 0 on each connect/reconnect. */
 export function deskStreamUrl(deskId: string): string {

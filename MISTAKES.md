@@ -369,3 +369,91 @@ for S5).
   rate limiting — the request-volume layer now closes in-process, first
   check before TTL/KDF, transient by construction (clears as the window
   slides; never a lockout).
+
+## Slice 5 — Pre-trip approval + pinned resume (reviewed 2026-08-29)
+
+Independent cross-check of S5 (commits 0875f9b/d5544fd, G4 CLOSED):
+1 High + 3 Medium + 14 Low. All fixed except three accepted-design items
+(dispositioned below).
+
+### Fixed this slice
+
+- **H1 — Pinned contingency gate measured the wrong offer's price.**
+  `_pinned_mark` compared `pos.mark_price` (the cheapest fresh offer, set
+  by `_reprice_fan_out`) against the approved price while the pin forced
+  the booking offer id to the approved one; the write wall re-checked only
+  budget/cap, never contingency, so a pinned offer could book silently far
+  beyond approved price + contingency.
+  **Fix:** divergence degrades the mark to escalate at mark time, and
+  `_write_position` now enforces
+  `verified.current_price - approved_price > contingency_left →
+  CONTINGENCY_EXCEEDED` before create_order; fail-closed on missing
+  approved price. Proven by BOTH proofs: the mark-time divergence test
+  test_pinned_divergent_fresh_offer_escalates and the write-time
+  test_pinned_verified_price_beyond_contingency_fails_write (fresh
+  search stays within contingency so the mark keeps `book`; only
+  verify reports the beyond-contingency rise, and the write wall is
+  the one gate that stops it — mutation-proven to bite).
+
+- **M1 — Hold cleared the pin before its CAS; a losing/late hold wiped a
+  winning approve's pin and snapshot.** **Fix:** atomic
+  `try_hold_approval` — lifecycle flip and unpin in one
+  `UPDATE ... WHERE lifecycle='pending_approval'`.
+
+- **M2 — Bot Approve/Hold push dormant while status claimed delivery**
+  (`manager_chat_id` hardcoded None; `_notify_pending_approval`
+  early-returns on it, so the web panel + release code is the only live
+  approve path). **Fix:** status corrected in 00-status.md, seam recorded
+  open (S3 M10), push/click path covered by six new tests so it goes live
+  tested once the seam lands.
+
+- **M3 — pending_approval panel never appeared live without reload**
+  (the post-result refetch dropped lifecycle/approval). **Fix:** refetch
+  mirrors the on-mount setters.
+
+- **L1 — fail-open on unparseable approved price.** **Fix:** escalates
+  instead (fail-closed).
+- **L3 — cross-round TOCTOU on /approve.** **Fix:** approval-round
+  supersession re-read before deciding.
+- **L4 — escalation beat misattributed "brain flagged for review" on
+  pinned escalates.** **Fix:** reason threaded through.
+- **L8 — approval-token credential branch untested.** **Fix:**
+  test_approval_token_branch.
+- **L10 — request_approval False return ignored.** **Fix:** honest
+  give-up text + warning when an approval round fails to open.
+- **L11 — UNBOOKABLE_CODES missing BOOKING_EXPIRED.** **Fix:** added +
+  parametrized test.
+- **L12 — reapproval_count was desk-lifetime.** **Fix:** reset per fresh
+  first-time round.
+- **L13 — get_approval exception degraded a gated desk past the
+  checkpoint.** **Fix:** fail-closed DESK_STATE_INVALID.
+- **L14 — bot approve click assumed loopback 8000.** **Fix:**
+  WAYPOINT_API_BASE startup warning + compose note.
+
+### Documented as known-open / decisions / deferred
+
+- **L2 — /approve answers 410 before 403, mirroring /confirm.** Probing
+  a known desk_id can distinguish pending_approval; accepted because
+  desk_id entropy makes blind probing impractical.
+- **L5 — recorded-mode exemption from the approval gate is enforced by
+  deployment config (ungated seeding), not a code clause.**
+- **L9 — /approve has NO attempt cap (unlike /confirm).** Deferred,
+  tracked; mitigated by ~2 KDF verifies/sec on the bounded executor at
+  260k rounds and the one-shot close.
+- **L6 — group-chat token-spending caveat.** The approval token plaintext
+  rides the pending_approval event into the manager chat; anyone in that
+  chat could spend it. LATENT until the S3 M10 manager-identity seam lands
+  (push is dormant today); comment added.
+- **L7 — manager-also-traveler false-positive refusal.** A manager who is
+  also a traveler can be refused approving their own desk; comment added,
+  web panel is the fallback approve path.
+
+### Post-fix proof
+- Full suite: 267 passed, 4 deselected (baseline 257; +6 bot push/click
+  tests, +4 new lifecycle/security tests). Frontend `npx tsc --noEmit`
+  clean.
+- Mutation pass during the cross-check proved all five S5 tests bite. Two
+  layer nuances: `test_approve_pins_offer` cannot see route-layer resume
+  regressions (it pins at the store layer), and `test_second_approve_410`'s
+  store CAS is shadowed by the route pre-check (410 is decided before the
+  CAS runs).

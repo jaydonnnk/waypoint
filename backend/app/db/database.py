@@ -63,6 +63,10 @@ _MANDATE_COLUMN_BACKFILL = (
     ("policy_json", "TEXT"),
     ("reapproval_count", "INTEGER NOT NULL DEFAULT 0"),
     ("code_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    # G4 pre-trip approval (S5): the identity snapshot taken at approval
+    # (S6's pack reads it) and the hash of the per-round approval token.
+    ("approved_snapshot_json", "TEXT"),
+    ("approval_token_hash", "TEXT"),
 )
 
 

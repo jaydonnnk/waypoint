@@ -10,6 +10,7 @@ transaction, never acting on cached state.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -46,6 +47,37 @@ class MarkUpdate:
     mark_at: datetime
     mark_stale: bool = False
     atlas_offer_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ApprovalState:
+    """The G4 pin, read in ONE transaction (S5).
+
+    `invite_token` rides along because the approval checkpoint is keyed on
+    DESK KIND exactly like the pax builder: only a GATED desk (token set)
+    ever stops for pre-trip approval, so ungated/legacy/recorded desks keep
+    today's behavior byte-for-byte and the gate makes zero Atlas calls.
+    """
+
+    lifecycle: str
+    approved_offer_id: str | None
+    snapshot: dict
+    reapproval_count: int
+    approval_token_hash: str | None
+    invite_token: str | None
+
+    @property
+    def gated(self) -> bool:
+        return self.invite_token is not None
+
+    @property
+    def pinned_position_id(self) -> str | None:
+        """Which POSITION the pin belongs to (the pin is per-position; the
+        position id lives in the snapshot, so no extra column is needed)."""
+        if not self.approved_offer_id:
+            return None
+        value = self.snapshot.get("position_id")
+        return value if isinstance(value, str) and value else None
 
 
 @dataclass(frozen=True)
@@ -409,6 +441,18 @@ class DeskStore:
                 ).scalar_one()
             )
 
+    def get_chat_binding(self, chat_id: str) -> tuple[str, int] | None:
+        """(desk_id, slot) for a bound Telegram chat, or None if unbound.
+
+        Read-only identity lookup — S5 uses it for role separation: a chat
+        that IS a traveler on a desk may not approve that desk's trip.
+        """
+        with database.SessionLocal() as session:
+            row = session.get(ChatBindingRow, chat_id)
+            if row is None:
+                return None
+            return row.desk_id, int(row.slot)
+
     def bind_chat(
         self, chat_id: str, token: str
     ) -> tuple[str, int] | None:
@@ -643,6 +687,180 @@ class DeskStore:
             session.commit()
             return int(new_count)
 
+    # ------------------------------------------------------------------
+    # G4 pre-trip approval (S5) — the pin, its identity snapshot, and the
+    # two lifecycle compare-and-sets that make the approval slot one-shot.
+    # ------------------------------------------------------------------
+
+    def get_approval(self, desk_id: str) -> ApprovalState:
+        """Read the whole G4 pin state in ONE transaction. Raises KeyError
+        for an unknown desk. A malformed snapshot JSON degrades to {} — a
+        corrupt blob must never crash a cycle, it just un-pins the desk."""
+        with database.SessionLocal() as session:
+            row = session.get(MandateRow, desk_id)
+            if row is None:
+                raise KeyError(f"unknown desk: {desk_id}")
+            snapshot: dict = {}
+            if row.approved_snapshot_json:
+                try:
+                    parsed = json.loads(row.approved_snapshot_json)
+                except (ValueError, TypeError):
+                    parsed = None
+                if isinstance(parsed, dict):
+                    snapshot = parsed
+            return ApprovalState(
+                lifecycle=row.lifecycle,
+                approved_offer_id=row.approved_offer_id,
+                snapshot=snapshot,
+                reapproval_count=int(row.reapproval_count),
+                approval_token_hash=row.approval_token_hash,
+                invite_token=row.invite_token,
+            )
+
+    def offer_snapshot(self, desk_id: str) -> dict:
+        """The identity snapshot taken AT APPROVAL (03-program-design §Pack).
+
+        Segments / carrier / flight numbers / cabin as they were when the
+        manager signed off. The S6 pack reads THIS and never re-derives
+        identity at TICKETED. {} when nothing has been approved."""
+        return self.get_approval(desk_id).snapshot
+
+    def set_approved_offer(
+        self,
+        desk_id: str,
+        offer_id: str,
+        snapshot: dict | None = None,
+        approval_token_hash: str | None = None,
+        reset_reapproval: bool = False,
+    ) -> None:
+        """Pin the offer the manager is being asked to sign off, together
+        with its identity snapshot and the hash of that round's approval
+        token. Raises KeyError for an unknown desk.
+
+        `reset_reapproval` (L12): when True, the SAME write zeroes
+        `reapproval_count` — a fresh FIRST-TIME approval round starts a
+        fresh one-re-approval allowance; a re-approval request never
+        resets it, so the count stays capped within one pin lineage.
+
+        Honesty register — ONE pin per desk, not per position. The column
+        set is `approved_offer_id` + this snapshot on the mandate row (as
+        specified at Gate 3), so a desk that stops for approval a SECOND
+        time — a multi-position portfolio, or the unbookable-pin
+        re-approval — overwrites the previous snapshot. The pin is still
+        applied per-position (the position id lives in the snapshot); what
+        does not survive is the identity of an EARLIER approved position
+        once a later one is approved. Today only the most recent approval
+        can feed the S6 pack; a multi-trip pack needs a per-position
+        approvals table, which is a schema change, not a patch here."""
+        with database.SessionLocal() as session:
+            row = session.get(MandateRow, desk_id)
+            if row is None:
+                raise KeyError(f"unknown desk: {desk_id}")
+            row.approved_offer_id = offer_id
+            row.approved_snapshot_json = (
+                json.dumps(snapshot) if snapshot is not None else None
+            )
+            row.approval_token_hash = approval_token_hash
+            if reset_reapproval:
+                row.reapproval_count = 0
+            session.commit()
+
+    def clear_approved_offer(self, desk_id: str) -> None:
+        """Drop the pin (the HOLD decision): the next cycle judges this
+        position normally. The identity snapshot goes with it — an
+        unapproved offer must never leave a stale 'approved' identity
+        behind for the S6 pack to read. Raises KeyError for unknown desk."""
+        with database.SessionLocal() as session:
+            row = session.get(MandateRow, desk_id)
+            if row is None:
+                raise KeyError(f"unknown desk: {desk_id}")
+            row.approved_offer_id = None
+            row.approved_snapshot_json = None
+            row.approval_token_hash = None
+            session.commit()
+
+    def try_request_approval(self, desk_id: str) -> bool:
+        """Atomic CAS 'released' -> 'pending_approval'. True exactly once
+        per approval round: the desk stops, the manager is asked. A desk
+        already pending (or closed) returns False, so a second checkpoint
+        inside the same cycle can never re-ask."""
+        with database.SessionLocal() as session:
+            result = session.execute(
+                update(MandateRow)
+                .where(
+                    MandateRow.id == desk_id,
+                    MandateRow.lifecycle == "released",
+                )
+                .values(lifecycle="pending_approval")
+            )
+            session.commit()
+            return result.rowcount == 1
+
+    def try_decide_approval(self, desk_id: str) -> bool:
+        """Atomic CAS 'pending_approval' -> 'released' — THE one-shot guard
+        on the approval slot (mirrors `try_release`). Exactly one caller
+        wins; every later /approve sees a non-pending lifecycle and gets a
+        410, so an approval can never be replayed."""
+        with database.SessionLocal() as session:
+            result = session.execute(
+                update(MandateRow)
+                .where(
+                    MandateRow.id == desk_id,
+                    MandateRow.lifecycle == "pending_approval",
+                )
+                .values(lifecycle="released")
+            )
+            session.commit()
+            return result.rowcount == 1
+
+    def try_hold_approval(self, desk_id: str) -> bool:
+        """Atomic HOLD (M-H2): 'pending_approval' -> 'released' AND the pin
+        dropped in ONE statement — lifecycle, approved_offer_id, snapshot
+        and approval-token hash all cleared by the same UPDATE, rowcount
+        checked exactly like `try_decide_approval`. The decision and the
+        unpin can no longer tear apart in a crash window, and a losing
+        hold (rowcount 0) can never wipe a winning approve's pin/snapshot
+        because the UPDATE only matches a still-pending row."""
+        with database.SessionLocal() as session:
+            result = session.execute(
+                update(MandateRow)
+                .where(
+                    MandateRow.id == desk_id,
+                    MandateRow.lifecycle == "pending_approval",
+                )
+                .values(
+                    lifecycle="released",
+                    approved_offer_id=None,
+                    approved_snapshot_json=None,
+                    approval_token_hash=None,
+                )
+            )
+            session.commit()
+            return result.rowcount == 1
+
+    def bump_reapproval(self, desk_id: str) -> int:
+        """Atomically increment and return the new reapproval_count.
+
+        Bounds the unbookable-pin ping-pong at ONE re-judgment (Gate 2
+        decision 1). Single UPDATE (never a Python read-modify-write), with
+        the read-back in the SAME transaction — mirrors bump_code_attempts.
+        Raises KeyError for an unknown desk."""
+        with database.SessionLocal() as session:
+            result = session.execute(
+                update(MandateRow)
+                .where(MandateRow.id == desk_id)
+                .values(reapproval_count=MandateRow.reapproval_count + 1)
+            )
+            if result.rowcount != 1:
+                raise KeyError(f"unknown desk: {desk_id}")
+            new_count = session.execute(
+                select(MandateRow.reapproval_count).where(
+                    MandateRow.id == desk_id
+                )
+            ).scalar_one()
+            session.commit()
+            return int(new_count)
+
     def has_ledger_marker(self, desk_id: str, marker: str) -> bool:
         """True if any ledger note on this desk starts with `marker`.
 
@@ -668,11 +886,15 @@ class DeskStore:
     def desk_state(self, desk_id: str) -> dict:
         """Snapshot for GET /api/desk/{desk_id} (positions/ledger/budgets)."""
         mandate, positions, budgets, ledger_tail = self.reload_desk(desk_id)
-        lifecycle = self.get_lifecycle(desk_id)
+        approval = self.get_approval(desk_id)
         return {
             "desk_id": desk_id,
-            "lifecycle": lifecycle,
+            "lifecycle": approval.lifecycle,
             "verified_count": self.verified_count(desk_id),
+            # G4 (S5): the itinerary the manager is being asked to approve.
+            # The identity snapshot only — the approval token's HASH lives
+            # in its own column and never rides a read endpoint.
+            "approval": approval.snapshot or None,
             "mandate": mandate.model_dump(mode="json"),
             "positions": [p.model_dump(mode="json") for p in positions],
             "budgets": [b.model_dump(mode="json") for b in budgets],

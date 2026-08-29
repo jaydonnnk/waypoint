@@ -63,6 +63,19 @@ class MandateRow(Base):
     )
     # G4 (S5): the offer the manager signed off, pinned for the resumed cycle.
     approved_offer_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # G4/G5 (S5): the IDENTITY snapshot taken AT APPROVAL — position_id,
+    # offer id, approved price, segments (flight numbers/times), carrier and
+    # cabin where the mapper carries them. Persisted so it survives a
+    # restart and so the S6 pack never RE-DERIVES identity at TICKETED.
+    approved_snapshot_json: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    # G4 (S5): hash of the per-round approval token minted at the checkpoint.
+    # The plaintext rides the pending_approval event to the manager's chat
+    # ONLY; a traveler never sees it. Re-minted on every new approval round.
+    approval_token_hash: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
     # G2 (S7): {airlines:[IATA], cabin, depart_after, arrive_by}; absent -> no filter.
     policy_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # G4 re-approval cap (1) for the unbookable-pin edge (S5).
