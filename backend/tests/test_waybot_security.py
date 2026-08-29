@@ -5,7 +5,7 @@ nothing that matters changed.  Each guard covers one row of 02-architecture
 §"The 7 security guards".
 
 Confirm-side guards are complete; approve-side assertions are stubbed
-(xfail/TODO) — the /approve endpoint lands in Slice 5.
+S5 filled the two approve stubs in: /approve now exists, so the role-separation and one-shot cases are real tests.
 """
 from __future__ import annotations
 
@@ -100,6 +100,44 @@ def _seed_gated(client, **kwargs) -> dict:
     resp = client.post("/api/desk/seed", json=payload)
     assert resp.status_code == 200
     return resp.json()
+
+
+def _drive_to_pending_approval(desk_id: str, with_token: bool = False):
+    """Put a gated desk at the pre-trip approval checkpoint, exactly where
+    a live cycle leaves it: released, an offer pinned with its identity
+    snapshot, lifecycle 'pending_approval'. Returns the pinned position id.
+
+    Driven through the same store primitives the agent loop uses, so the
+    security tests below exercise the REAL approval state rather than a
+    hand-forged row.
+
+    `with_token=True` (L8) additionally mints the round's approval token
+    and stores its KDF hash through the REAL setter (`set_approved_offer`,
+    the same seam `request_approval` uses); the helper then returns
+    (position_id, plaintext_token).
+    """
+    store = DeskStore()
+    positions = store.reload_desk(desk_id)[1]
+    position_id = positions[0].id
+    store.set_lifecycle(desk_id, "released")
+    approval_token = None
+    token_hash = None
+    if with_token:
+        from app.codes import hash_code
+
+        approval_token = secrets.token_urlsafe(16)
+        token_hash = hash_code(approval_token)
+    store.set_approved_offer(desk_id, "off-approved", snapshot={
+        "position_id": position_id,
+        "offer_id": "off-approved",
+        "price": "500.00",
+        "currency": "USD",
+        "segments": [],
+    }, approval_token_hash=token_hash)
+    assert store.try_request_approval(desk_id) is True
+    if with_token:
+        return position_id, approval_token
+    return position_id
 
 
 # ==========================================================================
@@ -599,26 +637,183 @@ class TestTravelerSessionCannotConfirmOrApprove:
 
         assert routes.STORE.get_lifecycle(desk_id) == "awaiting_travelers"
 
-    @pytest.mark.xfail(
-        reason="S5: /approve endpoint does not exist yet. "
-               "Approve-side role separation test lands with Slice 5.",
-        strict=True,
-        raises=AssertionError,
-    )
     def test_traveler_cannot_approve(
         self, tmp_db, stub_agent, stub_auditor, no_ttl,
     ):
-        """STUB (S5): when /approve exists, a traveler session (chat binding
-        without manager authority) cannot approve an offer. The approve
-        endpoint checks manager identity — a bot-path session is refused.
+        """A bot-path (traveler) identity cannot approve a trip.
 
-        This xfail will FAIL TO FAIL (become a pass) once S5 adds the
-        endpoint and the test body is filled in, which is the desired
-        signal to complete the assertion.
+        Exactly the /confirm shape: authority is a secret the traveler
+        never receives. The traveler has the desk_id (it is in the URL)
+        and the invite token (it is in the deep link); it has neither the
+        manager's release code nor the round's approval token, and the
+        invite token verifies against neither hash — so 403, and the
+        approval stays open. The manager's real code then releases it,
+        proving the refusal was about identity, not a broken route.
+
+        FAILS pre-S5: there is no /approve endpoint, so every POST is 404.
         """
-        # Placeholder: once /approve exists, POST to it with a traveler
-        # identity and assert 403/401/similar refusal.
-        assert False, "S5 will fill this in — approve endpoint not yet built"
+        with TestClient(app) as client:
+            body = _seed_gated(client, team_size=1)
+            desk_id = body["desk_id"]
+            token = body["invite_token"]
+            _drive_to_pending_approval(desk_id)
+
+            # The traveler's ONLY secret is the invite token.
+            resp = client.post(
+                f"/api/desk/{desk_id}/approve",
+                json={"choice": "approve", "code": token},
+            )
+            assert resp.status_code == 403
+            # An empty credential is refused the same way.
+            resp = client.post(
+                f"/api/desk/{desk_id}/approve",
+                json={"choice": "approve", "code": ""},
+            )
+            assert resp.status_code == 403
+            # Nothing moved: the approval is still open and unpinned by no one.
+            assert routes.STORE.get_lifecycle(desk_id) == "pending_approval"
+            assert desk_id not in routes.DESKS
+
+            # The MANAGER's code does approve — same route, same body.
+            resp = client.post(
+                f"/api/desk/{desk_id}/approve",
+                json={
+                    "choice": "approve",
+                    "code": body["confirmation_code"],
+                },
+            )
+            assert resp.status_code == 200
+            assert resp.json()["resumed"] is True
+            # Join the resumed cycle before the client context closes.
+            assert client.get(f"/api/desk/{desk_id}/close").status_code == 200
+
+        assert routes.STORE.get_lifecycle(desk_id) == "released"
+
+
+def test_approval_token_branch(
+    tmp_db, stub_agent, stub_auditor, no_ttl,
+):
+    """L8 — the approval-token credential branch of /approve: the round's
+    token approves; a wrong code and the desk's OWN invite token are both
+    refused with the approval still open; the token then succeeds after
+    the refusals (positive control on the SAME desk)."""
+    with TestClient(app) as client:
+        body = _seed_gated(client, team_size=1)
+        desk_id = body["desk_id"]
+        invite_token = body["invite_token"]
+        _pos_id, approval_token = _drive_to_pending_approval(
+            desk_id, with_token=True,
+        )
+
+        # Wrong code -> 403, the approval stays open.
+        resp = client.post(
+            f"/api/desk/{desk_id}/approve",
+            json={"choice": "approve", "code": "WRONG-CREDENTIAL"},
+        )
+        assert resp.status_code == 403
+        assert routes.STORE.get_lifecycle(desk_id) == "pending_approval"
+
+        # The desk's own invite token is a TRAVELER credential — it
+        # verifies against neither the release-code hash nor the
+        # round-token hash.
+        resp = client.post(
+            f"/api/desk/{desk_id}/approve",
+            json={"choice": "approve", "code": invite_token},
+        )
+        assert resp.status_code == 403
+        assert routes.STORE.get_lifecycle(desk_id) == "pending_approval"
+
+        # Positive control: after the refusals, the round's token approves.
+        resp = client.post(
+            f"/api/desk/{desk_id}/approve",
+            json={"choice": "approve", "code": approval_token},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["resumed"] is True
+        # Join the resumed cycle so teardown is clean.
+        assert client.get(f"/api/desk/{desk_id}/close").status_code == 200
+
+    assert routes.STORE.get_lifecycle(desk_id) == "released"
+
+
+def test_superseded_round_token_410_new_token_still_works(
+    tmp_db, stub_agent, stub_auditor, no_ttl, monkeypatch,
+):
+    """L3 — approval tokens are PER-ROUND: once a second round lands (a
+    NEW token hash stored through the REAL `set_approved_offer` seam),
+    round 1's token answers 410 (round superseded), while round 2's own
+    token still approves (positive control on the same desk).
+
+    The route's shape: (1) read the approval hash, (2) KDF-verify the
+    presented credential against it, (3) re-read and require the SAME
+    hash still pinned before deciding. The guard owns the race where
+    round 2 lands between (1) and (3); this test replays that ordering
+    deterministically — the first hash read serves the stale round-1
+    state (so token A verifies), and the pre-decision re-read sees what
+    `set_approved_offer` already wrote for round 2.
+    """
+    from app.codes import hash_code
+
+    with TestClient(app) as client:
+        body = _seed_gated(client, team_size=1)
+        desk_id = body["desk_id"]
+
+        # --- round 1: pinned with token A through the real helper.
+        _pos_id, token_a = _drive_to_pending_approval(
+            desk_id, with_token=True,
+        )
+        store = DeskStore()
+        stale_round1 = store.get_approval(desk_id)
+        assert stale_round1.approval_token_hash  # round 1 hash A
+
+        # --- round 2 simulation: store ONLY the new token hash via the
+        # real seam. set_approved_offer never touches lifecycle, so the
+        # desk stays pending_approval (the slot is still open).
+        token_b = secrets.token_urlsafe(16)
+        store.set_approved_offer(
+            desk_id, "off-approved",
+            snapshot=stale_round1.snapshot,
+            approval_token_hash=hash_code(token_b),
+        )
+        assert store.get_lifecycle(desk_id) == "pending_approval"
+
+        # Deterministic TOCTOU replay: the route's FIRST hash read
+        # returns the stale round-1 state; every later read answers from
+        # the real store (round-2 hash B).
+        real_get_approval = store.get_approval
+        read_state = {"stale_first": False}
+
+        def raced_get_approval(desk_id_):
+            if read_state["stale_first"]:
+                read_state["stale_first"] = False
+                return stale_round1
+            return real_get_approval(desk_id_)
+
+        monkeypatch.setattr(
+            routes.STORE, "get_approval", raced_get_approval,
+        )
+
+        # Round 1's token arrives after round 2 opened -> 410, slot open.
+        read_state["stale_first"] = True
+        resp = client.post(
+            f"/api/desk/{desk_id}/approve",
+            json={"choice": "approve", "code": token_a},
+        )
+        assert resp.status_code == 410
+        assert "superseded" in resp.json()["detail"]
+        assert routes.STORE.get_lifecycle(desk_id) == "pending_approval"
+
+        # Positive control: round 2's OWN token still approves.
+        resp = client.post(
+            f"/api/desk/{desk_id}/approve",
+            json={"choice": "approve", "code": token_b},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["resumed"] is True
+        # Join the resumed cycle so teardown is clean.
+        assert client.get(f"/api/desk/{desk_id}/close").status_code == 200
+
+    assert routes.STORE.get_lifecycle(desk_id) == "released"
 
 
 # ==========================================================================
@@ -1146,18 +1341,46 @@ class TestConfirmAndApproveSingleUse:
             )
             assert resp.status_code == 410
 
-    @pytest.mark.xfail(
-        reason="S5: /approve endpoint does not exist yet. "
-               "Approve single-use test lands with Slice 5.",
-        strict=True,
-        raises=AssertionError,
-    )
     def test_second_approve_410(
         self, tmp_db, stub_agent, stub_auditor, no_ttl,
     ):
-        """STUB (S5): when /approve exists, a second approve → 410.
+        """The approval slot is ONE-SHOT: a replayed approve → 410.
 
-        This xfail will FAIL TO FAIL once S5 adds the endpoint, which is
-        the desired signal to complete the assertion.
+        The guard is the lifecycle compare-and-set inside apply_decision,
+        the same single-winner shape /confirm uses for release — so a
+        captured or re-sent approval can never execute twice, and a HOLD
+        cannot be overturned by a later approve either.
+
+        FAILS pre-S5: there is no /approve endpoint, so both POSTs are 404.
         """
-        assert False, "S5 will fill this in — approve endpoint not yet built"
+        with TestClient(app) as client:
+            body = _seed_gated(client, team_size=1)
+            desk_id = body["desk_id"]
+            code = body["confirmation_code"]
+            _drive_to_pending_approval(desk_id)
+
+            first = client.post(
+                f"/api/desk/{desk_id}/approve",
+                json={"choice": "approve", "code": code},
+            )
+            assert first.status_code == 200
+
+            # Replay with the SAME valid credential — the slot is spent.
+            second = client.post(
+                f"/api/desk/{desk_id}/approve",
+                json={"choice": "approve", "code": code},
+            )
+            assert second.status_code == 410
+
+            # And a hold arriving late cannot overturn the approval either.
+            late_hold = client.post(
+                f"/api/desk/{desk_id}/approve",
+                json={"choice": "hold", "code": code},
+            )
+            assert late_hold.status_code == 410
+
+            assert client.get(f"/api/desk/{desk_id}/close").status_code == 200
+
+        assert routes.STORE.get_lifecycle(desk_id) == "released"
+        # The pin survives the approval — the resumed cycle executes it.
+        assert routes.STORE.get_approval(desk_id).approved_offer_id == "off-approved"

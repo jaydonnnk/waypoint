@@ -100,3 +100,11 @@ class EventSink:
             logger.exception(
                 "EventSink subscriber raised on %s (isolated)", event.type
             )
+
+
+# The process-wide sink singleton (S5). It lived in `app/main.py` through
+# S4, but the agent loop now publishes to it too (pending_approval /
+# pinned_resume) and `routes.py` builds the AGENT — main.py imports routes,
+# so the singleton has to live BELOW both of them. `app.main.SINK` stays a
+# valid name (main re-imports it), and there is still exactly one sink.
+SINK = EventSink()

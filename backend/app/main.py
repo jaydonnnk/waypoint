@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import STORE, router
 from app.db.database import init_db
-from app.events import EventSink
+from app.events import SINK
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,9 @@ def _cors_origins() -> list[str]:
 _BOT_BACKOFF_MAX = 30.0
 # Max consecutive restart attempts before giving up (M1 circuit breaker).
 _BOT_MAX_CONSECUTIVE_FAILURES = 5
-# Module-level event sink — the single in-process pub/sub bus.
-SINK = EventSink()
+# The single in-process pub/sub bus now lives in app.events (S5: the
+# agent loop publishes to it as well, and routes.py builds the AGENT).
+# Re-exported here so `app.main.SINK` keeps resolving.
 
 
 def _is_unrecoverable(exc: BaseException) -> bool:

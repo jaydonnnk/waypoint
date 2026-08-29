@@ -369,3 +369,235 @@ class TestInviteTokenIndex:
             rows = conn.execute(text("PRAGMA index_list(mandate)")).fetchall()
         index_names = [r[1] for r in rows]
         assert any("invite_token" in name for name in index_names)
+
+
+# ---------------------------------------------------------------------------
+# S5 approval push: _notify_pending_approval (task 14)
+# ---------------------------------------------------------------------------
+
+
+def _approval_payload(*, manager_chat_id=None, token="appr-token-1") -> dict:
+    """Fabricate the pending_approval payload approval.py publishes:
+    token, reason, reapproval_count, identity-snapshot itinerary, price,
+    currency, manager_chat_id (None in production — seam S3 M10)."""
+    return {
+        "approval_token": token,
+        "reason": "pre-trip approval requested",
+        "reapproval_count": 0,
+        "itinerary": {
+            "trip_label": "Offsite Q3",
+            "origin": "SIN",
+            "dest": "HND",
+            "depart_date": "2026-09-15",
+            "currency": "USD",
+            "segments": [{
+                "dep_airport": "SIN",
+                "arr_airport": "HND",
+                "dep_time": "2026-09-15T08:30:00",
+                "arr_time": "2026-09-15T16:45:00",
+                "flight_number": "12",
+                "carrier": "SQ",
+                "direction": "outbound",
+            }],
+        },
+        "price": "450.00",
+        "currency": "USD",
+        "manager_chat_id": manager_chat_id,
+    }
+
+
+class TestNotifyPendingApproval:
+    """pending_approval → itinerary + Approve/Hold buttons to the manager."""
+
+    @pytest.mark.asyncio
+    async def test_notify_pending_approval_sends_buttons(self):
+        """With manager_chat_id set: send_message carries the itinerary
+        essentials, wbapprove:/wbhold: buttons, and the token is stashed
+        in bot_data keyed by desk_id."""
+        from app.bot.notify import APPROVAL_TOKENS_KEY, make_notify_handler
+
+        mock_bot = AsyncMock()
+        mock_application = MagicMock()
+        mock_application.bot = mock_bot
+        mock_application.bot_data = {}  # real dict — token stash is asserted
+
+        handler = make_notify_handler(mock_application)
+        desk_id = "desk-appr-1"
+        payload = _approval_payload(manager_chat_id="424242")
+
+        await handler(DeskEvent(
+            type="pending_approval", desk_id=desk_id, payload=payload
+        ))
+
+        mock_bot.send_message.assert_called_once()
+        kwargs = mock_bot.send_message.call_args.kwargs
+        assert kwargs["chat_id"] == 424242
+        text = kwargs["text"]
+        # Itinerary essentials: route, flight, price line, consent language.
+        assert "SIN" in text and "HND" in text
+        assert "SQ 12" in text
+        assert "450.00 USD" in text
+        assert "Approve this trip" in text
+        # Buttons: exactly Approve + Hold with the desk_id-only payloads.
+        markup = kwargs["reply_markup"]
+        buttons = [b for row in markup.inline_keyboard for b in row]
+        assert [b.callback_data for b in buttons] == [
+            f"wbapprove:{desk_id}", f"wbhold:{desk_id}"
+        ]
+        # Token stays in-process — never in the 64-byte callback_data.
+        assert mock_application.bot_data[APPROVAL_TOKENS_KEY][desk_id] == (
+            payload["approval_token"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_notify_pending_approval_no_manager_chat_skips(self):
+        """No manager_chat_id in payload → logged and skipped, no send."""
+        from app.bot.notify import make_notify_handler
+
+        mock_bot = AsyncMock()
+        mock_application = MagicMock()
+        mock_application.bot = mock_bot
+        mock_application.bot_data = {}
+
+        handler = make_notify_handler(mock_application)
+        await handler(DeskEvent(
+            type="pending_approval",
+            desk_id="desk-appr-2",
+            payload=_approval_payload(manager_chat_id=None),
+        ))
+
+        mock_bot.send_message.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# S5 approval click: _on_approval_click (task 14)
+# ---------------------------------------------------------------------------
+
+
+def _fake_httpx(monkeypatch, status_code: int) -> list:
+    """Replace httpx.AsyncClient with a capturing async-context stand-in;
+    returns the list of created clients (empty ⇒ no HTTP call was made)."""
+    created: list = []
+
+    class _Client:
+        def __init__(self, timeout=None):
+            self.timeout = timeout
+            self.posts: list = []
+            created.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json=None):
+            self.posts.append((url, json))
+            resp = MagicMock()
+            resp.status_code = status_code
+            return resp
+
+    monkeypatch.setattr("httpx.AsyncClient", _Client)
+    return created
+
+
+class TestApprovalClick:
+    """Manager taps Approve/Hold → POST /api/desk/{id}/approve."""
+
+    def _make_query(self, data: str) -> MagicMock:
+        query = MagicMock()
+        query.data = data
+        query.edit_message_text = AsyncMock()
+        return query
+
+    def _make_context(self, store: DeskStore, tokens: dict) -> MagicMock:
+        from app.bot.notify import APPROVAL_TOKENS_KEY
+
+        context = MagicMock()
+        context.bot_data = {"store": store, APPROVAL_TOKENS_KEY: tokens}
+        return context
+
+    @pytest.mark.asyncio
+    async def test_on_approval_click_approve_200(
+        self, tmp_db, store, monkeypatch
+    ):
+        """200 → confirmation edit, correct URL/body, token spent."""
+        from app.bot.handlers import _on_approval_click
+
+        desk_id = "desk-appr-200"
+        created = _fake_httpx(monkeypatch, 200)
+        tokens = {desk_id: "appr-token-200"}
+        context = self._make_context(store, tokens)
+        query = self._make_query(f"wbapprove:{desk_id}")
+
+        await _on_approval_click(query, context, "chat_manager")
+
+        assert len(created) == 1
+        url, body = created[0].posts[0]
+        assert url.endswith(f"/api/desk/{desk_id}/approve")
+        assert body == {"choice": "approve", "code": "appr-token-200"}
+        query.edit_message_text.assert_awaited_once()
+        assert "✅" in query.edit_message_text.await_args.args[0]
+        # One-shot: the token is dropped after a successful decision.
+        assert desk_id not in tokens
+
+    @pytest.mark.asyncio
+    async def test_on_approval_click_approve_410(
+        self, tmp_db, store, monkeypatch
+    ):
+        """410 (round already spent) → 'already decided' edit."""
+        from app.bot.handlers import _on_approval_click
+
+        desk_id = "desk-appr-410"
+        _fake_httpx(monkeypatch, 410)
+        context = self._make_context(store, {desk_id: "appr-token-410"})
+        query = self._make_query(f"wbapprove:{desk_id}")
+
+        await _on_approval_click(query, context, "chat_manager")
+
+        query.edit_message_text.assert_awaited_once()
+        assert "already decided" in query.edit_message_text.await_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_on_approval_click_approve_403(
+        self, tmp_db, store, monkeypatch
+    ):
+        """403 (credential mismatch) → unauthorised edit."""
+        from app.bot.handlers import _on_approval_click
+
+        desk_id = "desk-appr-403"
+        _fake_httpx(monkeypatch, 403)
+        context = self._make_context(store, {desk_id: "appr-token-403"})
+        query = self._make_query(f"wbapprove:{desk_id}")
+
+        await _on_approval_click(query, context, "chat_manager")
+
+        query.edit_message_text.assert_awaited_once()
+        assert "isn't authorised" in (
+            query.edit_message_text.await_args.args[0]
+        )
+
+    @pytest.mark.asyncio
+    async def test_on_approval_click_refuses_traveler_binding(
+        self, tmp_db, store, monkeypatch
+    ):
+        """A chat bound as a traveler on the SAME desk is refused before
+        any HTTP call, and the stashed token is NOT spent."""
+        from app.bot.handlers import _on_approval_click
+
+        desk_id, invite_token = _seed_gated_desk(store)
+        store.bind_chat("chat_traveler", invite_token)
+
+        created = _fake_httpx(monkeypatch, 200)
+        tokens = {desk_id: "appr-token-x"}
+        context = self._make_context(store, tokens)
+        query = self._make_query(f"wbapprove:{desk_id}")
+
+        await _on_approval_click(query, context, "chat_traveler")
+
+        assert created == []  # no httpx client ever constructed
+        query.edit_message_text.assert_awaited_once()
+        assert "Travellers can't approve" in (
+            query.edit_message_text.await_args.args[0]
+        )
+        assert desk_id in tokens  # refusal spends nothing

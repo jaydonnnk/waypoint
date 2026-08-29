@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -39,6 +40,46 @@ logger = logging.getLogger(__name__)
 # OR below-minimum override falls back to the default rather than crashing
 # bot import (config-typo DoS) or disabling the size gate.
 MAX_PHOTO_BYTES = int_env("WAYBOT_MAX_PHOTO_BYTES", 10 * 1024 * 1024, minimum=1)
+
+# S5 manager buttons. callback_data is capped at 64 bytes by Telegram, so
+# it carries the prefix + desk_id only (a desk id is `desk-<8 hex>`); the
+# round's approval token stays in bot_data (see notify.APPROVAL_TOKENS_KEY).
+APPROVE_CALLBACK_PREFIX = "wbapprove:"
+HOLD_CALLBACK_PREFIX = "wbhold:"
+
+# Where the bot posts the manager's decision. Same process by default —
+# the bot deliberately goes through the HTTP route so the credential
+# check, the one-shot CAS and the pinned resume live in ONE place.
+API_BASE_ENV = "WAYPOINT_API_BASE"
+DEFAULT_API_BASE = "http://127.0.0.1:8000"
+APPROVE_TIMEOUT_SECONDS = 10.0
+
+
+# L14: one-time-per-process warning when the bot silently falls back to the
+# loopback default — a containerized bot posting to a containerized backend
+# must set WAYPOINT_API_BASE or every approve POST dies on connection refused.
+_API_BASE_FALLBACK_WARNED = False
+
+
+def api_base() -> str:
+    """Backend origin for the bot's own API calls. Unset/blank keeps the
+    single-worker localhost default; a trailing slash is trimmed so the
+    joined path never doubles up."""
+    global _API_BASE_FALLBACK_WARNED
+    base = os.environ.get(API_BASE_ENV)
+    if not base:
+        if not _API_BASE_FALLBACK_WARNED:
+            _API_BASE_FALLBACK_WARNED = True
+            logger.warning(
+                "%s is unset — the bot is POSTing approvals to the loopback "
+                "default %s. If the bot and backend do not share a loopback "
+                "interface (e.g. separate containers), set %s to the backend "
+                "origin or every approve call will fail to connect.",
+                API_BASE_ENV, DEFAULT_API_BASE, API_BASE_ENV,
+            )
+        return DEFAULT_API_BASE
+    return base.rstrip("/")
+
 
 # Module-level session store (per-chat conversation state).
 SESSIONS = SessionStore()
@@ -241,11 +282,21 @@ async def _show_confirm_card(
 # ---------------------------------------------------------------------------
 
 async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle Confirm/Redo inline keyboard presses."""
+    """Handle Confirm/Redo (traveler) and Approve/Hold (manager) presses."""
     query = update.callback_query
     await query.answer()
 
     chat_id = str(query.message.chat_id)
+
+    # S5 manager buttons come from the pending_approval push, which lands
+    # in the MANAGER's chat — that chat has no traveler session, so this
+    # branch has to run before the session lookup below.
+    if query.data.startswith(
+        (APPROVE_CALLBACK_PREFIX, HOLD_CALLBACK_PREFIX)
+    ):
+        await _on_approval_click(query, context, chat_id)
+        return
+
     session = SESSIONS.get(chat_id)
 
     if session is None:
@@ -256,6 +307,99 @@ async def _on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await _confirm_passport(query, context, session, chat_id)
     elif query.data == "redo_passport":
         await _redo_passport(query, context, session, chat_id)
+
+
+async def _on_approval_click(query, context, chat_id: str) -> None:
+    """Manager tapped Approve/Hold → POST /api/desk/{id}/approve.
+
+    The bot goes through the HTTP route rather than calling the store
+    directly, so the manager credential, the one-shot compare-and-set and
+    the pinned resume are enforced in exactly ONE place for both the web
+    manager and the Telegram manager.
+
+    Role separation, defence in depth: a chat that is BOUND as a traveler
+    on this desk is refused here before the request is even made. The
+    route refuses it a second time — a traveler holds the invite token,
+    which verifies against neither credential hash.
+    """
+    from app.bot.notify import APPROVAL_TOKENS_KEY
+
+    raw = query.data
+    approve = raw.startswith(APPROVE_CALLBACK_PREFIX)
+    prefix = APPROVE_CALLBACK_PREFIX if approve else HOLD_CALLBACK_PREFIX
+    desk_id = raw[len(prefix):]
+    choice = "approve" if approve else "hold"
+
+    store: DeskStore = context.bot_data["store"]
+    # L6/L7 advisory — this binding check is defense-in-depth ONLY, not
+    # the gate:
+    # - The /approve route's credential check is the authoritative wall;
+    #   a traveler's invite token verifies against neither credential hash.
+    # - The check is SAME-DESK-ONLY by design: unbound chats and chats
+    #   bound to OTHER desks pass it and are decided by the route.
+    # - Accepted documented gaps: (1) in a GROUP manager chat, any member
+    #   who taps the button spends the manager's stashed token — deliver
+    #   to private manager chats once the manager_chat_id seam (S3 M10)
+    #   lands; (2) a manager who also bound as a traveler on THIS desk
+    #   gets a false-positive refusal here (the web UI still works).
+    binding = await asyncio.to_thread(store.get_chat_binding, chat_id)
+    if binding is not None and binding[0] == desk_id:
+        await query.edit_message_text(
+            "⚠️ Travellers can't approve a trip — only the trip manager can."
+        )
+        return
+
+    token = (context.bot_data.get(APPROVAL_TOKENS_KEY) or {}).get(desk_id)
+    if not token:
+        await query.edit_message_text(
+            "⚠️ This approval is no longer available. Open the desk page "
+            "to approve it there."
+        )
+        return
+
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=APPROVE_TIMEOUT_SECONDS) as client:
+            resp = await client.post(
+                f"{api_base()}/api/desk/{desk_id}/approve",
+                json={"choice": choice, "code": token},
+            )
+    except Exception:  # noqa: BLE001 — always reply, never raise into PTB
+        logger.exception("approve POST failed for desk %s (isolated)", desk_id)
+        await query.edit_message_text(
+            "⚠️ Couldn't reach the desk just now. Please try again."
+        )
+        return
+
+    if resp.status_code == 200:
+        # One-shot: the slot is spent either way, so drop the token.
+        (context.bot_data.get(APPROVAL_TOKENS_KEY) or {}).pop(desk_id, None)
+        await query.edit_message_text(
+            "✅ Approved — booking the flight you signed off. The price "
+            "and budget cap are re-checked in code before anything is paid."
+            if approve else
+            "⏸ Held — nothing was booked. The desk will judge this trip "
+            "again from scratch on its next run."
+        )
+        return
+    if resp.status_code == 410:
+        await query.edit_message_text(
+            "This approval was already decided — nothing more to do."
+        )
+        return
+    if resp.status_code == 403:
+        await query.edit_message_text(
+            "⚠️ This chat isn't authorised to approve that trip."
+        )
+        return
+    logger.warning(
+        "approve POST for desk %s returned %s", desk_id, resp.status_code
+    )
+    await query.edit_message_text(
+        "⚠️ Something went wrong approving that trip. Please try the "
+        "desk page."
+    )
 
 
 async def _confirm_passport(query, context, session, chat_id: str) -> None:

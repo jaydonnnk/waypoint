@@ -35,6 +35,12 @@ services:
       # For a VPS, admit the public frontend origin (comma-separated);
       # unset keeps the localhost defaults.
       # WAYPOINT_CORS_ORIGIN: "https://demo.example.com"
+      # Origin the bot POSTS the manager's Approve/Hold decision to
+      # (app.bot.handlers.api_base). Unset keeps the loopback default,
+      # which only works when bot and backend share a network namespace;
+      # if non-default it MUST match the backend's bind address, e.g.
+      # http://backend:8000 for a split-service deployment.
+      # WAYPOINT_API_BASE: http://backend:8000
       # Park SQLite on the volume-mounted DIRECTORY /app/db (a named
       # volume on a FILE path initializes as a directory and breaks
       # SQLite). Unset locally, database.py keeps its exact default.
