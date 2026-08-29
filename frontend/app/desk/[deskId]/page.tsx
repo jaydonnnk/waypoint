@@ -279,6 +279,46 @@ function friendlyTrip(id: string | null): string {
   return clean.length > 8 ? `Trip ${clean.slice(-6)}` : id;
 }
 
+/** "2026-09-18" -> "Sep 18" — string surgery only (no Date object is ever
+    constructed, so no timezone can shift the day). Anything unexpected
+    renders verbatim. Display-only re-format of the snapshot's own value. */
+const MONTHS_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+function shortDate(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return iso;
+  const mon = MONTHS_SHORT[Number(m[2]) - 1];
+  if (!mon) return iso;
+  return `${mon} ${Number(m[3])}`;
+}
+
+/** Pass 7: timeline-dot tone per event — colors only, never words. Book
+    dots go green ONLY when the snapshot confirms the booking (positions
+    are the source of truth); waiting states are amber; drops and errors
+    red; routine checks stay neutral. */
+function tickTone(event: StreamEvent, snap: Position | undefined): string {
+  switch (event.type) {
+    case "trade":
+      if (event.kind === "book") {
+        return snap && snap.status === "booked" ? "good" : "flat";
+      }
+      return "wait";
+    case "mark":
+      return event.stale ? "wait" : "flat";
+    case "alloc":
+      return "good";
+    case "loss":
+    case "error":
+      return "stop";
+    case "reconcile":
+      return "flat";
+    default:
+      return "flat";
+  }
+}
+
 /** Formats the price inside an option label with the same money() used
     everywhere else ("book now at 1790.00 (manual approval)" ->
     "book now at $1,790.00 (manual approval)"). Only the known "at <price>"
@@ -779,118 +819,213 @@ export default function DeskPage() {
       ? screen.steps[screen.steps.length - 1]
       : null;
 
+  // Pass 7 (Person A): the feed GROUPED BY TRIP — a pure render-time
+  // derivation over the same blotter array (no state, no reducer change,
+  // no event dropped). Escalations still surface only as THE DECISION
+  // card; the rare event with no position id stands as its own group so
+  // nothing is ever filed under the wrong trip. Group order = first
+  // arrival order, so a replay rebuilds the exact same board.
+  const tripGroups: { key: string; pos: string | null; rows: BlotterRow[] }[] =
+    [];
+  {
+    const at = new Map<string, number>();
+    for (const row of screen.blotter) {
+      if (row.event.type === "escalate") continue;
+      const pid =
+        "position_id" in row.event && row.event.position_id
+          ? row.event.position_id
+          : null;
+      const key = pid ?? `lone-${row.ix}`;
+      const seen = at.get(key);
+      if (seen === undefined) {
+        at.set(key, tripGroups.length);
+        tripGroups.push({ key, pos: pid, rows: [row] });
+      } else {
+        tripGroups[seen].rows.push(row);
+      }
+    }
+  }
+
   // ---------- render helpers ----------------------------------------------
 
-  /** One trip card per blotter event — desk-v3 row shape, real stream data. */
-  function renderTrip(row: BlotterRow) {
-    const { event, ix } = row;
-    if (event.type === "escalate") return null; // surfaces as THE DECISION card
-    const pos =
-      "position_id" in event && event.position_id ? event.position_id : null;
-    // Real trip identity from the snapshot — undefined before it arrives or
-    // when the id isn't in it, in which case both helpers degrade cleanly.
+  /** Pass 7: ONE CARD PER TRIP. The header is the trip's identity (label,
+      date, people) with the route DRAWN as a line; the trip's events render
+      as a compact timeline of dots. Every dot is still a `.trip[data-ix]`
+      element, so the entrance tween and the replay wipe behave exactly as
+      before — nothing is dropped, the words just stop repeating. Every
+      figure is the stream's own value (fares from mark events, saved/drop
+      amounts from alloc/loss events, booked state from the snapshot). */
+  function renderTripGroup(group: {
+    key: string;
+    pos: string | null;
+    rows: BlotterRow[];
+  }) {
+    const { pos, rows } = group;
     const snapPos = pos ? positions[pos] : undefined;
-    const blocked = event.type === "loss" || event.type === "error";
-    const avatarCls = `avatar a${(ix % 4) + 2}`;
+    const last = rows[rows.length - 1].event;
+    const blocked = last.type === "loss" || last.type === "error";
+    const avatarCls = `avatar a${(rows[0].ix % 4) + 2}`;
+    // Snapshot-confirmed booking outranks the latest event — positions are
+    // the source of truth (same test the KPI booked count uses).
+    const booked = Boolean(
+      snapPos && snapPos.status === "booked" && snapPos.ticket_asserted
+    );
 
-    let badge: ReactNode = null;
-    let amount: ReactNode = null;
-    let extra: ReactNode = null;
-
-    switch (event.type) {
-      case "trade":
-        badge =
-          event.kind === "book" ? (
-            snapPos && snapPos.status === "booked" ? (
-              <span className="badge ok">Booked</span>
-            ) : (
+    let badge: ReactNode;
+    if (booked) {
+      badge = <span className="badge ok">Booked</span>;
+    } else {
+      switch (last.type) {
+        case "trade":
+          badge =
+            last.kind === "book" ? (
               <span className="badge plain">Book decision logged</span>
-            )
-          ) : event.kind === "hold" ? (
-            <span className="badge plain">Holding</span>
+            ) : last.kind === "hold" ? (
+              <span className="badge plain">Holding</span>
+            ) : (
+              <span className="badge wait">Needs your OK</span>
+            );
+          break;
+        case "mark":
+          badge = last.stale ? (
+            <span className="badge wait">Holding for now</span>
           ) : (
-            <span className="badge wait">Needs your OK</span>
+            <span className="badge plain">Checked</span>
           );
-        break;
-      case "mark":
-        badge = event.stale ? (
-          <span className="badge wait">Holding for now</span>
-        ) : (
-          <span className="badge plain">Checked</span>
-        );
-        amount = (
+          break;
+        case "alloc":
+          badge = <span className="badge ok">Saved</span>;
+          break;
+        case "loss":
+          badge = <span className="badge no">Dropped in value</span>;
+          break;
+        case "reconcile":
+          badge = <span className="badge plain">Handled</span>;
+          break;
+        case "error":
+          badge = <span className="badge no">On it</span>;
+          break;
+        default:
+          badge = null;
+      }
+    }
+
+    // Latest fare: the newest mark event's own figures — struck old -> new
+    // when the price moved, the single value when it didn't (old === new,
+    // so nothing is hidden). An error with no mark yet shows its code.
+    let fare: ReactNode = null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const e = rows[i].event;
+      if (e.type === "mark") {
+        fare = (
           <div className="fare num">
-            {event.old !== event.new ? (
+            {e.old !== e.new ? (
               <>
-                <s>{money(event.old, currency)}</s> →{" "}
-                {money(event.new, currency)}
+                <s>{money(e.old, currency)}</s> →{" "}
+                {money(e.new, currency)}
               </>
             ) : (
-              <>
-                {money(event.old, currency)} → {money(event.new, currency)}
-              </>
+              money(e.new, currency)
             )}
           </div>
         );
         break;
-      case "alloc":
-        badge = <span className="badge ok">Saved</span>;
-        extra = <div className="saved">saved {money(event.amount, currency)}</div>;
+      }
+    }
+    if (!fare && last.type === "error") {
+      fare = <div className="fare num">{last.code}</div>;
+    }
+
+    // Money moment: the newest alloc ("saved …") or loss ("↓ …") — each
+    // amount is that event's own figure, never a client-side sum.
+    let delta: ReactNode = null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const e = rows[i].event;
+      if (e.type === "alloc") {
+        delta = <div className="saved">saved {money(e.amount, currency)}</div>;
         break;
-      case "loss":
-        badge = <span className="badge no">Dropped in value</span>;
-        amount = (
-          <div className="fare num">
-            ↓ {money(event.amount, currency).replace("−", "")}
+      }
+      if (e.type === "loss") {
+        delta = (
+          <div className="fare num tg-down">
+            ↓ {money(e.amount, currency).replace("−", "")}
           </div>
         );
         break;
-      case "reconcile":
-        badge = <span className="badge plain">Handled</span>;
-        amount = <div className="fare num">{money(event.delta, currency)}</div>;
-        break;
-      case "error":
-        badge = <span className="badge no">On it</span>;
-        amount = <div className="fare num">{event.code}</div>;
-        break;
-      default:
-        return null;
+      }
+    }
+
+    // The plain-language line — same Pass 4 phrases, and ONLY when the
+    // latest event needs words a badge can't carry (stale data, a question
+    // for the manager, an issue). Routine states stay visual: the badge
+    // word + the dots + the fare already say it, so repeating "Waiting for
+    // a better fare" on five quiet cards is exactly the wall Jaydon read.
+    const now =
+      last.type === "trade" && last.kind === "escalate"
+        ? "Asking you first"
+        : last.type === "mark" && last.stale
+          ? "Using last known price"
+          : last.type === "error"
+            ? "See full record"
+            : null;
+
+    const label = snapPos?.trip_label?.trim();
+    const hasRoute = Boolean(snapPos && snapPos.origin && snapPos.dest);
+    const sub: string[] = [];
+    if (snapPos?.depart_date) sub.push(shortDate(snapPos.depart_date));
+    if (snapPos && typeof snapPos.pax === "number" && snapPos.pax >= 1) {
+      sub.push(snapPos.pax === 1 ? "1 person" : `${snapPos.pax} people`);
     }
 
     return (
-      <div key={ix} data-ix={ix} className={blocked ? "trip blocked" : "trip"}>
+      <div key={group.key} className={blocked ? "tg blocked" : "tg"}>
         <div className={avatarCls}>{tripInitials(snapPos, pos)}</div>
-        <div className="info">
-          {/* Pass 3 (R1): the TRIP IDENTITY is the card's heading — unique
-              per card, so the feed scans; the state word demotes to the leg.
-              Both helpers untouched; only what feeds which line swaps. */}
-          <div className="name">{tripIdentity(snapPos, pos)}</div>
-          <div className="leg">
-            {tripTitle(event)}
-            {" · "}
-            {event.type === "trade"
-              ? event.kind === "book"
-                ? "Price looked good"
-                : event.kind === "hold"
-                  ? "Waiting for a better fare"
-                  : "Asking you first"
-              : event.type === "mark"
-                ? event.stale
-                  ? "Using last known price"
-                  : "Checked today's fares"
-                : event.type === "alloc"
-                  ? "Came in under quote"
-                  : event.type === "loss"
-                    ? `Down ${money(event.amount, currency).replace("−", "")}`
-                    : event.type === "reconcile"
-                      ? "Adjusted before booking"
-                      : "See full record"}
+        <div className="tg-body">
+          <div className="tg-head">
+            <span className="tg-label">{label || friendlyTrip(pos)}</span>
+            {sub.length > 0 && (
+              <span className="tg-sub">{sub.join(" · ")}</span>
+            )}
           </div>
-          {extra}
+          {hasRoute && snapPos && (
+            <div
+              className="tg-route"
+              aria-label={`${snapPos.origin} to ${snapPos.dest}`}
+            >
+              <span className="tg-city num">{snapPos.origin}</span>
+              <span className="tg-path" aria-hidden="true">
+                <i className="tg-dot" />
+                <i className="tg-line" />
+                <span className="tg-plane">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" />
+                  </svg>
+                </span>
+                <i className="tg-line" />
+                <i className="tg-dot" />
+              </span>
+              <span className="tg-city num">{snapPos.dest}</span>
+            </div>
+          )}
+          <div className="tg-track">
+            {rows.map(({ event, ix }) => (
+              <div
+                key={ix}
+                data-ix={ix}
+                className={`trip tick ${tickTone(event, snapPos)}`}
+                title={tripTitle(event)}
+              >
+                <span className="tick-dot" aria-hidden="true" />
+                <span className="tick-word">{tripTitle(event)}</span>
+              </div>
+            ))}
+          </div>
+          {now && <div className="tg-now">{now}</div>}
         </div>
-        <div className="right">
-          {amount}
+        <div className="tg-right">
           {badge}
+          {fare}
+          {delta}
         </div>
       </div>
     );
@@ -1535,10 +1670,10 @@ export default function DeskPage() {
         </aside>
 
         <div className="desk-main">
-          {/* ---- the trips — one board, one hairline row per event ------ */}
+          {/* ---- the trips — one board, ONE CARD PER TRIP (Pass 7) ------ */}
           <section className="board">
           <div className="sec">The trips</div>
-          {screen.blotter.length === 0 ? (
+          {tripGroups.length === 0 ? (
             <>
               <div className="trip empty">
                 Just starting — updates will appear here.
@@ -1564,7 +1699,7 @@ export default function DeskPage() {
               )}
             </>
           ) : (
-            screen.blotter.map(renderTrip)
+            tripGroups.map(renderTripGroup)
           )}
           </section>
 
