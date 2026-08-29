@@ -181,7 +181,7 @@ export default function MandatePage() {
               sends their passport — nothing to type by hand.
             </p>
 
-            <label className="constraint-field">
+            <label className="constraint-field share-link">
               <span className="constraint-k">Invite link</span>
               <input
                 type="text"
@@ -195,7 +195,7 @@ export default function MandatePage() {
               />
             </label>
 
-            <label className="constraint-field">
+            <label className="constraint-field share-code">
               <span className="constraint-k">Your release code (keep private)</span>
               <input
                 type="text"

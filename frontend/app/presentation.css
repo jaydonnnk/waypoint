@@ -390,3 +390,50 @@
   .trip.skeleton .sk-line { animation: none; }
   .pa-beacon { animation: none; }
 }
+
+/* §9 — Screen 1: landing polish + the Waybot share-card moment.
+   Logic and copy untouched; className additions only (share-link /
+   share-code). The hero-form pane gets a gentle darkening scrim toward
+   its right edge so every white form text clears WCAG AA even at the
+   lightest teal the animated ground shows (white alone tops out ~3.5:1
+   on #1a9a8c — physics, not styling). */
+.hero-title {
+  font-size: clamp(34px, 4.2vw, 56px);
+  letter-spacing: -1px;
+  line-height: 1.06;
+}
+.hero-lead { font-size: var(--fs-ui); max-width: 46ch; }
+.assure-chip {
+  min-height: 32px;
+  border-radius: var(--r-pill);
+  border-width: 1px;
+}
+.hero-form {
+  background: linear-gradient(
+    100deg,
+    rgba(8, 63, 58, 0) 0%,
+    rgba(8, 63, 58, 0.32) 22%,
+    rgba(8, 63, 58, 0.32) 100%
+  );
+}
+.hero-form .constraint-field input { min-height: 48px; }
+.hero-form .constraint-field input:focus {
+  box-shadow: var(--ring); /* keeps the existing focus border-color */
+}
+.hero-form .start-btn { min-height: 52px; }
+
+/* share card — the demo moment: the release code is the star.
+   Scoped under .hero-form so these beat the pane's .constraint-field
+   rules above on specificity. */
+.hero-form .share-code input {
+  font-size: 28px;
+  letter-spacing: 2px;
+  text-align: center;
+  padding: 14px 12px;
+  border: 1.5px dashed var(--line2);
+}
+/* the t.me bridge row reads distinct from the code box — brighter glass */
+.hero-form .constraint-field.share-link {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.45);
+}
