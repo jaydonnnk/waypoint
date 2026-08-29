@@ -14,6 +14,10 @@ from app.db.database import init_db
 from app.events import SINK
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 # Default allowed origins — the exact pre-S10 list. A deployment EXTENDS
 # this list via WAYPOINT_CORS_ORIGIN (comma-separated); the localhost
