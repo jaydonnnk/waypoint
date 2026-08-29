@@ -53,6 +53,27 @@ export default function MandatePage() {
     };
   }, []);
 
+  // Copy-to-clipboard for the share fields. `copied` holds the key of the
+  // field whose button was last pressed; it clears after 1.5s (or if the
+  // component unmounts first). Falls back silently when the Clipboard API
+  // is unavailable — the fields stay selectable/readOnly as before.
+  const [copied, setCopied] = useState<string | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+  }, []);
+  function copyField(text: string, key: string) {
+    if (!text || !navigator.clipboard) return;
+    navigator.clipboard.writeText(text).then(
+      () => {
+        setCopied(key);
+        if (copyTimer.current) clearTimeout(copyTimer.current);
+        copyTimer.current = setTimeout(() => setCopied(null), 1500);
+      },
+      () => {},
+    );
+  }
+
   // ---- ops-manager budget constraints (set BEFORE "Start booking") ----
   const [budgetTotal, setBudgetTotal] = useState(12000);
   const [authorityCap, setAuthorityCap] = useState(1500);
@@ -211,12 +232,26 @@ export default function MandatePage() {
             {waybotUsername && share.invite_token ? (
               <label className="constraint-field">
                 <span className="constraint-k">Invite link</span>
-                <input
-                  type="text"
-                  readOnly
-                  value={`https://t.me/${waybotUsername}?start=${share.invite_token}`}
-                  onFocus={(e) => e.currentTarget.select()}
-                />
+                <div className="copy-row">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`https://t.me/${waybotUsername}?start=${share.invite_token}`}
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                  <button
+                    type="button"
+                    className="copy-btn"
+                    onClick={() =>
+                      copyField(
+                        `https://t.me/${waybotUsername}?start=${share.invite_token}`,
+                        "invite",
+                      )
+                    }
+                  >
+                    {copied === "invite" ? "Copied ✓" : "Copy"}
+                  </button>
+                </div>
               </label>
             ) : (
               <div className="note-soft">
@@ -227,12 +262,23 @@ export default function MandatePage() {
 
             <label className="constraint-field">
               <span className="constraint-k">Your release code (keep private)</span>
-              <input
-                type="text"
-                readOnly
-                value={share.confirmation_code ?? ""}
-                onFocus={(e) => e.currentTarget.select()}
-              />
+              <div className="copy-row">
+                <input
+                  type="text"
+                  readOnly
+                  value={share.confirmation_code ?? ""}
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <button
+                  type="button"
+                  className="copy-btn"
+                  onClick={() =>
+                    copyField(share.confirmation_code ?? "", "code")
+                  }
+                >
+                  {copied === "code" ? "Copied ✓" : "Copy"}
+                </button>
+              </div>
             </label>
 
             <div className="note-soft">
