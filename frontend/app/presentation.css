@@ -437,3 +437,37 @@
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.45);
 }
+
+/* §10 — Screen 3: the peak-end summary. Pure CSS — the close page's JSX
+   already carries every class. The hero figure inherits §5's .budget .big
+   (--fs-hero), mirroring Screen 2 so the ending judges remember it. */
+.close-call { font-size: var(--fs-h1); }
+
+/* demoted counts — quiet tiles on an 8px grid, never competing with the
+   hero. Scoped above the globals ".record .close-stat*" rules. */
+.record .close-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-2);
+}
+.record .close-stat {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-trip);
+  padding: var(--sp-4);
+  min-width: 0;
+}
+.record .close-stat .cs-v { font-size: var(--fs-h2); }
+/* tile labels carry meaning — --faint fails AA on paper, bump to --mut */
+.record .close-stat .cs-k { color: var(--mut); }
+
+/* actions stay small and tappable (R4) */
+.close-actions .btn { min-height: 48px; }
+
+/* auditor second opinion — mono ledger feel, matching Screen 2's record */
+.close-room.filled .auditor-k {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
