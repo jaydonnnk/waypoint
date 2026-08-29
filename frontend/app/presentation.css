@@ -104,144 +104,221 @@
   color: var(--mut);
 }
 
-/* §5 — Pass 3 command layout: grid skeleton, summary hero, decision ask.
-   Below 1080px the three zones stack in DOM order — decisions → console
-   → trips (exception-first). .desk-decisions is conditionally rendered
-   in the page, so an empty slot never leaves a stray grid gap. */
+/* ==================================================================== */
+/* §5 — Pass 4 command layout v2. One dense board instead of a wall of  */
+/* floating cards; summary, decision, console share one card language.  */
+/* Below 1080px everything stacks in DOM order: decisions → console →   */
+/* board (exception-first). .desk-decisions is conditionally rendered.  */
+/* ==================================================================== */
 .desk-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--sp-4);
+  gap: var(--sp-3);
   align-items: start;
 }
-.desk-main { min-width: 0; }
+.desk-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.desk-decisions { display: flex; flex-direction: column; gap: var(--sp-3); }
 
 @media (min-width: 1080px) {
   .teal-app > .wrap { max-width: 1180px; }
   .desk-grid {
-    grid-template-columns: minmax(0, 1fr) 330px;
+    grid-template-columns: minmax(0, 1fr) 332px;
     grid-template-areas:
       "decisions console"
       "main console";
-    column-gap: var(--sp-6);
+    column-gap: var(--sp-4);
   }
   .desk-decisions { grid-area: decisions; }
   .desk-main { grid-area: main; }
   .desk-console { grid-area: console; position: sticky; top: var(--sp-6); }
 }
 
-/* summary card — the Saved figure is the page's largest element (R3) */
+/* ---- summary card: one hero number, quiet meta ---- */
 .run {
+  border: none;
   box-shadow: var(--shadow-2);
-  padding: var(--sp-6);
+  padding: 24px 28px 20px;
+  margin-bottom: var(--sp-3);
 }
-.run .run-title { font-size: var(--fs-h2); }
+.run .run-title { font-size: 19px; font-weight: 800; letter-spacing: -0.3px; }
+.run .run-who { margin-bottom: 2px; }
+.run .run-ctx { margin: 0 0 18px; }
+.budget { margin-bottom: 12px; }
+.budget .left { font-size: 14px; }
 .budget .big {
-  font-size: var(--fs-hero);
+  font-size: clamp(30px, 3.4vw, 40px);
   letter-spacing: -1px;
   line-height: 1.05;
 }
-.bar { height: 10px; }
+.bar { height: 12px; border-radius: 6px; }
 /* spent/left note carries meaning — --faint fails AA, bump to --mut */
-.bar-note { color: var(--mut); }
-
-/* statusline chips → quiet pills; pin dots stay the redundant channel */
-.statusline { gap: 8px; }
+.bar-note { color: var(--mut); font-size: 12.5px; margin-top: 8px; }
+.statusline {
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
 .statusline .s {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
-  padding: 5px 12px;
-  font-size: 13px;
+  padding: 6px 12px;
+  font-size: 12.5px;
 }
 
-/* decision card — the ask (R4): rises in, recommendation dominates */
+/* ---- decision card: white, amber-edged, radio options (R4) ---- */
 .decide {
-  border: 1px solid #ecdcba;
-  box-shadow: var(--shadow-3);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--warn);
+  box-shadow: var(--shadow-2);
+  margin: 0;
   animation: rise var(--t-slow) var(--ease-out) both;
+}
+.decide .decide-name { font-size: 17px; }
+.decide .reason { font-size: 14.5px; color: var(--mut); }
+.decide-opts { gap: 8px; }
+.decide-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line2);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 14px;
+  background: var(--card);
+}
+.decide-opt::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid var(--line2);
+  flex: none;
 }
 .decide-opt.rec {
   border: 2px solid var(--good);
   background: var(--goodbg);
-  padding: 10px 14px;
+  padding: 11px 13px;
+}
+.decide-opt.rec::before {
+  border-color: var(--good);
+  background: var(--good);
+  box-shadow: inset 0 0 0 3px var(--goodbg);
 }
 .btns .btn { min-height: 48px; font-size: var(--fs-ui); }
 .btn:focus-visible { outline: none; box-shadow: var(--ring); }
 .esc-btn:focus-visible { outline: none; box-shadow: var(--ring); }
 @media (max-width: 620px) {
   .btns .btn { flex: 1; }
+  .decide-opt { font-size: 13.5px; }
 }
 
-/* §6 — trip cards: identity-first headings (R1), calmer blocked state */
-.trip {
-  min-height: 64px;
-  padding: var(--sp-4);
-  box-shadow: var(--shadow-1);
-  transition:
-    transform var(--t-fast) var(--ease-out),
-    box-shadow var(--t-fast) var(--ease-out);
+/* ==================================================================== */
+/* §6 — the trips board: one surface, hairline rows, aligned columns.   */
+/* Row identity is the heading (R1); fares right-aligned tabular mono.  */
+/* ==================================================================== */
+.board {
+  background: var(--card);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
 }
-/* hover only — never on data updates. (GSAP entrances leave an inline
-   transform on animated cards, so the lift shows wherever no tween ran,
-   e.g. reduced motion; the elevation always applies.) */
-.trip:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); }
-.trip .name { font-size: var(--fs-h3); font-weight: 700; }
-.trip .leg { font-size: var(--fs-body); }
-.trip .fare { text-align: right; }
-.trip .fare s { color: var(--faint); text-decoration-thickness: 1.5px; }
-
-/* decorative route line (aria-hidden) — Flighty-style, pure CSS */
-.route-line { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.rl-code { font-size: 11px; color: var(--faint); }
-.rl-track {
-  position: relative;
-  flex: 1;
-  height: 1px;
-  background: var(--line2);
+.board > .sec {
+  margin: 0;
+  padding: 16px 22px 12px;
+  color: var(--mut);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
 }
-.rl-track::before,
-.rl-track::after {
-  content: "";
-  position: absolute;
-  top: -2px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--brand);
+.board .trip {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  box-shadow: none;
+  padding: 13px 22px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  column-gap: 14px;
+  align-items: center;
+  transition: background var(--t-fast) var(--ease-out);
 }
-.rl-track::before { left: 0; }
-.rl-track::after { right: 0; }
-
-/* blocked: no full red wash — hairline card, red edge, light tint */
-.trip.blocked {
-  background: var(--card); /* fallback where color-mix is unsupported */
-  background: color-mix(in srgb, var(--badbg) 50%, var(--card));
-  border-left: 3px solid var(--bad);
+.board .trip:hover { background: var(--paper); }
+.board .trip .avatar { width: 34px; height: 34px; font-size: 11px; }
+.board .trip .name { font-size: 15px; font-weight: 700; letter-spacing: -0.1px; }
+.board .trip .leg { font-size: 13px; margin-top: 1px; }
+.board .trip .right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  text-align: right;
 }
-
+.board .trip .fare { font-size: 14.5px; font-weight: 600; }
+.board .trip .fare s { color: var(--faint); font-weight: 500; margin-right: 2px; text-decoration-thickness: 1.5px; }
 .badge {
   border-radius: var(--r-pill);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  padding: 4px 10px;
+  letter-spacing: 0.2px;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+/* blocked rows: a quiet red inset marker, never a full wash */
+.board .trip.blocked {
+  background: transparent;
+  border-left: none;
+  box-shadow: inset 3px 0 0 var(--bad);
+}
+.board .trip.blocked:hover { background: var(--badbg); }
+.board .trip.empty {
+  display: flex;
+  justify-content: center;
+  padding: 22px;
+  color: var(--mut);
+  font-size: 13.5px;
 }
 
-/* §7 — the agent console: the labor made visible (R2). Quiet card; the
-   existing "Working on" kicker doubles as its visual header — no new copy. */
+/* phone rows: identity gets the full width; fare + chip drop to line 2 */
+@media (max-width: 560px) {
+  .board > .sec { padding: 14px 16px 10px; }
+  .board .trip { grid-template-columns: minmax(0, 1fr); padding: 13px 16px; }
+  .board .trip .avatar { display: none; }
+  .board .trip .right {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: 8px;
+  }
+}
+
+/* ==================================================================== */
+/* §7 — the agent console: same card language as the summary (R2).      */
+/* ==================================================================== */
 .desk-console {
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid var(--line);
+  background: var(--card);
+  border: none;
   border-radius: var(--r-card);
-  box-shadow: var(--shadow-1);
-  padding: var(--sp-5);
+  box-shadow: var(--shadow-2);
+  padding: 20px 22px;
 }
 .desk-console .pa-working {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
 }
-/* the wrapper stays mounted (aria-live) — collapse it when it's empty */
 .desk-console .pa-working:empty { min-height: 0; }
 .desk-console .pa-working-k {
   display: flex;
@@ -261,12 +338,15 @@
   50% { opacity: 0.35; }
 }
 
-/* fare-check micro-meter — bound ONLY to screen.meter; plain width style,
-   no animation toward fake values */
 .console-meter {
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
+}
+.desk-console .pa-working:empty + .console-meter {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 .cm-k {
   font-family: var(--mono);
@@ -275,7 +355,7 @@
   text-transform: uppercase;
   color: var(--mut);
 }
-.cm-read { font-size: 15px; color: var(--ink); margin: 2px 0 6px; }
+.cm-read { font-size: 16px; color: var(--ink); margin: 3px 0 7px; }
 .cm-read b { font-weight: 700; }
 .cm-track {
   height: 6px;
@@ -289,15 +369,13 @@
   background: var(--brand);
 }
 
-/* data sources — stacked rows, name left / label right; the fallback
-   rule stands (label muted unless explicitly `live`) */
 .desk-console .pa-sources {
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
   flex-direction: column;
   flex-wrap: nowrap;
-  gap: 7px;
+  gap: 8px;
 }
 .desk-console .pa-source {
   display: flex;
@@ -306,8 +384,15 @@
   gap: 10px;
   width: 100%;
 }
+.desk-console .pa-source-name { font-size: 12.5px; }
+.desk-console .pa-source-label { font-size: 12px; text-align: right; }
 
-/* §8 — record polish, honest skeletons, toast, Waybot awaiting refinements */
+/* ==================================================================== */
+/* §8 — record, skeletons, toast, awaiting gate, result banner          */
+/* ==================================================================== */
+/* the record zone: drop the dashed divider — the ghost toggle is enough */
+.record { border-top: none; }
+
 .record-toggle {
   display: inline-flex;
   align-items: center;
@@ -330,7 +415,6 @@
 }
 .record-toggle:focus-visible { outline: none; box-shadow: var(--ring); }
 
-/* ledger rhythm — consistent 8px, prose capped at ~72ch */
 .fineprint .brow .b-body { max-width: 72ch; }
 .fineprint .stream {
   border-radius: var(--r-bar);
@@ -339,9 +423,10 @@
 
 /* skeletons — obviously placeholders: no text, no numbers */
 .trip.skeleton { pointer-events: none; }
+.board .trip.skeleton { grid-template-columns: 34px minmax(0, 1fr); }
 .sk-avatar {
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: var(--line);
   flex: none;
@@ -363,16 +448,26 @@
   50% { opacity: 0.5; }
 }
 
-/* toast — shadow-3, reuses the frozen toast-in entrance. ≥720px sits
-   bottom-right: the keyframe ends at translateX(-50%), so the anchor is
-   the gutter plus half the 480px cap width (width is always 480px here). */
+/* toast — bottom-right on wide screens with its own entrance (the base
+   toast-in keyframe assumes the centered translateX(-50%) anchor) */
 .toast {
   box-shadow: var(--shadow-3);
-  border-radius: var(--r-trip);
+  border-radius: 14px;
+  border-left: 3px solid var(--brand);
   padding-bottom: max(var(--sp-4), env(safe-area-inset-bottom));
 }
 @media (min-width: 720px) {
-  .toast { left: calc(100vw - 262px); }
+  .toast {
+    left: auto;
+    right: 22px;
+    transform: none;
+    width: min(400px, calc(100vw - 44px));
+    animation: toast-in-r 0.3s var(--ease-out) both;
+  }
+}
+@keyframes toast-in-r {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
 }
 
 /* Waybot awaiting gate — CSS-only refinements (logic + copy untouched) */
@@ -383,7 +478,13 @@
 }
 .decide .constraint-field input:focus { box-shadow: var(--ring); }
 
-/* Pass 3 motion guards — local (the global reduced-motion block stays
+/* result banner joins the card language */
+.result-banner {
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-2);
+}
+
+/* Pass 4 motion guards — local (the global reduced-motion block stays
    untouched): static skeletons + no beacon pulse under reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .trip.skeleton .sk-avatar,
@@ -391,12 +492,13 @@
   .pa-beacon { animation: none; }
 }
 
-/* §9 — Screen 1: landing polish + the Waybot share-card moment.
-   Logic and copy untouched; className additions only (share-link /
-   share-code). The hero-form pane gets a gentle darkening scrim toward
-   its right edge so every white form text clears WCAG AA even at the
-   lightest teal the animated ground shows (white alone tops out ~3.5:1
-   on #1a9a8c — physics, not styling). */
+/* ==================================================================== */
+/* §9 — Screen 1: landing polish + the Waybot share-card moment.        */
+/* Logic and copy untouched; className additions only (share-link /     */
+/* share-code). The hero-form pane gets a gentle darkening scrim so     */
+/* every white form text clears WCAG AA even at the lightest teal the   */
+/* animated ground shows.                                               */
+/* ==================================================================== */
 .hero-title {
   font-size: clamp(34px, 4.2vw, 56px);
   letter-spacing: -1px;
@@ -422,9 +524,6 @@
 }
 .hero-form .start-btn { min-height: 52px; }
 
-/* share card — the demo moment: the release code is the star.
-   Scoped under .hero-form so these beat the pane's .constraint-field
-   rules above on specificity. */
 .hero-form .share-code input {
   font-size: 28px;
   letter-spacing: 2px;
@@ -432,19 +531,16 @@
   padding: 14px 12px;
   border: 1.5px dashed var(--line2);
 }
-/* the t.me bridge row reads distinct from the code box — brighter glass */
 .hero-form .constraint-field.share-link {
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.45);
 }
 
-/* §10 — Screen 3: the peak-end summary. Pure CSS — the close page's JSX
-   already carries every class. The hero figure inherits §5's .budget .big
-   (--fs-hero), mirroring Screen 2 so the ending judges remember it. */
+/* ==================================================================== */
+/* §10 — Screen 3: the peak-end summary.                                */
+/* ==================================================================== */
 .close-call { font-size: var(--fs-h1); }
 
-/* demoted counts — quiet tiles on an 8px grid, never competing with the
-   hero. Scoped above the globals ".record .close-stat*" rules. */
 .record .close-stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -458,13 +554,10 @@
   min-width: 0;
 }
 .record .close-stat .cs-v { font-size: var(--fs-h2); }
-/* tile labels carry meaning — --faint fails AA on paper, bump to --mut */
 .record .close-stat .cs-k { color: var(--mut); }
 
-/* actions stay small and tappable (R4) */
 .close-actions .btn { min-height: 48px; }
 
-/* auditor second opinion — mono ledger feel, matching Screen 2's record */
 .close-room.filled .auditor-k {
   font-family: var(--mono);
   font-size: 10px;

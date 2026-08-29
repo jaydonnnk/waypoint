@@ -829,15 +829,6 @@ export default function DeskPage() {
                       ? "Adjusted before booking"
                       : "See full record"}
           </div>
-          {/* Decorative route line — renders ONLY when the snapshot carries
-              BOTH endpoints; never invents codes, absent snapshot → nothing. */}
-          {snapPos?.origin && snapPos?.dest && (
-            <div className="route-line" aria-hidden="true">
-              <span className="rl-code num">{snapPos.origin}</span>
-              <span className="rl-track" />
-              <span className="rl-code num">{snapPos.dest}</span>
-            </div>
-          )}
           {extra}
         </div>
         <div className="right">
@@ -1406,7 +1397,8 @@ export default function DeskPage() {
         </aside>
 
         <div className="desk-main">
-          {/* ---- the trips — one card per real stream event ------------- */}
+          {/* ---- the trips — one board, one hairline row per event ------ */}
+          <section className="board">
           <div className="sec">The trips</div>
           {screen.blotter.length === 0 ? (
             <>
@@ -1436,6 +1428,7 @@ export default function DeskPage() {
           ) : (
             screen.blotter.map(renderTrip)
           )}
+          </section>
 
           {/* ---- the full record: every check, disclosure and code --------
                  (step 3 — collapsed by default, behind a quiet toggle. The
