@@ -14,7 +14,12 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+# Waybot gate (S3, M8): "false" seeds desks UNGATED so the recorded/scripted
+# pitch books demo pax byte-safe (no bot token, no traveler capture). Any
+# other value (default) keeps the gated G1 flow for the live bot demo.
+ARG NEXT_PUBLIC_WAYBOT_GATED=true
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_WAYBOT_GATED=$NEXT_PUBLIC_WAYBOT_GATED \
     NEXT_TELEMETRY_DISABLED=1 \
     NEXT_STANDALONE=1
 RUN npm run build

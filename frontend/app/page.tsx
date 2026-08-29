@@ -21,6 +21,12 @@ import WaypointField from "./WaypointField";
 
 gsap.registerPlugin(useGSAP);
 
+// Waybot gate (S3/M8): seed gated unless NEXT_PUBLIC_WAYBOT_GATED is exactly
+// "false" (the recorded/scripted pitch, which runs bot-less and must book
+// demo pax byte-safe rather than hold on an empty roster). Inlined at build
+// time by Next — a module-level const so the value is fixed per build.
+const WAYBOT_GATED = process.env.NEXT_PUBLIC_WAYBOT_GATED !== "false";
+
 export default function MandatePage() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -106,13 +112,17 @@ export default function MandatePage() {
         destination_label: destination.trim(),
         trip_purpose: tripPurpose.trim(),
         // Waybot: seed with the invite gate so we get a share link + code
-        // and the cycle waits for the manager's confirm.
-        gated: true,
+        // and the cycle waits for the manager's confirm. S3/M8: the
+        // recorded/scripted pitch runs bot-less, so NEXT_PUBLIC_WAYBOT_GATED
+        // ("false") seeds UNGATED — the desk books demo pax byte-safe instead
+        // of holding forever on an empty roster. Default (unset/true) keeps
+        // the gated capture flow for the live G1 bot demo.
+        gated: WAYBOT_GATED,
       });
-      // Backward-compat guard (M2): a pre-S1 backend ignores `gated` and
-      // starts the cycle server-side, returning only { desk_id }. With no
-      // invite_token there's nothing to share and a live desk is already
-      // running — navigate straight to it instead of showing a blank card.
+      // Backward-compat guard (M2) / ungated recorded pitch: an ungated seed
+      // (or a pre-S1 backend) returns only { desk_id } with no invite_token —
+      // there's nothing to share and the cycle is already running, so navigate
+      // straight to the desk instead of showing a blank share card.
       if (!result.invite_token) {
         router.push(`/desk/${result.desk_id}`);
         return;

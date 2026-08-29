@@ -66,6 +66,11 @@ services:
         # origin the browser can reach. Override for a VPS deployment,
         # e.g. --build-arg NEXT_PUBLIC_API_URL=https://api.example.com
         NEXT_PUBLIC_API_URL: http://localhost:8000
+        # Recorded/scripted pitch runs bot-less (no WAYPOINT_BOT_TOKEN), so
+        # seed UNGATED — the desk books demo pax byte-safe instead of holding
+        # forever on an empty roster (S3, M8). The live G1 demo (with a bot
+        # token) builds with this unset/true to get the gated capture flow.
+        NEXT_PUBLIC_WAYBOT_GATED: "false"
     ports:
       - "3000:3000"
     depends_on:
