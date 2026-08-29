@@ -605,6 +605,44 @@ class DeskStore:
                 raise KeyError(f"unknown desk: {desk_id}")
             return row.team_size
 
+    def get_code_attempts(self, desk_id: str) -> int:
+        """Read the mandate's current code_attempts WITHOUT writing. Raises
+        KeyError for an unknown desk. Used by the /confirm route's cap check
+        (H-new1): when the counter is already at/over the cap, a wrong code
+        answers 429 with no bump UPDATE — the flood stops writing."""
+        with database.SessionLocal() as session:
+            row = session.get(MandateRow, desk_id)
+            if row is None:
+                raise KeyError(f"unknown desk: {desk_id}")
+            return int(row.code_attempts)
+
+    def bump_code_attempts(self, desk_id: str) -> int:
+        """Atomically increment and return the new code_attempts count.
+
+        Used by the /confirm route to enforce the attempt cap (5 wrong codes
+        → 429). Raises KeyError for an unknown desk.
+
+        The increment is a single UPDATE (``code_attempts = code_attempts +
+        1``) so SQLite serializes concurrent bumps — never a Python-side
+        read-modify-write that two racing sessions could lose. The read-back
+        SELECT runs in the SAME transaction, so it observes this bump's value.
+        """
+        with database.SessionLocal() as session:
+            result = session.execute(
+                update(MandateRow)
+                .where(MandateRow.id == desk_id)
+                .values(code_attempts=MandateRow.code_attempts + 1)
+            )
+            if result.rowcount != 1:
+                raise KeyError(f"unknown desk: {desk_id}")
+            new_count = session.execute(
+                select(MandateRow.code_attempts).where(
+                    MandateRow.id == desk_id
+                )
+            ).scalar_one()
+            session.commit()
+            return int(new_count)
+
     def has_ledger_marker(self, desk_id: str, marker: str) -> bool:
         """True if any ledger note on this desk starts with `marker`.
 

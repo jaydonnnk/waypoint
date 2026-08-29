@@ -24,10 +24,21 @@ from telegram.ext import (
 )
 
 from app.bot.session import SessionStore
+from app.config import int_env
 from app.db.store import DeskStore
 from app.events import DeskEvent, EventSink
 
 logger = logging.getLogger(__name__)
+
+# S4 guard 4: reject OVERSIZED photos BEFORE extraction. 10 MB — generous
+# for a passport photo, but stops multi-hundred-MB blobs from reaching the
+# VL model (memory + cost). ENV-tunable for testing. (Malformed / non-image
+# blobs are not rejected here — they fail closed via extract_passport's
+# except into the typed-entry fallback, not an explicit rejection.)
+# Tolerant read shared with the API routes (app.config, M-new2): a malformed
+# OR below-minimum override falls back to the default rather than crashing
+# bot import (config-typo DoS) or disabling the size gate.
+MAX_PHOTO_BYTES = int_env("WAYBOT_MAX_PHOTO_BYTES", 10 * 1024 * 1024, minimum=1)
 
 # Module-level session store (per-chat conversation state).
 SESSIONS = SessionStore()
@@ -114,10 +125,31 @@ async def _on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Stash the new photo message_id for later deleteMessage.
     session.photo_message_id = update.message.message_id
 
-    # Download the largest photo variant.
+    # Pick the largest photo variant.
     photo = update.message.photo[-1]  # largest resolution
+
+    # S4 guard 4 (L1): reject oversized photos BEFORE spending the download.
+    # Telegram reports file_size on the PhotoSize, so a huge blob is refused
+    # without ever pulling the bytes into memory. The post-download check
+    # below stays authoritative (file_size can be absent or under-report).
+    if photo.file_size is not None and photo.file_size > MAX_PHOTO_BYTES:
+        await update.message.reply_text(
+            f"⚠️ Photo too large ({photo.file_size // 1024}KB). "
+            "Please send a smaller photo of your passport."
+        )
+        return
+
     file = await photo.get_file()
     image_bytes = await file.download_as_bytearray()
+
+    # Authoritative size gate: reject oversized photos BEFORE extraction. The
+    # VL model should never see a multi-hundred-MB blob — memory + cost + abuse.
+    if len(image_bytes) > MAX_PHOTO_BYTES:
+        await update.message.reply_text(
+            f"⚠️ Photo too large ({len(image_bytes) // 1024}KB). "
+            "Please send a smaller photo of your passport."
+        )
+        return
 
     # Extract MRZ via Qwen-VL (or injected transport).
     try:

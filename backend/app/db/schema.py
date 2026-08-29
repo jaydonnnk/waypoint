@@ -67,7 +67,7 @@ class MandateRow(Base):
     policy_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # G4 re-approval cap (1) for the unbookable-pin edge (S5).
     reapproval_count: Mapped[int] = mapped_column(Integer, default=0)
-    # Confirmation-code attempt cap (5 -> reissue) (S4).
+    # Confirmation-code attempt cap (5) — wrong-code guessers throttled with 429; verify-first, no lockout (S4).
     code_attempts: Mapped[int] = mapped_column(Integer, default=0)
 
 

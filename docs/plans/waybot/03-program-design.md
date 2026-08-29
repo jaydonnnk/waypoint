@@ -72,7 +72,7 @@ class MandateRow(Base):
     approved_offer_id: Mapped[str | None] = mapped_column(String, nullable=True)
     policy_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     reapproval_count: Mapped[int] = mapped_column(Integer, default=0)  # cap 1 (unbookable-pin edge)
-    code_attempts: Mapped[int] = mapped_column(Integer, default=0)     # cap 5 → reissue
+    code_attempts: Mapped[int] = mapped_column(Integer, default=0)     # cap 5 → 429 throttles wrong-code guessers only (verify-first); correct code always releases; no reissue endpoint (no auth layer)
 
 class TravelerRow(Base):
     __tablename__ = "travelers"
@@ -184,7 +184,7 @@ class SeedRequest(BaseModel):
 async def seed_desk(request: SeedRequest | None = None) -> dict:   # -> {desk_id, invite_token, confirmation_code}
 
 @router.post("/desk/{desk_id}/confirm")
-async def confirm(desk_id: str, body: ConfirmRequest) -> dict:     # hash-check; 403 wrong; 410 second call; 429 over attempt cap → reissue; then _start_cycle
+async def confirm(desk_id: str, body: ConfirmRequest) -> dict:     # VERIFY-FIRST: hash-check runs before the cap — correct code ALWAYS releases; 403 wrong; 410 second call; 429 past the attempt cap throttles wrong-code guessers only (counter freezes at cap); no reissue endpoint (no auth layer); then _start_cycle
 
 @router.post("/desk/{desk_id}/approve")
 async def approve(desk_id: str, body: ApproveRequest) -> dict:     # {choice: approve|hold}; approve → ledger note + _start_cycle (pinned resume)
@@ -263,7 +263,7 @@ Bot-side counting is rejected: it drifts on reject/dedupe/resubmit. Bot stays a 
 - `test_desk_lifecycle.py::test_seed_does_not_start_cycle` — after seed, no DeskState/task, lifecycle awaiting_travelers; `::test_confirm_wrong_code_no_start` — 403, still awaiting; `::test_confirm_starts_cycle` — right code → task exists, lifecycle released; `::test_approve_pins_offer` — resumed cycle books the pinned offer, no re-judgment (brain.judge not called — assert via a counting stub); `::test_pinned_price_move_beyond_contingency_escalates` — verify increase past contingency/cap on the pinned path → escalation, not silent book (wall invariants fire on the pinned path too); `::test_unbookable_pin_one_reapproval_then_hold` — first unbookable re-judges once (reapproval_count→1), second holds+discloses; `::test_travelers_complete_fires_once_backend` — Nth insert fires exactly one travelers_complete, resubmit does not refire.
 - `test_policy_filter.py::test_cheapest_among_policy_passing` — offers filtered by airline/cabin/time, cheapest survivor chosen; `::test_zero_pass_escalates` — empty survivor set → escalation, never a silent violation.
 - `test_waybot_security.py` (style of `test_injection_containment.py` — assume the attack succeeded, assert nothing that matters changed):
-  1. `test_code_hashed_constant_time_attempt_cap` — plaintext never stored; >5 wrong → reissue/lock.
+  1. `test_code_hashed_constant_time_attempt_cap` — plaintext never stored; >5 wrong → 429 (verify-first: the cap throttles wrong-code guessers only, counter freezes past cap, the correct code always releases; no reissue endpoint — no auth layer exists).
   2. `test_leaked_token_cannot_release` — valid token + wrong/absent code → no cycle start.
   3. `test_traveler_session_cannot_confirm_or_approve` — bot-path identity has no release/approve authority.
   4. `test_checksum_and_dup_and_oversize_rejected` — bad checksum / duplicate doc / oversized photo never becomes a traveler.
@@ -271,7 +271,7 @@ Bot-side counting is rejected: it drifts on reject/dedupe/resubmit. Bot stays a 
   6. `test_hostile_mrz_name_contained` — a passport "name" carrying an injection string flows only into pax JSON, never into a brain prompt or CLI arg; wall still books only TICKETED.
   7. `test_confirm_and_approve_single_use` — second confirm/approve → 410.
 
-Every new test must fail against pre-change code (no test that can pass today).
+Every new test must fail against pre-change code (no test that can pass today) — EXCEPT tests explicitly labeled as regression/back-compat guards, which pass pre-change by design (`test_constant_time_compare`, `test_legacy_sha256_still_verifies`).
 
 ## Least confident decisions — RESOLVED at Gate 3 approval
 

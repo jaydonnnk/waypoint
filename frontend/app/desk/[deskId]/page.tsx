@@ -691,7 +691,11 @@ export default function DeskPage() {
         ? "That code didn't match — check it and try again."
         : outcome.kind === "not_found"
           ? "This desk isn't available."
-          : outcome.detail
+          : outcome.kind === "gone"
+            ? "This desk has already been released or the code has expired — ask your manager to seed a fresh desk."
+            : outcome.kind === "throttled"
+              ? "Too many wrong attempts — only the correct code releases this desk."
+              : outcome.detail
     );
   }
 
