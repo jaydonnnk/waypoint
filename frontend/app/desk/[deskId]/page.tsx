@@ -1162,13 +1162,15 @@ export default function DeskPage() {
           <span className="beacon" />
           Waypoint
         </div>
-        <div className={streamDead ? "r-tag err" : "r-tag"}>
+        <div className={streamDead && !awaiting ? "r-tag err" : "r-tag"}>
           <div>
-            {connected
-              ? "Live updates on"
-              : streamDead
-                ? "Connection closed"
-                : "Connecting…"}
+            {awaiting
+              ? "Waiting for your team"
+              : connected
+                ? "Live updates on"
+                : streamDead
+                  ? "Connection closed"
+                  : "Connecting…"}
           </div>
           {/* comparison-mode / live-ticketing disclosure, in plain words */}
           <div
@@ -1271,7 +1273,7 @@ export default function DeskPage() {
                 : `Over by ${money(screen.result.pnl, currency).replace("−", "")}`}
             </div>
           ) : (
-            <div className="big num">{settled ? "" : "Booking…"}</div>
+            <div className="big num">{settled || awaiting ? "" : "Booking…"}</div>
           )}
         </div>
         {/* Spent-vs-budget, real figures only: both numbers are summed

@@ -314,6 +314,14 @@
   box-shadow: var(--shadow-2);
   padding: 20px 22px;
 }
+/* nothing to show yet (e.g. the awaiting gate) — the console sheds its
+   card chrome entirely; the aria-live wrapper inside stays mounted */
+.desk-console:not(:has(.console-meter)):not(:has(.pa-sources)) {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
 .desk-console .pa-working {
   margin-top: 0;
   padding-top: 0;
@@ -470,11 +478,14 @@
   to { opacity: 1; transform: none; }
 }
 
-/* Waybot awaiting gate — CSS-only refinements (logic + copy untouched) */
+/* Waybot awaiting gate — CSS-only refinements (logic + copy untouched):
+   the release entry reads like the share card's code box */
+.decide .constraint-field { flex: 0 0 auto; }
 .decide .constraint-field input {
-  min-height: 48px;
-  font-size: 18px;
-  letter-spacing: 1px;
+  min-height: 52px;
+  font-size: 20px;
+  letter-spacing: 1.5px;
+  text-align: center;
 }
 .decide .constraint-field input:focus { box-shadow: var(--ring); }
 
@@ -495,7 +506,9 @@
 /* ==================================================================== */
 /* §9 — Screen 1: landing polish + the Waybot share-card moment.        */
 /* Logic and copy untouched; className additions only (share-link /     */
-/* share-code).                                                         */
+/* share-code). The hero-form pane gets a gentle darkening scrim so     */
+/* every white form text clears WCAG AA even at the lightest teal the   */
+/* animated ground shows.                                               */
 /* ==================================================================== */
 .hero-title {
   font-size: clamp(34px, 4.2vw, 56px);
@@ -524,6 +537,12 @@
   box-shadow: var(--ring); /* keeps the existing focus border-color */
 }
 .hero-form .start-btn { min-height: 52px; }
+
+/* share card — content flows from the top; glass tiles never stretch */
+.hero-form .share-card { justify-content: flex-start; gap: 18px; }
+.share-card .constraint-field { flex: 0 0 auto; }
+.hero-form .share-link input { font-size: 13px; }
+.share-card .start-btn { margin-top: 8px; }
 
 .hero-form .share-code input {
   font-size: 28px;
