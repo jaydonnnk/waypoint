@@ -1208,13 +1208,14 @@ export default function DeskPage() {
   return (
     <main className="teal-app" ref={scopeRef}>
       <WaypointField />
-      <div className="wrap">
-      {/* ---- header ------------------------------------------------------ */}
+      {/* ---- app bar: full-width spine; same elements, re-parented ------- */}
+      <div className="appbar">
       <div className="top">
         <div className="brand">
           <span className="beacon" />
           Waypoint
         </div>
+        <span className="run-id appbar-id">{deskId}</span>
         <div className={streamDead && !awaiting ? "r-tag err" : "r-tag"}>
           <div>
             {awaiting
@@ -1243,7 +1244,9 @@ export default function DeskPage() {
           </div>
         </div>
       </div>
+      </div>
 
+      <div className="wrap">
       {/* ---- Waybot pre-stream gate: awaiting travelers -> enter the code - */}
       {awaiting && (
         <div className="decide">
@@ -1357,39 +1360,11 @@ export default function DeskPage() {
         </div>
       )}
 
-      {/* ---- run summary -------------------------------------------------- */}
-      <div className="run">
-        <h1 className="run-title">Booking your team's trips</h1>
-        <div className="run-who">
-          <span className="run-id">{deskId}</span>
-        </div>
-
-        {/* trip context (task #2) — the operator's own words, displayed
-            plainly as context, never as verified data; renders nothing
-            when both label and purpose are blank */}
-        {screen.mandate &&
-          (screen.mandate.destination_label || screen.mandate.trip_purpose) && (
-            <div className="run-ctx">
-              Booking{" "}
-              {(screen.mandate.team_size ?? 1) > 1
-                ? `${screen.mandate.team_size} travelers`
-                : "1 traveler"}
-              {screen.mandate.destination_label &&
-                ` to ${screen.mandate.destination_label}`}
-              {screen.mandate.trip_purpose &&
-                ` — ${screen.mandate.trip_purpose}`}
-            </div>
-          )}
-
-        <div className="budget">
-          <div className="left">
-            Budget{" "}
-            <b className="num">
-              {screen.mandate
-                ? money(screen.mandate.budget_total, currency)
-                : "—"}
-            </b>
-          </div>
+      {/* ---- KPI band: the run summary re-tiled — same elements, same
+             bindings and refs (bigFigRef / barFillRef untouched) --------- */}
+      <div className={awaiting ? "kpis kpis-quiet" : "kpis"}>
+        <div className="kpi kpi-hero">
+          <h1 className="run-title">Booking your team's trips</h1>
           {screen.result ? (
             <div ref={bigFigRef} className="big num">
               {Number(screen.result.pnl) >= 0
@@ -1399,58 +1374,113 @@ export default function DeskPage() {
           ) : (
             <div className="big num">{settled || awaiting ? "" : "Booking…"}</div>
           )}
+          {/* trip context (task #2) — the operator's own words, displayed
+              plainly as context, never as verified data; renders nothing
+              when both label and purpose are blank */}
+          {screen.mandate &&
+            (screen.mandate.destination_label || screen.mandate.trip_purpose) && (
+              <div className="run-ctx">
+                Booking{" "}
+                {(screen.mandate.team_size ?? 1) > 1
+                  ? `${screen.mandate.team_size} travelers`
+                  : "1 traveler"}
+                {screen.mandate.destination_label &&
+                  ` to ${screen.mandate.destination_label}`}
+                {screen.mandate.trip_purpose &&
+                  ` — ${screen.mandate.trip_purpose}`}
+              </div>
+            )}
         </div>
-        {/* Spent-vs-budget, real figures only: both numbers are summed
-            from the snapshot's budgets[] (same pattern as the summary
-            page). The fill starts collapsed in base CSS and gsap settles
-            it at the real ratio (a 0 ratio stays honestly empty). With no
-            figures the bar renders empty and the note is dropped entirely
-            — never a guess. */}
-        <div className="bar">
-          <div ref={barFillRef} className="fill" />
+
+        <div className="kpi kpi-budget">
+          <div className="budget">
+            <div className="left">
+              Budget{" "}
+              <b className="num">
+                {screen.mandate
+                  ? money(screen.mandate.budget_total, currency)
+                  : "—"}
+              </b>
+            </div>
+          </div>
+          {/* Spent-vs-budget, real figures only: both numbers are summed
+              from the snapshot's budgets[] (same pattern as the summary
+              page). The fill starts collapsed in base CSS and gsap settles
+              it at the real ratio (a 0 ratio stays honestly empty). With no
+              figures the bar renders empty and the note is dropped entirely
+              — never a guess. */}
+          <div className="bar">
+            <div ref={barFillRef} className="fill" />
+          </div>
+          {budgetFigures && (
+            <div className="bar-note num">
+              spent {money(String(budgetFigures.spent), currency)} of{" "}
+              {money(String(budgetFigures.budget), currency)} ·{" "}
+              {money(String(budgetFigures.budget - budgetFigures.spent), currency)}{" "}
+              left
+            </div>
+          )}
         </div>
-        {budgetFigures && (
-          <div className="bar-note num">
-            spent {money(String(budgetFigures.spent), currency)} of{" "}
-            {money(String(budgetFigures.budget), currency)} ·{" "}
-            {money(String(budgetFigures.budget - budgetFigures.spent), currency)}{" "}
-            left
+
+        <div className="kpi kpi-status">
+          <div className="statusline">
+            <span className="s">
+              <span className="pin g" />
+              <b>{bookedCount}</b> booked
+            </span>
+            {openEscRows.length > 0 && (
+              <span className="s">
+                <span className="pin w" />
+                <b>{openEscRows.length}</b> need{openEscRows.length === 1 ? "s" : ""}{" "}
+                your OK
+              </span>
+            )}
+            {lossCount > 0 && (
+              <span className="s">
+                <span className="pin r" />
+                <b>{lossCount}</b> price drop{lossCount === 1 ? "" : "s"}
+              </span>
+            )}
+            {recCount > 0 && (
+              <span className="s">
+                <span className="pin r" />
+                <b>{recCount}</b> price adjustment{recCount === 1 ? "" : "s"}
+              </span>
+            )}
+            {errCount > 0 && (
+              <span className="s">
+                <span className="pin r" />
+                <b>{errCount}</b> issue{errCount === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* fare-check meter — bound ONLY to screen.meter, clamped at 100;
+            plain width style, no animation toward fake values. Rendered
+            here (not the console) so the band answers "how hard is it
+            working" at a glance; never duplicated. */}
+        {screen.meter && screen.meter.max > 0 && (
+          <div className="kpi kpi-meter">
+            <div className="console-meter">
+              <div className="cm-k">Fare checks</div>
+              <div className="cm-read num">
+                <b>{screen.meter.used}</b> of <b>{screen.meter.max}</b>
+              </div>
+              <div className="cm-track" aria-hidden="true">
+                <div
+                  className="cm-fill"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      (screen.meter.used / screen.meter.max) * 100
+                    )}%`,
+                  }}
+                />
+              </div>
+            </div>
           </div>
         )}
-
-        <div className="statusline">
-          <span className="s">
-            <span className="pin g" />
-            <b>{bookedCount}</b> booked
-          </span>
-          {openEscRows.length > 0 && (
-            <span className="s">
-              <span className="pin w" />
-              <b>{openEscRows.length}</b> need{openEscRows.length === 1 ? "s" : ""}{" "}
-              your OK
-            </span>
-          )}
-          {lossCount > 0 && (
-            <span className="s">
-              <span className="pin r" />
-              <b>{lossCount}</b> price drop{lossCount === 1 ? "" : "s"}
-            </span>
-          )}
-          {recCount > 0 && (
-            <span className="s">
-              <span className="pin r" />
-              <b>{recCount}</b> price adjustment{recCount === 1 ? "" : "s"}
-            </span>
-          )}
-          {errCount > 0 && (
-            <span className="s">
-              <span className="pin r" />
-              <b>{errCount}</b> issue{errCount === 1 ? "" : "s"}
-            </span>
-          )}
-          {/* Pass 3: the fare-check meter MOVED to the agent console rail
-              (below) — removed here, not duplicated. Same data, same guard. */}
-        </div>
       </div>
 
       {/* ---- Pass 3 command layout: decisions | console | main feed ------
@@ -1485,28 +1515,6 @@ export default function DeskPage() {
               </>
             ) : null}
           </div>
-
-          {/* (b) fare-check meter — bound ONLY to screen.meter, clamped at
-              100; plain width style, no animation toward fake values. */}
-          {screen.meter && screen.meter.max > 0 && (
-            <div className="console-meter">
-              <div className="cm-k">Fare checks</div>
-              <div className="cm-read num">
-                <b>{screen.meter.used}</b> of <b>{screen.meter.max}</b>
-              </div>
-              <div className="cm-track" aria-hidden="true">
-                <div
-                  className="cm-fill"
-                  style={{
-                    width: `${Math.min(
-                      100,
-                      (screen.meter.used / screen.meter.max) * 100
-                    )}%`,
-                  }}
-                />
-              </div>
-            </div>
-          )}
 
           {/* (c) data sources — rail name + label verbatim, same state
               classes; rail.detail stays in the full record only. */}

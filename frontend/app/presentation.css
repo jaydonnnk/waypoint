@@ -125,7 +125,7 @@
 .desk-decisions { display: flex; flex-direction: column; gap: var(--sp-3); }
 
 @media (min-width: 1080px) {
-  .teal-app > .wrap { max-width: 1180px; }
+  .teal-app > .wrap { max-width: 1280px; }
   .desk-grid {
     grid-template-columns: minmax(0, 1fr) 332px;
     grid-template-areas:
@@ -138,39 +138,110 @@
   .desk-console { grid-area: console; position: sticky; top: var(--sp-6); }
 }
 
-/* ---- summary card: one hero number, quiet meta ---- */
-.run {
-  border: none;
+/* ---- app bar: the product's spine (full width, above .wrap) ---- */
+.appbar {
+  position: relative;
+  z-index: 2;
+  background: rgba(8, 51, 47, 0.55);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+.appbar .top {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 28px;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.appbar .brand { color: #ffffff; }
+.appbar-id {
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--r-pill);
+  padding: 4px 12px;
+}
+.appbar .r-tag { margin-left: auto; }
+/* amber/pending read dim on the dark bar — brightened, same meaning */
+.appbar .mode-banner.comparison { color: #ffd9a3; }
+.appbar .mode-banner.pending { color: rgba(255, 255, 255, 0.65); }
+@media (max-width: 620px) {
+  .appbar .top { padding: 8px 16px; gap: 10px; min-height: 48px; }
+  .appbar-id { display: none; }
+  .appbar .r-tag { font-size: 11px; }
+  .appbar .mode-banner { font-size: 10.5px; }
+}
+
+/* ---- KPI band: value-largest tiles, one hero ---- */
+.kpis {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+  flex-wrap: wrap;
+  margin: 0 0 var(--sp-3);
+}
+.kpi {
+  flex: 1 1 190px;
+  min-width: 0;
+  background: var(--card);
+  border-radius: var(--r-card);
   box-shadow: var(--shadow-2);
-  padding: 24px 28px 20px;
-  margin-bottom: var(--sp-3);
-}
-.run .run-title { font-size: 19px; font-weight: 800; letter-spacing: -0.3px; }
-.run .run-who { margin-bottom: 2px; }
-.run .run-ctx { margin: 0 0 18px; }
-.budget { margin-bottom: 12px; }
-.budget .left { font-size: 14px; }
-.budget .big {
-  font-size: clamp(30px, 3.4vw, 40px);
-  letter-spacing: -1px;
-  line-height: 1.05;
-}
-.bar { height: 12px; border-radius: 6px; }
-/* spent/left note carries meaning — --faint fails AA, bump to --mut */
-.bar-note { color: var(--mut); font-size: 12.5px; margin-top: 8px; }
-.statusline {
+  padding: 16px 20px 14px;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
+}
+.kpi-hero { flex: 1.7 1 300px; gap: 3px; }
+.kpi-hero .run-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mut);
+  margin: 0;
+  letter-spacing: 0;
+}
+.kpi-hero .big {
+  font-size: clamp(28px, 3vw, 38px);
+  font-weight: 800;
+  letter-spacing: -1px;
+  line-height: 1.1;
+  color: var(--good);
+  min-height: 42px;
+}
+.kpi-hero .run-ctx {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--mut);
+  margin: 2px 0 0;
+}
+.kpi-budget .budget { margin: 0; }
+.kpi-budget .left { font-size: 13px; color: var(--mut); }
+.kpi-budget .bar { height: 10px; border-radius: 5px; margin-top: 2px; }
+/* spent/left note carries meaning — --faint fails AA, bump to --mut */
+.bar-note { color: var(--mut); font-size: 11.5px; margin-top: 6px; }
+.kpi-status .statusline {
+  margin: 0;
+  padding: 0;
+  border: none;
+  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
 }
 .statusline .s {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
-  padding: 6px 12px;
-  font-size: 12.5px;
+  padding: 4px 11px;
+  font-size: 12px;
 }
+.kpi-meter .console-meter { margin: 0; padding: 0; border: none; }
+.kpi-meter .cm-read { font-size: 18px; }
+/* while the gate is closed the band has little to say — compact, quiet */
+.kpis-quiet .kpi { padding: 12px 20px; box-shadow: var(--shadow-1); }
+.kpis-quiet .kpi-hero .big { min-height: 0; }
+/* the awaiting gate card sits directly in the wrap — give it its gap */
+.wrap > .decide { margin: 0 0 var(--sp-3); }
 
 /* ---- decision card: white, amber-edged, radio options (R4) ---- */
 .decide {
@@ -316,7 +387,7 @@
 }
 /* nothing to show yet (e.g. the awaiting gate) — the console sheds its
    card chrome entirely; the aria-live wrapper inside stays mounted */
-.desk-console:not(:has(.console-meter)):not(:has(.pa-sources)) {
+.desk-console:not(:has(.pa-sources)):not(:has(.pa-working-text)) {
   background: transparent;
   border: none;
   box-shadow: none;
@@ -398,31 +469,53 @@
 /* ==================================================================== */
 /* §8 — record, skeletons, toast, awaiting gate, result banner          */
 /* ==================================================================== */
-/* the record zone: drop the dashed divider — the ghost toggle is enough */
-.record { border-top: none; }
-
+/* the full record — the black box: a dark ledger module inside the
+   light UI (the one dark surface; log-console convention) */
+.record {
+  border-top: none;
+  background: var(--term-bg);
+  border-radius: var(--r-card);
+  padding: 14px 18px 16px;
+  box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.45);
+}
 .record-toggle {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
   padding: 10px 16px;
-  background: var(--card);
-  border: 1px solid var(--line2);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: var(--r-btn);
   font-size: 12.5px;
-  color: var(--mut);
+  font-family: var(--mono);
+  letter-spacing: 0.6px;
   transition:
     border-color var(--t-fast) var(--ease-out),
     color var(--t-fast) var(--ease-out);
 }
 .record-toggle:hover,
 .record-toggle:focus-visible {
-  color: var(--ink);
-  border-color: var(--mut);
+  border-color: rgba(255, 255, 255, 0.55);
   text-decoration: none;
 }
 .record-toggle:focus-visible { outline: none; box-shadow: var(--ring); }
 
+.fineprint .fineprint-k { color: rgba(255, 255, 255, 0.75); }
+.record .register,
+.record .rails {
+  background: var(--paper);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.record .brow { background: var(--card); }
+/* the close page's stat tray is a .record too — it stays light; only
+   the true full-record ledger goes dark */
+.record.close-record {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 0;
+}
 .fineprint .brow .b-body { max-width: 72ch; }
 .fineprint .stream {
   border-radius: var(--r-bar);
@@ -521,6 +614,41 @@
   border-radius: var(--r-pill);
   border-width: 1px;
 }
+
+/* the start/share widget becomes ONE solid cream card (no glass tiles):
+   research-backed form anatomy — persistent top labels, plain weight,
+   full-strength prefilled values, one coral primary */
+.hero-form { align-items: center; }
+.hero-form .start {
+  background: var(--paper);
+  border-radius: 20px;
+  box-shadow: 0 24px 60px -18px rgba(4, 32, 29, 0.55);
+  padding: 30px 32px 26px;
+  max-width: 640px;
+  width: 100%;
+  margin-left: auto;
+  justify-content: flex-start;
+  gap: 18px;
+  flex: none;
+}
+.hero-form .start-title { color: var(--ink); font-size: 27px; }
+.hero-form .start-sub { color: var(--mut); font-size: 14px; }
+.hero-form .note-soft { color: var(--mut); font-weight: 400; }
+.hero-form .constraint-field {
+  background: transparent;
+  border: none;
+  padding: 0;
+  backdrop-filter: none;
+}
+.hero-form .constraint-k { color: var(--mut); }
+.hero-form .constraint-k::before { content: none; }
+.hero-form .constraint-field input {
+  border: 1px solid var(--line2);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 15px;
+  border-radius: 10px;
+}
 /* wide windows: the limits form stays a 2-column grid — never the old
    flex stretch that turned six fields into floor-to-ceiling columns */
 .hero-form .constraints {
@@ -551,15 +679,14 @@
   padding: 14px 12px;
   border: 1.5px dashed var(--line2);
 }
-.hero-form .constraint-field.share-link {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.45);
-}
+.hero-form .share-link input { color: var(--brand); font-weight: 600; }
 
 /* ==================================================================== */
 /* §10 — Screen 3: the peak-end summary.                                */
 /* ==================================================================== */
 .close-call { font-size: var(--fs-h1); }
+/* the ending's hero figure mirrors the desk band's Saved */
+.close-status-card .budget .big { font-size: clamp(28px, 3vw, 40px); }
 
 .record .close-stats {
   display: grid;
