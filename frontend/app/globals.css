@@ -25,9 +25,14 @@
   --bad: #D64550;              /* over budget / couldn't book */
   --badbg: #FBEDED;
 
-  /* ---- Slice 8 type — Figtree for everything, IBM Plex Mono for figures ---- */
-  --sans: "Figtree", system-ui, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* ---- Slice 8 type — Figtree for everything, IBM Plex Mono for figures.
+       Pass 11: both are SELF-HOSTED (next/font/google in layout.tsx, which
+       downloads them at build time). --font-figtree / --font-plex-mono are
+       the variables that layout emits; the literal family names and the
+       system fallbacks stay behind them so the page still renders if a
+       font file 404s. ---------------------------------------------- */
+  --sans: var(--font-figtree), "Figtree", system-ui, sans-serif;
+  --mono: var(--font-plex-mono), "IBM Plex Mono", ui-monospace, monospace;
 
   /* ---- Slice 8 radii & spacing (extracted from desk-v3.html) ---- */
   --r-card: 18px;              /* run summary / decision cards */
@@ -57,7 +62,10 @@
   --fs-h3: 17.5px;         /* card sub-heads, trip names */
   --fs-h2: 22px;           /* section/card titles */
   --fs-h1: 27px;           /* page titles */
-  --fs-hero: clamp(32px, 4.6vw, 46px);  /* THE saved figure */
+  /* --fs-hero DELETED (Pass 11). It was the old hero token and nothing
+     referenced it; the live hero is --metric-hero-size on the metric ramp
+     below. Keeping both is how the hero silently shrank 46px -> 36px in
+     Pass 10: ONE role, ONE token. */
 
   /* ---- Pass 3 elevation (soft, y-offset, never harsh) ---- */
   --shadow-1: 0 1px 2px rgba(27, 36, 48, 0.05);
@@ -111,10 +119,16 @@
        Tracking CROSSES ZERO (positive below 16px, zero at 16-22px,
        negative above) and the line-height ratio tightens as size grows
        above ~22px — both confirmed against Material 3 and Carbon. ---- */
-  --font-fine-size: 12px;   --font-fine-lh: 16px;  --font-fine-track: 0.16px;
-  --font-small-size: 13px;  --font-small-lh: 18px; --font-small-track: 0.08px;
-  --font-body-size: 14px;   --font-body-lh: 20px;  --font-body-track: 0.04px;
-  --font-lead-size: 16px;   --font-lead-lh: 24px;  --font-lead-track: 0;
+  /* Pass 11: every step that carries RUNNING TEXT moves up one notch.
+     14px body is small for a product read across a room (iOS body is 17pt,
+     Material body-large 16px). Line-height follows the ramp's own rule --
+     the ratio tightens as the size grows -- and tracking still crosses zero
+     (positive below 16px, zero from 16px up). The heading steps below are
+     already large and are deliberately untouched. */
+  --font-fine-size: 12.5px;  --font-fine-lh: 17px;  --font-fine-track: 0.14px;
+  --font-small-size: 13.5px; --font-small-lh: 19px; --font-small-track: 0.06px;
+  --font-body-size: 15px;    --font-body-lh: 22px;  --font-body-track: 0.02px;
+  --font-lead-size: 17px;    --font-lead-lh: 26px;  --font-lead-track: 0;
   --font-title-size: 18px;  --font-title-lh: 24px; --font-title-track: -0.1px;
   --font-h2-size: 22px;     --font-h2-lh: 28px;    --font-h2-track: -0.2px;
   --font-h1-size: 28px;     --font-h1-lh: 36px;    --font-h1-track: -0.4px;
@@ -125,7 +139,17 @@
   --metric-sm-size: 16px;  --metric-sm-lh: 20px;
   --metric-md-size: 24px;  --metric-md-lh: 28px;
   --metric-lg-size: 28px;  --metric-lg-lh: 32px;
-  --metric-hero-size: clamp(28px, 2.6vw, 36px); --metric-hero-lh: 1.12;
+  /* Pass 11 restores the hero's presence: Pass 10 shipped it at
+     clamp(28px, 2.6vw, 36px), which was 36px at 1440 against the 46px it
+     had before -- a 22% cut to the single most important number in the
+     product, in the pass that was supposed to strengthen hierarchy. */
+  --metric-hero-size: clamp(30px, 3.3vw, 47px); --metric-hero-lh: 1.12;
+  --metric-hero-track: -0.022em;   /* tracking SCALES with the size */
+  /* the wrap-up's peak-end figure: the last thing anyone reads, on a
+     full-width card with no neighbours to balance against, so it takes a
+     larger step. Two tokens, two ROLES -- not two tokens for one role. */
+  --metric-peak-size: clamp(34px, 4.2vw, 58px); --metric-peak-lh: 1.08;
+  --metric-peak-track: -0.024em;
 
   /* ---- 3. Elevation. Polaris-derived, NOT Primer's (see research §1.1):
        never pure black — the shadow is --ink, the background's own hue
@@ -188,8 +212,18 @@
      4.57 on --goodbg, 4.56 on --warnbg. Same hue family, no new colour.
      --mut itself is left alone so nothing else shifts. */
   --text-primary: var(--ink);          /* 15.00 on paper */
-  --text-secondary: #65707E;           /* 4.82 on paper, 5.03 on card */
-  --text-tertiary: #65707E;            /* --faint is 2.45 and MUST NOT hold text on light */
+  /* Pass 11: #65707E measured 4.82 on --paper -- over the 4.5 floor by
+     0.32 -- while primary sits at 15:1, and it carries nearly all of the
+     explanatory copy. It also measured 4.42 on --badbg, i.e. it was
+     ALREADY FAILING there. One more OKLCH step down the same hue (a and b
+     held exactly) clears every ground this app paints it on. */
+  --text-secondary: #4F5967;           /* 6.80 paper, 7.10 card, 6.45 goodbg,
+                                          6.44 warnbg, 6.23 badbg */
+  --text-tertiary: #65707E;            /* the OLD secondary, kept as a real
+                                          lighter step: 4.82 paper, 5.03 card.
+                                          Not for --badbg (4.42). --faint is
+                                          2.45 and MUST NOT hold text on light
+                                          at all. */
   --text-on-inverse: #FFFFFF;
   --text-on-inverse-secondary: rgba(255, 255, 255, 0.74);
   --text-on-inverse-tertiary: var(--faint);   /* 6.79 on --surface-inverse */
