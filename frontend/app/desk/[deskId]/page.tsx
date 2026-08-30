@@ -360,6 +360,30 @@ function glyphShape(event: StreamEvent): string {
   }
 }
 
+/** Pass 10: the provenance rail's pip SHAPE per state. Shape is the
+    load-bearing encoding, not hue — measured in
+    docs/design-research-pass10.md §4.2, the three status colours all land
+    at L* ~45 once they are dark enough to clear AA, so they are identical
+    in greyscale and near-identical under deuteranopia. A degraded rail can
+    therefore never be told from a live one by colour alone.
+      solid  = this source really answered
+      half   = known-good but not live (curated priors, a recording)
+      hollow = degraded (fallback / comparison / unknown)
+    A fallback gets the hollow shape AND the amber tone — never a success
+    shape, never green. The word from rail.label is still printed verbatim. */
+function railPip(state: string): string {
+  switch (state) {
+    case "live":
+    case "real":
+      return "pip-full";
+    case "curated":
+    case "recorded":
+      return "pip-half";
+    default:
+      return "pip-open";
+  }
+}
+
 /** Formats the price inside an option label with the same money() used
     everywhere else ("book now at 1790.00 (manual approval)" ->
     "book now at $1,790.00 (manual approval)"). Only the known "at <price>"
@@ -865,6 +889,52 @@ export default function DeskPage() {
       ? screen.steps[screen.steps.length - 1]
       : null;
 
+  // ---------- Pass 10: KPI-band derivations --------------------------------
+  // COUNTS of real rows only. Nothing here computes a money figure: the one
+  // arithmetic below (restTrips) subtracts two counts of snapshot rows so a
+  // gist bar has a third segment width, and it is never printed as text.
+
+  // Trips the snapshot actually told us about. 0 before it lands, so the
+  // tile shows "—" rather than a confident zero.
+  const tripsTracked = Object.keys(positions).length;
+  // Distinct POSITIONS with an open escalation (the chip used to count
+  // escalation events, which double-counts a trip escalated twice).
+  const needsYouPositions = new Set(
+    openEscRows
+      .map((r) => (r.event.type === "escalate" ? r.event.position_id : null))
+      .filter((p): p is string => Boolean(p))
+  );
+  const needsYouCount = needsYouPositions.size;
+  const restTrips = Math.max(0, tripsTracked - bookedCount - needsYouCount);
+
+  // "Nothing committed yet" is the honest reading of a dry run: every
+  // period's spend really is zero. Only claimed when the snapshot's own
+  // figures say so — a missing snapshot says nothing at all.
+  const nothingCommitted = budgetFigures !== null && budgetFigures.spent === 0;
+
+  // Hero tone. The figure used to render green unconditionally, so an
+  // "Over by" result still read as a success. Tone now follows the real
+  // sign AND the real terminal status — and a bad outcome is styled
+  // CALMER, never louder (visible effort scores worse than instant
+  // delivery when the outcome is poor; a proud red shout is the wrong
+  // note to end on).
+  const heroPnl = screen.result ? Number(screen.result.pnl) : NaN;
+  const heroTone = !screen.result
+    ? ""
+    : screen.result.status === "closed" && heroPnl >= 0
+      ? "ok"
+      : screen.result.status === "escalated"
+        ? "wait"
+        : "no";
+  const heroPip =
+    heroTone === "ok"
+      ? "pip-full"
+      : heroTone === "wait"
+        ? "pip-half"
+        : heroTone === "no"
+          ? "pip-cross"
+          : "pip-open";
+
   // Pass 7 (Person A): the feed GROUPED BY TRIP — a pure render-time
   // derivation over the same blotter array (no state, no reducer change,
   // no event dropped). Escalations still surface only as THE DECISION
@@ -950,45 +1020,62 @@ export default function DeskPage() {
       snapPos && snapPos.status === "booked" && snapPos.ticket_asserted
     );
 
-    // Status = a color AND a word (never color alone).
+    // Status = a WORD, a SHAPE and a colour — in that order of importance.
+    // Colour is the least reliable of the three here: measured, the three
+    // status hues all sit at L* ~45 once dark enough to clear AA, so they
+    // are indistinguishable in greyscale and near-identical under
+    // deuteranopia (research §4.2). The pip shape follows Polaris's Badge
+    // `progress` vocabulary — hollow = nothing settled, half = decided but
+    // not executed, solid = confirmed by the snapshot.
     let stateWord = "";
     let stateTone = "plain";
+    let statePip = "pip-open";
     if (booked) {
       stateWord = "Booked";
       stateTone = "ok";
+      statePip = "pip-full";
     } else {
       switch (last.type) {
         case "trade":
           if (last.kind === "book") {
+            // A book DECISION is not a booking. Half-filled, never solid.
             stateWord = "Book decision logged";
             stateTone = "plain";
+            statePip = "pip-half";
           } else if (last.kind === "hold") {
             stateWord = "Holding";
             stateTone = "plain";
+            statePip = "pip-open";
           } else {
             stateWord = "Needs your OK";
             stateTone = "wait";
+            statePip = "pip-half";
           }
           break;
         case "mark":
           stateWord = last.stale ? "Holding for now" : "Checked";
           stateTone = last.stale ? "wait" : "plain";
+          statePip = last.stale ? "pip-open" : "pip-half";
           break;
         case "alloc":
           stateWord = "Saved";
           stateTone = "ok";
+          statePip = "pip-full";
           break;
         case "loss":
           stateWord = "Dropped in value";
           stateTone = "no";
+          statePip = "pip-cross";
           break;
         case "reconcile":
           stateWord = "Handled";
           stateTone = "plain";
+          statePip = "pip-half";
           break;
         case "error":
           stateWord = "On it";
           stateTone = "no";
+          statePip = "pip-cross";
           break;
         default:
           stateWord = "";
@@ -1055,7 +1142,10 @@ export default function DeskPage() {
         <div className="tc-top">
           <span className="tc-name">{label || friendlyTrip(pos)}</span>
           {stateWord && (
-            <span className={`badge ${stateTone}`}>{stateWord}</span>
+            <span className={`badge ${stateTone}`}>
+              <i className={`pip ${statePip}`} aria-hidden="true" />
+              {stateWord}
+            </span>
           )}
         </div>
 
@@ -1108,11 +1198,23 @@ export default function DeskPage() {
           )}
         </div>
 
+        {/* Price movement is encoded ONCE. It used to be encoded twice —
+            a struck-through old price AND a delta pill, two devices
+            competing for one fact. The pill wins whenever a real loss or
+            alloc event supplied an amount, because that figure is a value
+            the system actually sent; the strike-through only stands in when
+            no such figure exists, and it then carries a visually-hidden
+            "was" because <s> is not announced by most screen readers. */}
         <div className="tc-money">
           {fareNow && (
-            <span className="tc-fare num">
+            <span className="tc-fare fig">
               {fareNow}
-              {fareWas && <s className="tc-was">{fareWas}</s>}
+              {fareWas && !delta && (
+                <s className="tc-was">
+                  <span className="visually-hidden">was </span>
+                  {fareWas}
+                </s>
+              )}
             </span>
           )}
           {delta}
@@ -1142,8 +1244,13 @@ export default function DeskPage() {
               </span>
             ))}
           </span>
+          {/* The label says what the control DOES, not just how many rows
+              exist behind it ("2 updates" named the contents but not the
+              action). The group's outcome is carried by the status badge
+              at the top of the card and by the dot track to the left, so
+              the collapsed group already states how it ended. */}
           <span className="tc-more-text">
-            {rows.length === 1 ? "1 update" : `${rows.length} updates`}
+            {open ? "Hide" : "Show"} {rows.length === 1 ? "1 step" : `${rows.length} steps`}
           </span>
           <span className="tc-chev" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">
@@ -1673,7 +1780,15 @@ export default function DeskPage() {
   return (
     <main className="teal-app" ref={scopeRef}>
       <WaypointField />
-      {/* ---- app bar: full-width spine; same elements, re-parented ------- */}
+      {/* ---- app bar: full-width spine -----------------------------------
+             Pass 10: the mode disclosure is promoted from a 12.5px line
+             floating in the corner into a PHASE BANNER — the documented
+             component for a persistent service-level state (GOV.UK: "shown
+             across all pages of a service, so users should understand it as
+             a service-level message"). Stripe's test-mode guidance points the
+             same way: one account-level signal, never a per-row warning. It
+             is strictly more prominent than before, and it still says exactly
+             what the backend reported and nothing more. --------------- */}
       <div className="appbar">
       <div className="top">
         <div className="brand">
@@ -1681,8 +1796,21 @@ export default function DeskPage() {
           Waypoint
         </div>
         <span className="run-id appbar-id">{deskId}</span>
-        <div className={streamDead && !awaiting ? "r-tag err" : "r-tag"}>
-          <div>
+        <div className="appbar-state">
+          {/* connection state — a named state, its own dot, never a
+              perpetual spinner: a stalled stream must LOOK stalled. */}
+          <span
+            className={
+              awaiting
+                ? "conn conn-wait"
+                : connected
+                  ? "conn conn-live"
+                  : streamDead
+                    ? "conn conn-dead"
+                    : "conn conn-pending"
+            }
+          >
+            <i className="conn-dot" aria-hidden="true" />
             {awaiting
               ? "Waiting for your team"
               : connected
@@ -1690,23 +1818,27 @@ export default function DeskPage() {
                 : streamDead
                   ? "Connection closed"
                   : "Connecting…"}
-          </div>
-          {/* comparison-mode / live-ticketing disclosure, in plain words */}
-          <div
+          </span>
+          <span
             className={
               screen.mode == null
-                ? "mode-banner pending"
+                ? "phase phase-pending"
                 : live
-                  ? "mode-banner live"
-                  : "mode-banner comparison"
+                  ? "phase phase-live"
+                  : "phase phase-dry"
             }
           >
-            {screen.mode == null
-              ? "Starting up…"
-              : live
-                ? "Live — booking for real"
-                : "Dry run — no real bookings yet"}
-          </div>
+            <b className="phase-k">
+              {screen.mode == null ? "Starting" : live ? "Live" : "Dry run"}
+            </b>
+            <span className="phase-v">
+              {screen.mode == null
+                ? "connecting to the desk"
+                : live
+                  ? "booking for real"
+                  : "no real bookings"}
+            </span>
+          </span>
         </div>
       </div>
       </div>
@@ -1825,99 +1957,180 @@ export default function DeskPage() {
         </div>
       )}
 
-      {/* ---- KPI band: the run summary re-tiled — same elements, same
-             bindings and refs (bigFigRef / barFillRef untouched) --------- */}
+      {/* ---- KPI band ------------------------------------------------------
+             Pass 10 rebuild. The four tiles previously had four different
+             internal anatomies and no shared baseline. They now share ONE:
+
+                 eyebrow  -> what this measures
+                 metric   -> the value, on the metric ramp, tabular
+                 meter    -> a track or a state row (the comparison)
+                 context  -> one line (the qualitative state)
+
+             A KPI needs a value, at least one comparison and a state to mean
+             anything; each tile below now carries all three. The hero uses a
+             larger step of the SAME metric ramp — a system, not a fifth
+             anatomy. Every binding and both gsap anchors (bigFigRef on the
+             `.big` figure, barFillRef on `.bar .fill`) are untouched. ---- */}
       <div className={awaiting ? "kpis kpis-quiet" : "kpis"}>
         <div className="kpi kpi-hero">
-          <h1 className="run-title">Booking your team's trips</h1>
+          <div className="kpi-k">This run</div>
           {screen.result ? (
-            <div ref={bigFigRef} className="big num">
+            <div ref={bigFigRef} className={`big fig kpi-v ${heroTone}`}>
               {Number(screen.result.pnl) >= 0
                 ? `Saved ${money(screen.result.pnl, currency)}`
                 : `Over by ${money(screen.result.pnl, currency).replace("−", "")}`}
             </div>
           ) : (
-            <div className="big num">{settled || awaiting ? "" : "Booking…"}</div>
+            <div className="big fig kpi-v pending">
+              {awaiting ? "Not started" : settled ? "" : "Booking…"}
+            </div>
           )}
+          <div className="kpi-meter">
+            {screen.result ? (
+              <span className={`lozenge ${heroTone || "flat"}`}>
+                <i className={`pip ${heroPip}`} aria-hidden="true" />
+                {plainStatus(screen.result.status)}
+              </span>
+            ) : screen.cycleFailed ? (
+              <span className="lozenge no">
+                <i className="pip pip-cross" aria-hidden="true" />
+                Stopped early
+              </span>
+            ) : awaiting ? (
+              <span className="lozenge flat">
+                <i className="pip pip-open" aria-hidden="true" />
+                Waiting for your team
+              </span>
+            ) : (
+              <span className="lozenge flat">
+                <i className="pip pip-half" aria-hidden="true" />
+                Working through the trips
+              </span>
+            )}
+          </div>
           {/* trip context (task #2) — the operator's own words, displayed
               plainly as context, never as verified data; renders nothing
               when both label and purpose are blank */}
-          {screen.mandate &&
-            (screen.mandate.destination_label || screen.mandate.trip_purpose) && (
-              <div className="run-ctx">
-                Booking{" "}
-                {(screen.mandate.team_size ?? 1) > 1
-                  ? `${screen.mandate.team_size} travelers`
-                  : "1 traveler"}
-                {screen.mandate.destination_label &&
-                  ` to ${screen.mandate.destination_label}`}
-                {screen.mandate.trip_purpose &&
-                  ` — ${screen.mandate.trip_purpose}`}
-              </div>
-            )}
+          <div className="kpi-ctx">
+            {screen.mandate &&
+            (screen.mandate.destination_label || screen.mandate.trip_purpose)
+              ? [
+                  (screen.mandate.team_size ?? 1) > 1
+                    ? `${screen.mandate.team_size} travelers`
+                    : "1 traveler",
+                  screen.mandate.destination_label
+                    ? `to ${screen.mandate.destination_label}`
+                    : "",
+                  screen.mandate.trip_purpose
+                    ? `— ${screen.mandate.trip_purpose}`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")
+              : ""}
+          </div>
         </div>
 
         <div className="kpi kpi-budget">
-          <div className="budget">
-            <div className="left">
-              Budget{" "}
-              <b className="num">
-                {screen.mandate
-                  ? money(screen.mandate.budget_total, currency)
-                  : "—"}
-              </b>
+          <div className="kpi-k">Budget</div>
+          {/* The METRIC is mandate.budget_total — one real value that
+              arrived on the wire. It used to be printed three times in
+              this tile (as "Budget", as "of", and again as "left"); two of
+              those came from client-side sums over budgets[]. */}
+          <div className="kpi-v fig">
+            {screen.mandate ? money(screen.mandate.budget_total, currency) : "—"}
+          </div>
+          {/* Spent-vs-budget. The fill starts COLLAPSED in base CSS so it
+              can never overstate spend before/without JS; gsap settles it
+              at the real ratio (a 0 ratio stays honestly empty). Bar
+              geometry derived from real decimals — permitted; no figure is
+              computed into text here. The zero tick makes an empty track
+              read as "nothing yet" rather than as a broken widget. */}
+          <div className="kpi-meter">
+            <div className={nothingCommitted ? "bar is-zero" : "bar"}>
+              <i className="bar-zero" aria-hidden="true" />
+              <div ref={barFillRef} className="fill" />
             </div>
           </div>
-          {/* Spent-vs-budget, real figures only: both numbers are summed
-              from the snapshot's budgets[] (same pattern as the summary
-              page). The fill starts collapsed in base CSS and gsap settles
-              it at the real ratio (a 0 ratio stays honestly empty). With no
-              figures the bar renders empty and the note is dropped entirely
-              — never a guess. */}
-          <div className="bar">
-            <div ref={barFillRef} className="fill" />
+          <div className="kpi-ctx">
+            {budgetFigures
+              ? nothingCommitted
+                ? "Nothing committed yet"
+                : `${money(String(budgetFigures.spent), currency)} of ${money(
+                    String(budgetFigures.budget),
+                    currency
+                  )} committed`
+              : ""}
           </div>
-          {budgetFigures && (
-            <div className="bar-note num">
-              spent {money(String(budgetFigures.spent), currency)} of{" "}
-              {money(String(budgetFigures.budget), currency)} ·{" "}
-              {money(String(budgetFigures.budget - budgetFigures.spent), currency)}{" "}
-              left
-            </div>
-          )}
         </div>
 
         <div className="kpi kpi-status">
-          <div className="statusline">
-            <span className="s">
-              <span className="pin g" />
-              <b>{bookedCount}</b> booked
-            </span>
-            {openEscRows.length > 0 && (
+          <div className="kpi-k">Trips</div>
+          <div className="kpi-v fig">
+            {tripsTracked > 0 ? bookedCount : "—"}
+            {tripsTracked > 0 && (
+              <span className="kpi-v-of">of {tripsTracked} booked</span>
+            )}
+          </div>
+          {/* Gist only — a stacked track is a length judgment for every
+              segment above the first, so the real counts always sit beside
+              it as text below. Widths are counts of real snapshot rows. */}
+          <div className="kpi-meter">
+            <div className="segbar" aria-hidden="true">
+              {tripsTracked > 0 ? (
+                <>
+                  {bookedCount > 0 && (
+                    <i
+                      className="seg seg-ok"
+                      style={{ flexGrow: bookedCount }}
+                    />
+                  )}
+                  {needsYouCount > 0 && (
+                    <i
+                      className="seg seg-wait"
+                      style={{ flexGrow: needsYouCount }}
+                    />
+                  )}
+                  {restTrips > 0 && (
+                    <i className="seg seg-flat" style={{ flexGrow: restTrips }} />
+                  )}
+                </>
+              ) : (
+                <i className="seg seg-empty" style={{ flexGrow: 1 }} />
+              )}
+            </div>
+          </div>
+          <div className="kpi-ctx statusline">
+            {needsYouCount > 0 && (
               <span className="s">
-                <span className="pin w" />
-                <b>{openEscRows.length}</b> need{openEscRows.length === 1 ? "s" : ""}{" "}
-                your OK
+                <i className="pip pip-half wait" aria-hidden="true" />
+                <b>{needsYouCount}</b> need{needsYouCount === 1 ? "s" : ""} your OK
               </span>
             )}
             {lossCount > 0 && (
               <span className="s">
-                <span className="pin r" />
+                <i className="pip pip-cross no" aria-hidden="true" />
                 <b>{lossCount}</b> price drop{lossCount === 1 ? "" : "s"}
               </span>
             )}
             {recCount > 0 && (
               <span className="s">
-                <span className="pin r" />
-                <b>{recCount}</b> price adjustment{recCount === 1 ? "" : "s"}
+                <i className="pip pip-open" aria-hidden="true" />
+                <b>{recCount}</b> adjustment{recCount === 1 ? "" : "s"}
               </span>
             )}
             {errCount > 0 && (
               <span className="s">
-                <span className="pin r" />
+                <i className="pip pip-cross no" aria-hidden="true" />
                 <b>{errCount}</b> issue{errCount === 1 ? "" : "s"}
               </span>
             )}
+            {needsYouCount === 0 &&
+              lossCount === 0 &&
+              recCount === 0 &&
+              errCount === 0 && (
+                <span className="s s-quiet">Nothing needs you</span>
+              )}
           </div>
         </div>
 
@@ -1926,12 +2139,10 @@ export default function DeskPage() {
             here (not the console) so the band answers "how hard is it
             working" at a glance; never duplicated. */}
         {screen.meter && screen.meter.max > 0 && (
-          <div className="kpi kpi-meter">
-            <div className="console-meter">
-              <div className="cm-k">Fare checks</div>
-              <div className="cm-read num">
-                <b>{screen.meter.used}</b> of <b>{screen.meter.max}</b>
-              </div>
+          <div className="kpi kpi-meter-tile">
+            <div className="kpi-k">Fare checks</div>
+            <div className="kpi-v fig">{screen.meter.used}</div>
+            <div className="kpi-meter">
               <div className="cm-track" aria-hidden="true">
                 <div
                   className="cm-fill"
@@ -1944,33 +2155,56 @@ export default function DeskPage() {
                 />
               </div>
             </div>
+            <div className="kpi-ctx">of {screen.meter.max} allowed this run</div>
           </div>
         )}
       </div>
 
-      {/* ---- Pass 3 command layout: decisions | console | main feed ------
-             Re-parented only — every component's logic, bindings and copy
-             are unchanged. Below 1080px the grid stacks in DOM order:
-             decisions → console → trips (exception-first). */}
-      <div className="desk-grid">
+      {/* ---- the desk layout ------------------------------------------------
+             Pass 10. The old grid was `1fr 332px` with the console sticky in
+             the right column and EVERYTHING ELSE — decision, board, record,
+             banner — in the left. Measured at 1440px, the console was 166px
+             tall inside a 1320px-tall grid: 1154px of empty background down
+             the right-hand side, and the single most visible unfinished tell
+             on the page.
+
+             Now the right column exists for exactly ONE row — the attention
+             row, where the decision card (what needs you) sits beside the
+             agent panel (what it is doing). Both are short, so they balance.
+             Everything below spans the full width, which is also why the
+             trips grid can now run three-up at 1440 instead of two.
+
+             When there is no escalation the rail has no partner, so the grid
+             drops to a single column and the agent panel becomes a full-width
+             strip (see .desk-grid:not(.has-decision) in presentation.css).
+             Re-parenting only: no logic, binding or copy changes, and the
+             mobile DOM order is unchanged (decision -> agent -> trips ->
+             record -> result). */}
+      <div className={escRows.length > 0 ? "desk-grid has-decision" : "desk-grid"}>
         {escRows.length > 0 && (
           <div className="desk-decisions">{escRows.map(renderDecision)}</div>
         )}
 
-        {/* Agent console — the Pass 2 evidence blocks MOVED here (never
-            duplicated), upgraded visually. No new copy: the existing
-            "Working on" kicker is the console's visual header. */}
+        {/* Agent panel — the Pass 2 evidence blocks (never duplicated).
+            Pass 10: it gets a real header, which is what removes the
+            orphaned rule that used to float above the first rail row with
+            nothing over it. */}
         <aside className="desk-console" aria-label="Agent activity">
-          {/* (a) working-on — same guard, same aria-live, wrapper always
-              mounted; the beacon pulse lives INSIDE the conditional content
-              so it can never claim work before the stream starts. */}
+          <div className="pa-head">
+            <span className="pa-head-k">Agent</span>
+            {!settled && !awaiting && (
+              <span className="pa-beacon" aria-hidden="true" />
+            )}
+          </div>
+
+          {/* (a) working-on — same guard, same aria-live, wrapper ALWAYS
+              mounted (gsap anchor). The narration is deliberately not a
+              card: it is a status that is replaced in place, not an
+              artefact that accretes — the record is where things accrete. */}
           <div className="pa-working" aria-live="polite">
             {!settled && latestStep ? (
               <>
-                <span className="pa-working-k">
-                  <span className="pa-beacon" aria-hidden="true" />
-                  Working on
-                </span>
+                <span className="pa-working-k">Working on</span>
                 <span
                   className="pa-working-text"
                   key={screen.steps.length}
@@ -1978,6 +2212,10 @@ export default function DeskPage() {
                   {latestStep.text}
                 </span>
               </>
+            ) : settled ? (
+              <span className="pa-working-idle">
+                Finished — nothing running.
+              </span>
             ) : null}
           </div>
 
@@ -1985,12 +2223,14 @@ export default function DeskPage() {
               classes; rail.detail stays in the full record only. */}
           {screen.rails && screen.rails.length > 0 && (
             <div className="pa-sources">
+              <span className="pa-sources-k">Where the numbers come from</span>
               {screen.rails.map((rail) => (
                 <span key={rail.rail} className="pa-source">
                   <span className="pa-source-name">
                     {rail.rail}
                   </span>
                   <span className={`pa-source-label ${rail.state}`}>
+                    <i className={`pip ${railPip(rail.state)}`} aria-hidden="true" />
                     {rail.label}
                   </span>
                 </span>
@@ -2000,9 +2240,35 @@ export default function DeskPage() {
         </aside>
 
         <div className="desk-main">
-          {/* ---- the trips — a grid of boarding-pass cards (Pass 8) ----- */}
+          {/* ---- the trips — a grid of boarding-pass cards (Pass 8) -----
+                 Pass 10: the section label was a 10.5px all-caps monospace
+                 eyebrow sitting a long way from the cards it named. It is
+                 now a real header, in sans, next to its own count.
+
+                 The right-hand line makes the MANAGER'S STANDING AUTHORITY
+                 visible on a screen where nothing is being asked of them —
+                 people accept an algorithm far more readily when their own
+                 control over it is apparent, and until now that rule was
+                 stated only inside an escalation card that may never
+                 appear. The figure is mandate.authority_cap, verbatim. */}
           <section className="board">
-          <div className="sec">The trips</div>
+          <div className="board-head">
+            <h2 className="sec">
+              The trips
+              {tripGroups.length > 0 && (
+                <span className="sec-n">{tripGroups.length}</span>
+              )}
+            </h2>
+            {screen.mandate && (
+              <p className="board-rule">
+                Books under{" "}
+                <b className="fig">
+                  {money(screen.mandate.authority_cap, currency)}
+                </b>{" "}
+                on its own — anything above comes to you
+              </p>
+            )}
+          </div>
           {tripGroups.length === 0 ? (
             <>
               <div className="trip empty">
@@ -2032,25 +2298,58 @@ export default function DeskPage() {
             <div className="tgrid">{tripGroups.map(renderTripGroup)}</div>
           )}
           </section>
+        </div>
 
-          {/* ---- the full record: every check, disclosure and code --------
-                 (step 3 — collapsed by default, behind a quiet toggle. The
-                  JSX inside is the step-2 fineprint block near-verbatim:
-                  nothing deleted, headings relabeled to plain English. The
-                  panel is local UI state only; it never touches the stream,
-                  and `hidden` keeps every row mounted so toggling cannot
-                  disturb the render.) ------------------------------------ */}
-          <div className="record">
-            <button
-              type="button"
-              className="record-toggle"
-              aria-expanded={recordOpen}
-              aria-controls="full-record"
-              onClick={() => setRecordOpen((o) => !o)}
-            >
-              {recordOpen ? "Hide the full record ↑" : "See the full record →"}
-            </button>
-            <div id="full-record" className="fineprint" hidden={!recordOpen}>
+        {/* ---- the full record: every check, disclosure and code ----------
+               (step 3 — collapsed by default, behind a quiet toggle. The
+                JSX inside is the step-2 fineprint block near-verbatim:
+                nothing deleted, headings relabeled to plain English. The
+                panel is local UI state only; it never touches the stream,
+                and `hidden` keeps every row mounted so toggling cannot
+                disturb the render.)
+
+               Pass 10: collapsed, this used to be a large near-black slab
+               holding one small ghost button — the visually heaviest thing
+               on the page and the one that said the least. Collapsed it is
+               now a quiet bar that states WHAT IS INSIDE, using real counts
+               so the reader can decide whether to open it. The dark panel —
+               which is measured, not stylistic: the status palette only
+               reaches AA body contrast on the dark ground — appears only
+               once it is open. --------------------------------------- */}
+        <div className={recordOpen ? "record is-open" : "record"}>
+          <button
+            type="button"
+            className="record-toggle"
+            aria-expanded={recordOpen}
+            aria-controls="full-record"
+            onClick={() => setRecordOpen((o) => !o)}
+          >
+            <span className="rt-main">
+              <span className="rt-k">The full record</span>
+              <span className="rt-sub">
+                Every check, figure and disclosure this run produced
+              </span>
+            </span>
+            <span className="rt-counts" aria-hidden="true">
+              <span className="rt-count">
+                <b className="fig">{screen.blotter.length}</b> entries
+              </span>
+              <span className="rt-count">
+                <b className="fig">{screen.steps.length}</b> steps
+              </span>
+              {screen.rails && screen.rails.length > 0 && (
+                <span className="rt-count">
+                  <b className="fig">{screen.rails.length}</b> sources
+                </span>
+              )}
+            </span>
+            <span className="rt-chev" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M7 10l5 5 5-5" />
+              </svg>
+            </span>
+          </button>
+          <div id="full-record" className="fineprint" hidden={!recordOpen}>
             <div className="sec fineprint-k">The full record</div>
 
             {/* Count-check, stated in the UI so a reader can audit the
@@ -2189,36 +2488,57 @@ export default function DeskPage() {
               </div>
             </section>
             </div>
-          </div>
-
-          {/* ---- terminal result -> the summary ------------------------- */}
-          {screen.result && (
-            <div className="result-banner done">
-              <div>
-                <div className="rb-k">{plainStatus(screen.result.status)}</div>
-              </div>
-              <Link className="cta" href={`/close/${deskId}`}>
-                See summary →
-              </Link>
-            </div>
-          )}
-
-          {/* ---- crash path: terminal DESK_CYCLE_FAILED, no result ------ */}
-          {screen.cycleFailed && !screen.result && (
-            <div className="result-banner">
-              <div>
-                <div className="rb-k">Stopped early</div>
-                <div className="rb-sub">
-                  Something went wrong — nothing was booked past that point.
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="note-soft">
-            Always within budget. Every fare is real.
-          </div>
         </div>
+
+        {/* ---- terminal result -> the summary --------------------------
+               Pass 10: the outcome word carries a state pip, and a poor
+               outcome is presented CALMER and shorter than a good one
+               rather than in a louder colour. */}
+        {screen.result && (
+          <div className={`result-banner ${heroTone === "ok" ? "done" : heroTone}`}>
+            <div className="rb-main">
+              <div className="rb-k">
+                <i className={`pip ${heroPip}`} aria-hidden="true" />
+                {plainStatus(screen.result.status)}
+              </div>
+              <div className="rb-sub">
+                {nothingCommitted
+                  ? "Nothing was bought — this was a dry run."
+                  : "The full breakdown is on the summary."}
+              </div>
+            </div>
+            <Link className="cta" href={`/close/${deskId}`}>
+              See summary
+              <span className="cta-arrow" aria-hidden="true">→</span>
+            </Link>
+          </div>
+        )}
+
+        {/* ---- crash path: terminal DESK_CYCLE_FAILED, no result ------ */}
+        {screen.cycleFailed && !screen.result && (
+          <div className="result-banner no">
+            <div className="rb-main">
+              <div className="rb-k">
+                <i className="pip pip-cross" aria-hidden="true" />
+                Stopped early
+              </div>
+              <div className="rb-sub">
+                Something went wrong — nothing was booked past that point.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Pass 10: this footnote used to be centred inside the 892px
+            left-hand column while the column itself was left-anchored in a
+            1280px wrap, so it read as centred on nothing. It is now a real
+            page footer on the full content width, with a rule to anchor
+            it. */}
+        <footer className="desk-foot">
+          <span className="note-soft">
+            Always within budget. Every fare is real.
+          </span>
+        </footer>
       </div>
 
       {/* ---- cold-open toast: plain copy only — the reducer's raw body
