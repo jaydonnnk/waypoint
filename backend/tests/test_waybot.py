@@ -13,9 +13,11 @@ Telegram). Tests use a real DeskStore + real EventSink on the temp DB.
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
@@ -190,6 +192,88 @@ class TestBuildApplication:
         assert len(sink._subscribers) == 1
         # The handler is the same object stashed on bot_data (M2 ref).
         assert sink._subscribers[0] is app.bot_data["_notify_handler"]
+
+
+# ---------------------------------------------------------------------------
+# GET /api/waybot — the share link's bot identity (task 6)
+# ---------------------------------------------------------------------------
+
+
+def _fake_application(username: str) -> MagicMock:
+    """A stand-in Application whose initialize/start/shutdown are awaitable
+    and whose bot reports a fixed username — the supervised startup must
+    capture it without ever touching Telegram."""
+    application = MagicMock()
+    application.bot.username = username
+    application.bot_data = {}
+    application.initialize = AsyncMock()
+    application.start = AsyncMock()
+    application.stop = AsyncMock()
+    application.shutdown = AsyncMock()
+    application.updater.start_polling = AsyncMock()
+    application.updater.stop = AsyncMock()
+    application.updater.running = True
+    application.running = True
+    return application
+
+
+def _poll_waybot(client: TestClient, attempts: int = 100) -> dict:
+    """The supervised bot task starts asynchronously with lifespan — poll
+    until the captured username lands instead of racing the first GET."""
+    for _ in range(attempts):
+        body = client.get("/api/waybot").json()
+        if body.get("username") is not None:
+            return body
+        time.sleep(0.05)
+    return client.get("/api/waybot").json()
+
+
+class TestWaybotEndpoint:
+    """GET /api/waybot exposes the live bot's Telegram username (derived
+    from WAYPOINT_BOT_TOKEN via getMe at startup) and null when bot-less.
+
+    FAILS against pre-task-6 code: the endpoint did not exist (404), so
+    neither assertion could pass — the share link's username was hardcoded
+    in the frontend instead.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_holder(self):
+        """The captured username is module state in app.bot — clear it
+        before AND after each test so results are order-independent."""
+        from app import bot as bot_module
+
+        bot_module.set_bot_username(None)
+        yield
+        bot_module.set_bot_username(None)
+
+    def test_no_token_username_null(self, tmp_db):
+        """Bot-less app (conftest unsets WAYPOINT_BOT_TOKEN) -> null."""
+        from app.main import app
+
+        with TestClient(app) as client:
+            resp = client.get("/api/waybot")
+            assert resp.status_code == 200
+            assert resp.json() == {"username": None}
+
+    def test_stubbed_bot_username_captured(self, tmp_db, monkeypatch):
+        """With a faked bot build, the supervised startup captures
+        application.bot.username and the endpoint returns it."""
+        from app import bot as bot_module
+        from app.main import app
+
+        fake = _fake_application("waypointdemobot")
+        monkeypatch.setattr(
+            bot_module,
+            "build_application",
+            lambda token, sink, store: fake,
+        )
+
+        with TestClient(app) as client:
+            body = _poll_waybot(client)
+            assert body == {"username": "waypointdemobot"}
+            # The real startup path ran on the fake (initialize called).
+            fake.initialize.assert_awaited()
 
 
 # ---------------------------------------------------------------------------

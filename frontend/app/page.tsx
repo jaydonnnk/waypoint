@@ -10,12 +10,12 @@
 // unchanged from Slices 1–7. Nothing here fabricates API numbers.
 
 import { useRouter } from "next/navigation";
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 
-import { seedDesk } from "@/lib/api";
+import { getWaybotUsername, seedDesk } from "@/lib/api";
 import type { SeedResult } from "@/lib/types";
 import WaypointField from "./WaypointField";
 
@@ -35,6 +35,44 @@ export default function MandatePage() {
   // we show the share link + confirmation code + a static 0/N progress
   // line here, so the manager can drop the link in the team chat.
   const [share, setShare] = useState<SeedResult | null>(null);
+
+  // Waybot identity (task 6): the share link's bot username comes from the
+  // backend's GET /api/waybot (derived from WAYPOINT_BOT_TOKEN via getMe)
+  // — NEVER hardcoded. null = bot-less (no token / backend down): the
+  // invite-link field is then hidden rather than pointing at a wrong bot.
+  // Fetched once on mount; the bot initializes at backend startup, long
+  // before a gated seed can land, so one fetch settles it.
+  const [waybotUsername, setWaybotUsername] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getWaybotUsername().then((name) => {
+      if (!cancelled) setWaybotUsername(name);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Copy-to-clipboard for the share fields. `copied` holds the key of the
+  // field whose button was last pressed; it clears after 1.5s (or if the
+  // component unmounts first). Falls back silently when the Clipboard API
+  // is unavailable — the fields stay selectable/readOnly as before.
+  const [copied, setCopied] = useState<string | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+  }, []);
+  function copyField(text: string, key: string) {
+    if (!text || !navigator.clipboard) return;
+    navigator.clipboard.writeText(text).then(
+      () => {
+        setCopied(key);
+        if (copyTimer.current) clearTimeout(copyTimer.current);
+        copyTimer.current = setTimeout(() => setCopied(null), 1500);
+      },
+      () => {},
+    );
+  }
 
   // ---- ops-manager budget constraints (set BEFORE "Start booking") ----
   const [budgetTotal, setBudgetTotal] = useState(12000);
@@ -191,28 +229,56 @@ export default function MandatePage() {
               sends their passport — nothing to type by hand.
             </p>
 
-            <label className="constraint-field share-link">
-              <span className="constraint-k">Invite link</span>
-              <input
-                type="text"
-                readOnly
-                value={
-                  share.invite_token
-                    ? `https://t.me/WaypointBot?start=${share.invite_token}`
-                    : ""
-                }
-                onFocus={(e) => e.currentTarget.select()}
-              />
-            </label>
+            {waybotUsername && share.invite_token ? (
+              <label className="constraint-field share-link">
+                <span className="constraint-k">Invite link</span>
+                <div className="copy-row">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`https://t.me/${waybotUsername}?start=${share.invite_token}`}
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                  <button
+                    type="button"
+                    className="copy-btn"
+                    onClick={() =>
+                      copyField(
+                        `https://t.me/${waybotUsername}?start=${share.invite_token}`,
+                        "invite",
+                      )
+                    }
+                  >
+                    {copied === "invite" ? "Copied ✓" : "Copy"}
+                  </button>
+                </div>
+              </label>
+            ) : (
+              <div className="note-soft">
+                The Telegram bot isn't live on this deployment — share the
+                release code below instead.
+              </div>
+            )}
 
             <label className="constraint-field share-code">
               <span className="constraint-k">Your release code (keep private)</span>
-              <input
-                type="text"
-                readOnly
-                value={share.confirmation_code ?? ""}
-                onFocus={(e) => e.currentTarget.select()}
-              />
+              <div className="copy-row">
+                <input
+                  type="text"
+                  readOnly
+                  value={share.confirmation_code ?? ""}
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <button
+                  type="button"
+                  className="copy-btn"
+                  onClick={() =>
+                    copyField(share.confirmation_code ?? "", "code")
+                  }
+                >
+                  {copied === "code" ? "Copied ✓" : "Copy"}
+                </button>
+              </div>
             </label>
 
             <div className="note-soft">

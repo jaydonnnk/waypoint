@@ -265,3 +265,282 @@ class TestTypedEntryGate:
             "tan", "wei", "m", "1990-02-30", "SG",  # Feb 30
             "e1", "SG", "2030-01-01",
         ) is None
+
+
+# ---------------------------------------------------------------------------
+# Real-incident golden MRZ (Qwen-VL extraction of a Singapore passport).
+# Provably valid: check digits pass on the canonical 44/44 pair.  The bug
+# was that vision-model output deviates on FILLER (dropped trailing '<',
+# spaces instead of '<'), and the old validate() hard-gated on len == 44.
+
+GOLDEN_NAME_BASE = "PASGPKUA<<HONG<YIK<JAYDON"  # 25 chars, no name filler
+GOLDEN_LINE1 = GOLDEN_NAME_BASE + "<" * (44 - len(GOLDEN_NAME_BASE))
+GOLDEN_LINE2 = "K3907018B1SGP0503291M3303023T0507554D<<<<<44"
+
+# EXACT raw pair captured live from qwen-vl-max on the incident photo:
+# line 1 carries one EXTRA trailing '<' (45 chars — existing trim form
+# rescues it); line 2 is 43 chars because ONE '<' was dropped from the
+# INTERIOR filler run of the personal-number field (needs the
+# check-digit-gated '<'-insertion repair).
+INCIDENT_LINE1_RAW = GOLDEN_NAME_BASE + "<" * 20  # 45 chars
+INCIDENT_LINE2_RAW = "K3907018B1SGP0503291M3303023T0507554D<<<<44"  # 43
+
+
+class TestGoldenIncidentMrz:
+    """The real incident MRZ must validate, and normalization must never
+    weaken the gate."""
+
+    def test_canonical_pair_passes(self):
+        assert len(GOLDEN_LINE1) == 44
+        assert len(GOLDEN_LINE2) == 44
+        result = validate({
+            "mrz_line1": GOLDEN_LINE1,
+            "mrz_line2": GOLDEN_LINE2,
+        })
+        assert result is not None
+        assert result.family_name == "KUA"
+        assert result.given_name == "HONG YIK JAYDON"
+        assert result.gender == "M"
+        assert result.birthday == "2005-03-29"
+        assert result.nationality_iso2 == "SG"
+        assert result.doc_number == "K3907018B"
+        assert result.issuing_country == "SG"
+        assert result.doc_expiry == "2033-03-02"
+
+    def test_line1_missing_trailing_filler_passes(self):
+        """VL output dropped the line-1 name padding (27-ish chars, not 44)."""
+        result = validate({
+            "mrz_line1": GOLDEN_NAME_BASE,  # 25 chars, filler omitted
+            "mrz_line2": GOLDEN_LINE2,
+        })
+        assert result is not None
+        assert result.family_name == "KUA"
+
+    def test_leading_trailing_spaces_pass(self):
+        result = validate({
+            "mrz_line1": "  " + GOLDEN_LINE1 + "  ",
+            "mrz_line2": " " + GOLDEN_LINE2 + "\n",
+        })
+        assert result is not None
+        assert result.given_name == "HONG YIK JAYDON"
+
+    def test_spaces_used_as_filler_pass(self):
+        """Spaces instead of '<' in the line-1 name padding."""
+        line1_spaces = GOLDEN_NAME_BASE + " " * (44 - len(GOLDEN_NAME_BASE))
+        result = validate({
+            "mrz_line1": line1_spaces,
+            "mrz_line2": GOLDEN_LINE2,
+        })
+        assert result is not None
+        assert result.family_name == "KUA"
+
+    def test_extra_trailing_filler_line2_pass(self):
+        """A 45-char line2 whose extra char is a trailing '<'."""
+        assert len(GOLDEN_LINE2 + "<") == 45
+        result = validate({
+            "mrz_line1": GOLDEN_LINE1,
+            "mrz_line2": GOLDEN_LINE2 + "<",
+        })
+        assert result is not None
+        assert result.doc_number == "K3907018B"
+
+    def test_line2_interior_spaces_as_filler_pass(self):
+        """Line 2 with spaces INSIDE the personal-number filler (positions
+        29-42) instead of '<'.  Position-preserving mapping must rescue it;
+        deletion-form normalization would shift the digit columns and break
+        the check digits."""
+        line2_spaces = "K3907018B1SGP0503291M3303023T0507554D     44"
+        assert len(line2_spaces) == 44
+        result = validate({
+            "mrz_line1": GOLDEN_LINE1,
+            "mrz_line2": line2_spaces,
+        })
+        assert result is not None
+        assert result.family_name == "KUA"
+        assert result.given_name == "HONG YIK JAYDON"
+        assert result.birthday == "2005-03-29"
+        assert result.doc_number == "K3907018B"
+        assert result.doc_expiry == "2033-03-02"
+
+    def test_line1_spaces_between_name_tokens_pass(self):
+        """Line 1 with spaces between given-name tokens (unpadded).  The
+        mapped form reconstructs 'HONG<YIK<JAYDON' — given_name must come
+        out with spaces, never merged into one token (the old
+        whitespace-deletion form corrupted this PII)."""
+        line1_spaces = "P<SGPKUA<<HONG YIK JAYDON"  # 26 chars, no filler
+        result = validate({
+            "mrz_line1": line1_spaces,
+            "mrz_line2": GOLDEN_LINE2,
+        })
+        assert result is not None
+        assert result.given_name == "HONG YIK JAYDON"
+        assert result.given_name != "HONGYIKJAYDON"
+        assert result.family_name == "KUA"
+
+    def test_combined_line1_spaces_and_line2_trailing_filler_pass(self):
+        """Both deviations at once: line 1 unpadded with spaces between
+        name tokens AND line 2 carrying an extra trailing '<'."""
+        result = validate({
+            "mrz_line1": "P<SGPKUA<<HONG YIK JAYDON",
+            "mrz_line2": GOLDEN_LINE2 + "<",  # 45 chars, filler excess
+        })
+        assert result is not None
+        assert result.given_name == "HONG YIK JAYDON"
+        assert result.doc_number == "K3907018B"
+
+    def test_line1_extra_trailing_filler_pass(self):
+        """Line 1 = golden line 1 + one extra trailing '<' (45 chars).
+        Trim-variant symmetry with the line-2 trailing-filler case."""
+        overlong = GOLDEN_LINE1 + "<"
+        assert len(overlong) == 45
+        result = validate({
+            "mrz_line1": overlong,
+            "mrz_line2": GOLDEN_LINE2,
+        })
+        assert result is not None
+        assert result.family_name == "KUA"
+        assert result.given_name == "HONG YIK JAYDON"
+
+    def test_o_for_zero_still_rejected(self):
+        """'O' substituted for '0' in the DOB → check-digit mismatch → None.
+        Normalization must not rescue content errors."""
+        corrupted = GOLDEN_LINE2[:13] + "O" + GOLDEN_LINE2[14:]
+        assert validate({
+            "mrz_line1": GOLDEN_LINE1,
+            "mrz_line2": corrupted,
+        }) is None
+
+    def test_wrong_stated_check_digit_still_rejected(self):
+        """Flip the stated DOB check digit (pos 19) → mismatch → None."""
+        stated = GOLDEN_LINE2[19]
+        flipped = "0" if stated != "0" else "1"
+        corrupted = GOLDEN_LINE2[:19] + flipped + GOLDEN_LINE2[20:]
+        assert validate({
+            "mrz_line1": GOLDEN_LINE1,
+            "mrz_line2": corrupted,
+        }) is None
+
+    def test_interior_corruption_still_rejected(self):
+        """Flip one digit inside the doc number → doc check digit (and
+        composite) no longer match → None."""
+        corrupted = ("4" if GOLDEN_LINE2[0] != "4" else "5") + GOLDEN_LINE2[1:]
+        assert validate({
+            "mrz_line1": GOLDEN_LINE1,
+            "mrz_line2": corrupted,
+        }) is None
+
+    def test_overlong_non_filler_excess_fails_closed(self):
+        """A 45-char line2 whose extra char is NOT trailing '<' filler is
+        never truncated — it fails closed at the length gate."""
+        corrupted = GOLDEN_LINE2[:43] + "A" + GOLDEN_LINE2[43]  # 45 chars
+        assert len(corrupted) == 45
+        assert validate({
+            "mrz_line1": GOLDEN_LINE1,
+            "mrz_line2": corrupted,
+        }) is None
+
+    # ---- Filler-insertion repair (dropped interior '<' on line 2) ----
+
+    def test_exact_incident_pair_passes(self):
+        """The EXACT raw VL output (45/43) validates with all golden
+        fields: line 1 via trailing-filler trim, line 2 via the
+        check-digit-gated '<'-insertion repair."""
+        assert len(INCIDENT_LINE1_RAW) == 45
+        assert len(INCIDENT_LINE2_RAW) == 43
+        result = validate({
+            "mrz_line1": INCIDENT_LINE1_RAW,
+            "mrz_line2": INCIDENT_LINE2_RAW,
+        })
+        assert result is not None
+        assert result.family_name == "KUA"
+        assert result.given_name == "HONG YIK JAYDON"
+        assert result.gender == "M"
+        assert result.birthday == "2005-03-29"
+        assert result.nationality_iso2 == "SG"
+        assert result.doc_number == "K3907018B"
+        assert result.issuing_country == "SG"
+        assert result.doc_expiry == "2033-03-02"
+
+    def test_two_dropped_fillers_line2_passes(self):
+        """A 42-char line 2 with TWO '<' missing from the interior filler
+        run (k=2 combinations) is repaired and passes."""
+        line2_42 = GOLDEN_LINE2[:37] + "<<<" + GOLDEN_LINE2[42:]
+        assert len(line2_42) == 42
+        result = validate({
+            "mrz_line1": GOLDEN_LINE1,
+            "mrz_line2": line2_42,
+        })
+        assert result is not None
+        assert result.doc_number == "K3907018B"
+        assert result.given_name == "HONG YIK JAYDON"
+        assert result.doc_expiry == "2033-03-02"
+
+    def test_spaces_plus_two_dropped_fillers_line2_passes(self):
+        """Combined deviation: a 42-char line 2 using SPACES as filler AND
+        missing TWO '<' from the interior filler run.  Validates with the
+        golden fields via whitespace→'<' mapping plus the check-digit-gated
+        '<'-insertion repair.  Regression test for the mapped-seed-first
+        enumeration order in _filler_repair_forms (space-bearing raw forms
+        can never pass the check-digit gate and must not consume the
+        candidate cap ahead of the mapped seed's valid proposals)."""
+        line2_42 = "K3907018B1SGP0503291M3303023T0507554D  <44"
+        assert len(line2_42) == 42
+        result = validate({
+            "mrz_line1": GOLDEN_LINE1,
+            "mrz_line2": line2_42,
+        })
+        assert result is not None
+        assert result.family_name == "KUA"
+        assert result.given_name == "HONG YIK JAYDON"
+        assert result.gender == "M"
+        assert result.birthday == "2005-03-29"
+        assert result.nationality_iso2 == "SG"
+        assert result.doc_number == "K3907018B"
+        assert result.issuing_country == "SG"
+        assert result.doc_expiry == "2033-03-02"
+
+    def test_line1_never_gets_filler_insertion_repair(self):
+        """Line-1 invariant: filler-INSERTION repair never applies to
+        line 1.  A 42-char line 1 missing ONE '<' from the surname/given
+        separator ('KUA<HONG' instead of 'KUA<<HONG') plus one trailing
+        filler: the ONLY candidate forms line 1 receives are
+        whitespace→'<' mapping and '<' PADDING, and padding cannot
+        re-insert the dropped separator '<', so the '<<' split fails and
+        the whole name field collapses into family_name.  Had '<'
+        insertion repair been allowed on line 1, a candidate would
+        restore the separator and yield family_name 'KUA' — this
+        assertion would fail.  Line 1 has no check digits, so nothing
+        could gate such fabricated content."""
+        short_line1 = "PASGPKUA<HONG<YIK<JAYDON" + "<" * 18
+        assert len(short_line1) == 42
+        result = validate({
+            "mrz_line1": short_line1,
+            "mrz_line2": GOLDEN_LINE2,
+        })
+        assert result is not None          # padding still yields a parse
+        assert result.family_name == "KUA HONG YIK JAYDON"  # NOT repaired
+        assert result.family_name != "KUA"
+
+    def test_dropped_real_content_char_fails_closed(self):
+        """A 43-char line2 made by deleting a REAL content character (the
+        '4' from the personal number 'T0507554D') must NOT be repaired —
+        insertion only proposes '<', and the check digits reject every
+        candidate."""
+        corrupted = GOLDEN_LINE2[:35] + GOLDEN_LINE2[36:]  # drop the '4'
+        assert len(corrupted) == 43
+        assert corrupted == "K3907018B1SGP0503291M3303023T050755D<<<<<44"
+        assert validate({
+            "mrz_line1": GOLDEN_LINE1,
+            "mrz_line2": corrupted,
+        }) is None
+
+    def test_dropped_dob_digit_fails_closed(self):
+        """A 43-char line2 missing a DOB digit: the repair window starts
+        at column 28, so the missing char (outside the window) can never
+        be re-inserted → None."""
+        corrupted = GOLDEN_LINE2[:14] + GOLDEN_LINE2[15:]  # drop DOB '5'
+        assert len(corrupted) == 43
+        assert validate({
+            "mrz_line1": GOLDEN_LINE1,
+            "mrz_line2": corrupted,
+        }) is None

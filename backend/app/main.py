@@ -82,6 +82,18 @@ async def _supervised_bot(application) -> None:
     while True:
         try:
             await application.initialize()
+            # Capture the REAL bot identity (getMe ran inside initialize)
+            # so GET /api/waybot can hand the frontend the actual username
+            # for the t.me share link — never a hardcoded name.
+            try:
+                from app.bot import set_bot_username
+
+                set_bot_username(application.bot.username)
+                logger.info(
+                    "Waybot identity: @%s", application.bot.username
+                )
+            except Exception:  # noqa: BLE001 — identity is cosmetic
+                logger.exception("Waybot username capture failed (ignored)")
             await application.start()
             await application.updater.start_polling(drop_pending_updates=True)
             logger.info("Waybot polling started")
@@ -175,3 +187,15 @@ app.include_router(router)
 @app.get("/api/health")
 async def health() -> dict:
     return {"ok": True}
+
+
+@app.get("/api/waybot")
+async def waybot() -> dict:
+    """The live Waybot's Telegram username, derived from WAYPOINT_BOT_TOKEN
+    via getMe at bot startup. `null` when the app runs bot-less (no
+    token / build failed) — the frontend then hides the share link rather
+    than rendering a broken t.me URL. Lives here (not in api/routes.py)
+    to keep app.bot import-isolated: only main.py imports from it."""
+    from app.bot import get_bot_username
+
+    return {"username": get_bot_username()}

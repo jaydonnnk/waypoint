@@ -355,6 +355,19 @@ body {
 }
 .hero-form .start-btn.primary:hover:not(:disabled) { filter: brightness(1.06); }
 
+/* share card: input + Copy button on one row */
+.hero-form .copy-row { display: flex; gap: 8px; align-items: stretch; }
+.hero-form .copy-row input { flex: 1; min-width: 0; }
+.hero-form .copy-btn {
+  flex: none; padding: 0 16px; border-radius: 8px; cursor: pointer;
+  font-size: 13px; font-weight: 700; letter-spacing: 0.5px;
+  color: #fff; background: var(--pop);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  transition: filter 0.15s ease, background 0.15s ease;
+}
+.hero-form .copy-btn:hover { filter: brightness(1.06); }
+.hero-form .copy-btn:active { filter: brightness(0.96); }
+
 @media (max-width: 900px) {
   .mandate-screen {
     grid-template-columns: 1fr;
