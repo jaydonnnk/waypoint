@@ -76,15 +76,15 @@ def test_recorded_search_yields_identical_offers_to_live_parser():
     search_entry = next(
         e for e in _captured_entries()
         if e["step"] == "search" and e["envelope"].get("code") == "FLIGHT_SEARCHED"
-        and e["seq"] >= 5  # the replay run (last auth gate onward)
+        and e["seq"] == 19  # the manifest-scripted DUR->CPT capture
     )
     expected = AtlasClient()._offers_from_envelope(search_entry["envelope"])
 
     recorded = RecordedAtlasClient()
-    got = recorded.search("SIN", "NRT", date(2026, 9, 4), 2)
+    got = recorded.search("DUR", "CPT", date(2026, 9, 20), 1)
 
     assert got == expected
-    assert len(got) == 8  # the capture holds eight SIN->NRT offers
+    assert len(got) == 10  # the capture holds ten DUR->CPT offers
     # Cheapest-first, exactly as the live parser sorts.
     assert [o.price for o in got] == sorted(o.price for o in got)
     assert got[0].price == min(o.price for o in got)
@@ -93,24 +93,24 @@ def test_recorded_search_yields_identical_offers_to_live_parser():
 def test_recorded_write_path_parses_captured_envelopes():
     """verify / create_order / pay run through the inherited write-path
     parsers unchanged: the captured envelopes produce the same typed
-    results a live run parsed, and the captured pay TIMEOUT raises the
-    typed error — branch on code, never message."""
+    results a live run parsed, including the genuine TICKETED pay —
+    branch on code, never message."""
     recorded = RecordedAtlasClient()
 
-    verified = recorded.verify("off_c5c2aff9ea4849967b775b98")
-    assert verified.booking_id == "book_db2483544646f3d094e082cb"
+    verified = recorded.verify("off_6ce597335a19f90d6044eb1b")
+    assert verified.booking_id == "book_d6b1b5f47d485b84ef562a48"
     assert verified.price_change == "unchanged"
-    assert len(verified.travelers) == 2  # carried, never invented
+    assert len(verified.travelers) == 1  # carried, never invented
 
     ref = recorded.create_order(verified.booking_id, "[]", "continue-without-seat")
-    assert ref.order_no == "TESTA20260825233427052"
+    assert ref.order_no == "TESTA20260830223723623"
     assert ref.payment_confirmation_id
 
-    # The capture's pay envelope IS the transport TIMEOUT — replay ends
-    # the way the capture ended, honestly (typed code on the wire).
-    with pytest.raises(AtlasError) as exc_info:
-        recorded.pay(ref.payment_confirmation_id)
-    assert exc_info.value.code == "TIMEOUT"
+    # The capture's pay envelope IS a genuine TICKETED — replay ends the
+    # way the capture ended, honestly (a real ticket, never fabricated).
+    result = recorded.pay(ref.payment_confirmation_id)
+    assert result.ticketed is True
+    assert result.order_no == "TESTA20260830223723623"
 
 
 def test_ticketing_live_replays_the_captured_auth_gate():
@@ -146,11 +146,11 @@ def test_unscripted_call_fails_closed_with_no_recording():
     assert exc_info.value.code == "NO_RECORDING"
 
 
-def test_poll_until_ticketed_is_clock_free_and_fails_closed():
+def test_poll_until_ticketed_is_clock_free_and_returns_ticketed():
     """The recording IS the timeline: poll_until_ticketed never touches
-    the clock (sleep/monotonic tripwired), and with no `order status`
-    step scripted (composite capture) it fails closed on NO_RECORDING —
-    it NEVER loops forever and NEVER fabricates TICKETED."""
+    the clock (sleep/monotonic tripwired), and with a genuine TICKETED
+    `order status` scripted, it returns immediately — `ticket_asserted`
+    True only because the captured envelope really is TICKETED."""
     def tripwire(*args, **kwargs):
         raise AssertionError("replay must never touch the clock")
 
@@ -160,9 +160,12 @@ def test_poll_until_ticketed_is_clock_free_and_fails_closed():
     time.sleep = tripwire
     time.monotonic = tripwire
     try:
-        with pytest.raises(AtlasError) as exc_info:
-            recorded.poll_until_ticketed("TESTA20260825233427052")
-        assert exc_info.value.code == "NO_RECORDING"
+        status, ticket_asserted = recorded.poll_until_ticketed(
+            "TESTA20260830223723623"
+        )
+        assert ticket_asserted is True
+        assert status.ticketed is True
+        assert status.code == "TICKETED"
     finally:
         time.sleep = monkeypatch_sleep
         time.monotonic = monkeypatch_monotonic
@@ -190,7 +193,7 @@ def test_missing_or_malformed_artifacts_fail_closed(tmp_path):
 
 def test_recorded_client_never_spawns_a_subprocess(monkeypatch):
     """Transport tripwire: a full scripted pass (auth probe -> search ->
-    verify -> create -> pay) spawns ZERO subprocesses."""
+    verify -> create -> pay -> order status) spawns ZERO subprocesses."""
     spawned: list = []
 
     def trap(*args, **kwargs):
@@ -202,11 +205,11 @@ def test_recorded_client_never_spawns_a_subprocess(monkeypatch):
 
     recorded = RecordedAtlasClient()
     assert recorded.ticketing_live() is True
-    recorded.search("SIN", "NRT", date(2026, 9, 4), 2)
-    verified = recorded.verify("off_c5c2aff9ea4849967b775b98")
+    recorded.search("DUR", "CPT", date(2026, 9, 20), 1)
+    verified = recorded.verify("off_6ce597335a19f90d6044eb1b")
     ref = recorded.create_order(verified.booking_id, "[]", "continue-without-seat")
-    with pytest.raises(AtlasError):
-        recorded.pay(ref.payment_confirmation_id)
+    result = recorded.pay(ref.payment_confirmation_id)
+    assert result.ticketed is True
     assert spawned == []
 
 
@@ -217,13 +220,14 @@ def test_recorded_client_never_spawns_a_subprocess(monkeypatch):
 
 def test_mode_label_and_wire_disclosure_are_honest():
     """Recorded NEVER wears the live label, and the wire disclosure
-    states the composite capture truth (no fabricated TICKETED)."""
+    states the genuinely-ticketed capture truth (a real TICKETED
+    envelope, never fabricated)."""
     recorded = RecordedAtlasClient()
     assert recorded.mode_label == "recorded"
     assert "recorded Atlas replay" in recorded.gate_disclosure
-    assert recorded.manifest["ticketed_captured"] is False
-    assert recorded.manifest["composite"] is True
-    # Every scripted step is provenance-captured in the composite case.
+    assert recorded.manifest["ticketed_captured"] is True
+    assert recorded.manifest["composite"] is False
+    # Every scripted step is provenance-captured (clean single run).
     assert recorded.manifest["reconstructed_steps"] == []
     assert all(
         entry["provenance"] == "captured" for entry in recorded.manifest["script"]

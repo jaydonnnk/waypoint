@@ -193,7 +193,7 @@ def test_recorded_atlas_rail_is_never_labelled_live(brain_source, comparison):
 
 def test_real_recorded_client_never_labels_atlas_live():
     """The REAL RecordedAtlasClient + REAL manifest: the Atlas rail says
-    recorded replay and its detail surfaces the composite honesty."""
+    recorded replay and its detail surfaces the genuine-ticketed honesty."""
     client = RecordedAtlasClient()
     for comparison in (True, False):
         rails = build_rails(
@@ -207,9 +207,9 @@ def test_real_recorded_client_never_labels_atlas_live():
             continue
         assert atlas["state"] == "recorded"
         assert "live" not in atlas["label"].lower()
-        # Composite + no-TICKETED honesty from the manifest, verbatim.
-        assert "composite" in atlas["detail"]
-        assert "no TICKETED envelope" in atlas["detail"]
+        # Genuine TICKETED honesty from the manifest, verbatim.
+        assert "genuinely captured" in atlas["detail"]
+        assert "composite" not in atlas["detail"]
 
 
 def test_recorded_without_manifest_degrades_least_live():
@@ -360,7 +360,7 @@ def test_meta_event_carries_honest_rails_in_recorded_mode(
     tmp_db, recorded_env
 ):
     """Full recorded cycle: the meta event carries all four rails, the
-    Atlas rail says recorded replay (never live) with the composite
+    Atlas rail says recorded replay (never live) with the genuine-ticketed
     honesty, and the fallback brain (no key) reads fallback. mode and
     disclosures stay as S9 pinned them."""
     atlas = RecordedAtlasClient()
@@ -377,8 +377,8 @@ def test_meta_event_carries_honest_rails_in_recorded_mode(
     atlas_rail = rail_by_name(rails, "Atlas")
     assert atlas_rail["state"] == "recorded"
     assert "live" not in atlas_rail["label"].lower()
-    assert "composite" in atlas_rail["detail"]
-    assert "no TICKETED envelope" in atlas_rail["detail"]
+    assert "genuinely captured" in atlas_rail["detail"]
+    assert "composite" not in atlas_rail["detail"]
     # meta rides BEFORE the first judgment → the Qwen rail reads the
     # least-live label (fallback), exactly the fail-to-least-live rule.
     qwen_rail = rail_by_name(rails, "Qwen")

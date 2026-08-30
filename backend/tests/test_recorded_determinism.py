@@ -8,12 +8,13 @@ created_at/mark_at wall-clock stamps. Everything else compares raw,
 including the full SSE event lists and the blotter rows.
 
 Scenario: ONE held SIN->NRT position (pax 2, cost 270.00). The replayed
-search marks it at the captured cheapest fare 323.00 (+19.6% vs cost,
-past the long_haul band top 14%) so the fallback brain says book; the
-write path replays verify + create, then ends EXACTLY the way the
-composite capture ended — the captured pay TIMEOUT (error event, position
-held, zero ledger writes by the cycle). One position = one search, so the
-reprice fan-out has no cross-thread queue race to hide behind.
+search marks it at the captured cheapest fare 64.11 (-76.3% vs cost,
+below the curated band floor) so the fallback brain says hold and admits
+the mark-to-market loss in code — the write path (verify/create/pay) is
+never reached because no rebook is triggered; the cycle closes on a
+single "loss" ledger entry, never touching the scripted order steps. One
+position = one search, so the reprice fan-out has no cross-thread queue
+race to hide behind.
 """
 from __future__ import annotations
 
@@ -162,25 +163,26 @@ def test_two_recorded_cycles_are_byte_identical(tmp_db, recorded_env):
     result_a, events_a = run_cycle(agent, desk_a)
     result_b, events_b = run_cycle(agent, desk_b)
 
-    # The composite replay's honest shape, asserted once on cycle A.
+    # The genuinely-ticketed replay's honest shape, asserted once on cycle A.
     meta = next(e for e in events_a if e["type"] == "meta")
     assert meta["mode"] == "recorded ticketing (replay)"
     assert any("recorded Atlas replay" in d for d in meta["disclosures"])
     assert any(
-        e["type"] == "error" and e["code"] == "TIMEOUT" for e in events_a
-    )  # the cycle ends the way the capture ended
+        e["type"] == "loss" for e in events_a
+    )  # the cheap replayed mark trips a mark-to-market loss admission
     assert result_a.status == "closed"
     assert result_a.comparison_mode is False
-    assert result_a.pnl == Decimal("53.00")  # 323.00 mark vs 270.00 cost
+    assert result_a.pnl == Decimal("-205.89")  # 64.11 mark vs 270.00 cost
 
     # BYTE-IDENTICAL after normalizing only the documented volatiles.
     assert dump(events_a, desk_a) == dump(events_b, desk_b)
     assert normalize(result_a.model_dump(mode="json"), desk_a) == \
         normalize(result_b.model_dump(mode="json"), desk_b)
-    # Blotter tie-out: only the seed disclosure row — the cycle wrote
-    # nothing (pay TIMEOUT), and both desks agree exactly.
+    # Blotter tie-out: seed disclosure + the admitted loss — the write
+    # path is never reached (no rebook triggered), and both desks agree
+    # exactly.
     assert ledger_rows(desk_a) == ledger_rows(desk_b)
-    assert all(kind == "adjust" for kind, *_ in ledger_rows(desk_a))
+    assert {kind for kind, *_ in ledger_rows(desk_a)} == {"adjust", "loss"}
 
 
 def test_recorded_cycle_spawns_no_subprocess(tmp_db, recorded_env, monkeypatch):
