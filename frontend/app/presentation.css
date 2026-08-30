@@ -597,9 +597,34 @@
   .desk-grid.has-decision > .desk-foot { grid-column: 1 / -1; }
 }
 
-/* the awaiting gate and the stream-dead line sit directly in the wrap */
+/* the awaiting gate and the stream-dead card sit directly in the wrap */
 .wrap > .decide { margin: 0 0 var(--space-8); }
-.wrap > .status { margin: 0 0 var(--space-6); }
+.wrap > .status { margin: 0 0 var(--space-8); }
+.deskerr {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--status-no-text);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elevation-2);
+  padding: var(--space-6) var(--space-7);
+}
+.deskerr .pip { color: var(--status-no-text); margin-top: 4px; }
+.deskerr-main { display: flex; flex-direction: column; gap: var(--space-1); }
+.deskerr-main b {
+  font-size: var(--font-title-size);
+  line-height: var(--font-title-lh);
+  letter-spacing: var(--font-title-track);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.deskerr-main span {
+  font-size: var(--font-small-size);
+  line-height: var(--font-small-lh);
+  color: var(--text-secondary);
+}
 
 /* ==================================================================== */
 /* §4 — the agent panel                                                 */
@@ -614,6 +639,26 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-card-gap);
+}
+/* Nothing to report yet (the awaiting-team gate, or before the first
+   step lands): the panel sheds its card entirely rather than sitting
+   there as an empty white bar with a header and no content. It is NOT
+   display:none — the .pa-working wrapper inside is the aria-live region
+   and has to stay in the accessibility tree, mounted, at all times. */
+.desk-console:not(:has(.pa-sources)):not(:has(.pa-working-text)):not(:has(.pa-working-idle)) {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  gap: 0;
+}
+.desk-console:not(:has(.pa-sources)):not(:has(.pa-working-text)):not(:has(.pa-working-idle)) .pa-head {
+  display: none;
+}
+/* the live region COLLAPSES rather than being display:none'd — a
+   display:none aria-live region does not reliably announce the content
+   that un-hides it */
+.desk-console:not(:has(.pa-sources)):not(:has(.pa-working-text)):not(:has(.pa-working-idle)) .pa-working {
+  min-height: 0;
 }
 /* A real header. This is what removes the ORPHANED RULE: .pa-sources used
    to carry a border-top that, whenever the working line was empty, sat

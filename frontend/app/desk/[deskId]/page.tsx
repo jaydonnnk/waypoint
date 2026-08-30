@@ -935,6 +935,16 @@ export default function DeskPage() {
           ? "pip-cross"
           : "pip-open";
 
+  // Is the desk ACTUALLY running right now? Everything that claims work
+  // is happening — the "Booking…" figure, the working lozenge, the
+  // pulsing beacon, the skeleton rows — must key off this and not off
+  // "not settled". A dead stream is not a slow one: with the stream
+  // closed the screen used to keep saying "Booking…" over three
+  // shimmering placeholders for trips that were never going to arrive.
+  // That is inventing progress, and it is the one thing this product
+  // cannot do.
+  const running = !settled && !awaiting && !streamDead;
+
   // Pass 7 (Person A): the feed GROUPED BY TRIP — a pure render-time
   // derivation over the same blotter array (no state, no reducer change,
   // no event dropped). Escalations still surface only as THE DECISION
@@ -1828,12 +1838,24 @@ export default function DeskPage() {
                   : "phase phase-dry"
             }
           >
+            {/* The mode arrives on the `meta` event. If the stream died
+                before that, we genuinely do not know which mode this desk
+                would have run in — and saying "connecting" next to
+                "Connection closed" would be a lie in two directions. */}
             <b className="phase-k">
-              {screen.mode == null ? "Starting" : live ? "Live" : "Dry run"}
+              {screen.mode == null
+                ? streamDead
+                  ? "Unknown"
+                  : "Starting"
+                : live
+                  ? "Live"
+                  : "Dry run"}
             </b>
             <span className="phase-v">
               {screen.mode == null
-                ? "connecting to the desk"
+                ? streamDead
+                  ? "the desk never reported its mode"
+                  : "connecting to the desk"
                 : live
                   ? "booking for real"
                   : "no real bookings"}
@@ -1950,10 +1972,20 @@ export default function DeskPage() {
         </div>
       )}
 
+      {/* The most important thing on a dead screen is that it IS dead, so
+          it gets a real surface rather than one small red line above the
+          band. Status is a word, a shape and a colour — never colour on
+          its own. */}
       {streamDead && !awaiting && (
-        <div className="status err">
-          We can't reach this booking — it may have ended or the link is
-          wrong.
+        <div className="status err deskerr" role="status">
+          <i className="pip pip-cross" aria-hidden="true" />
+          <span className="deskerr-main">
+            <b>We can't reach this booking</b>
+            <span>
+              It may have ended, or the link is wrong. Nothing on this page
+              is live.
+            </span>
+          </span>
         </div>
       )}
 
@@ -1982,7 +2014,13 @@ export default function DeskPage() {
             </div>
           ) : (
             <div className="big fig kpi-v pending">
-              {awaiting ? "Not started" : settled ? "" : "Booking…"}
+              {awaiting
+                ? "Not started"
+                : streamDead
+                  ? "No result"
+                  : settled
+                    ? ""
+                    : "Booking…"}
             </div>
           )}
           <div className="kpi-meter">
@@ -2000,6 +2038,11 @@ export default function DeskPage() {
               <span className="lozenge flat">
                 <i className="pip pip-open" aria-hidden="true" />
                 Waiting for your team
+              </span>
+            ) : streamDead ? (
+              <span className="lozenge no">
+                <i className="pip pip-cross" aria-hidden="true" />
+                Connection closed
               </span>
             ) : (
               <span className="lozenge flat">
@@ -2192,9 +2235,9 @@ export default function DeskPage() {
         <aside className="desk-console" aria-label="Agent activity">
           <div className="pa-head">
             <span className="pa-head-k">Agent</span>
-            {!settled && !awaiting && (
-              <span className="pa-beacon" aria-hidden="true" />
-            )}
+            {/* the pulse means "work is happening"; it must not outlive the
+                stream that produces the work */}
+            {running && <span className="pa-beacon" aria-hidden="true" />}
           </div>
 
           {/* (a) working-on — same guard, same aria-live, wrapper ALWAYS
@@ -2272,12 +2315,17 @@ export default function DeskPage() {
           {tripGroups.length === 0 ? (
             <>
               <div className="trip empty">
-                Just starting — updates will appear here.
+                {streamDead
+                  ? "No trips to show — we never reached this booking."
+                  : awaiting
+                    ? "Nothing yet — the trips appear once you release the booking."
+                    : "Just starting — updates will appear here."}
               </div>
               {/* Honest skeletons — obvious placeholders (no text, no
-                  numbers), rendered only while a run is genuinely starting
-                  (not settled, not the awaiting gate). */}
-              {!settled && !awaiting && (
+                  numbers), rendered ONLY while a run is genuinely starting.
+                  `running` excludes a dead stream: a placeholder promises
+                  content is coming, and with the stream closed none is. */}
+              {running && (
                 <>
                   <div className="trip skeleton" aria-hidden="true">
                     <div className="sk-avatar" /><div className="sk-lines">
