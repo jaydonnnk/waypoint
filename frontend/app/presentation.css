@@ -1443,8 +1443,18 @@
 }
 .record .stream .dim { color: var(--term-dim); }
 
-/* the rows: dark cards, hue as a left rule (a graphical object) */
+/* The rows do NOT animate in. Two reasons, both project principles:
+   the record is a settled artefact rather than live work (so the
+   labor-illusion argument for motion does not apply), and toggling the
+   panel would otherwise re-animate all fifteen rows at once — a full-list
+   re-animation, which this project already rules out for causing change
+   blindness. Dropping the inherited `rise` here also removes a whole class
+   of fragility: `animation: rise ... both` holds its `from` state (opacity
+   0) until the animation actually starts, so any subtree revealed from
+   `display: none` while the timeline is not advancing renders blank. The
+   `rise` keyframe itself is untouched and still used elsewhere. */
 .record .blotter { gap: 6px; margin-top: 12px; }
+.record .brow { animation: none; }
 .record .brow {
   background: rgba(255, 255, 255, 0.045);
   border: 1px solid rgba(255, 255, 255, 0.1);
