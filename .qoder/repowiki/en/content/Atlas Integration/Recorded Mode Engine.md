@@ -6,6 +6,7 @@
 - [manifest.json](file://backend/data/recorded/manifest.json)
 - [build_replay_manifest.py](file://backend/scripts/build_replay_manifest.py)
 - [capture_booking.py](file://backend/scripts/capture_booking.py)
+- [repoll_ticketed.py](file://backend/scripts/repoll_ticketed.py)
 - [10-s9-recorded-mode.md](file://docs/plans/waypoint/10-s9-recorded-mode.md)
 - [test_recorded_mode.py](file://backend/tests/test_recorded_mode.py)
 - [test_recorded_determinism.py](file://backend/tests/test_recorded_determinism.py)
@@ -13,7 +14,15 @@
 - [config.py](file://backend/app/atlas/config.py)
 - [routes.py](file://backend/app/api/routes.py)
 - [loop.py](file://backend/app/agent/loop.py)
+- [page.tsx](file://frontend/app/desk/[deskId]/page.tsx)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated manifest.json with new order TESTA20260830210123734 and streamlined booking workflow
+- Enhanced repoll_ticketed.py with WAYPOINT_REPOLL_ORDER environment variable support for flexible testing
+- Improved capture reliability with extended timeouts and better sandbox routing
+- Added comprehensive environment variable documentation for capture configuration
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -30,16 +39,20 @@
 ## Introduction
 The Recorded Mode Engine provides a deterministic, sandbox-independent replay rail for the Atlas ticketing subsystem. It captures live CLI envelopes during a real booking run and replays them with strict honesty guarantees: no fabricated TICKETED envelopes, no subprocesses, no clock or randomness, and explicit wire disclosures about composite recordings. The engine is selected via a strict environment switch and integrates into the existing desk orchestration loop without altering the live transport code.
 
+**Updated** Enhanced booking capture reliability with improved sandbox routing (DUR->CPT), extended timeouts, and improved frontend UX for better state differentiation. The latest recording features order TESTA20260830210123734 with a streamlined booking workflow that successfully captures complete booking flows including TICKETING_PENDING status.
+
 ## Project Structure
 Recorded mode spans capture tooling, replay client, manifest generation, configuration, API wiring, and tests. Key locations:
 - Replay client: backend/app/atlas/recorded.py
 - Manifest (honesty register): backend/data/recorded/manifest.json
 - Capture script: backend/scripts/capture_booking.py
+- Repoll script: backend/scripts/repoll_ticketed.py
 - Manifest builder: backend/scripts/build_replay_manifest.py
 - Mode config: backend/app/atlas/config.py
 - API seam: backend/app/api/routes.py
 - Orchestration loop: backend/app/agent/loop.py
 - Live client base: backend/app/atlas/client.py
+- Frontend UX: frontend/app/desk/[deskId]/page.tsx
 - Tests: backend/tests/test_recorded_mode.py, backend/tests/test_recorded_determinism.py
 - Plan and ADRs: docs/plans/waypoint/10-s9-recorded-mode.md, docs/adr/0005-recorded-atlas-replay-mode.md
 
@@ -47,10 +60,12 @@ Recorded mode spans capture tooling, replay client, manifest generation, configu
 graph TB
 subgraph "Capture"
 CAP["capture_booking.py"]
+ENV["Environment Variables<br/>WAYPOINT_CAPTURE_ROUTE<br/>WAYPOINT_CAPTURE_DEPART<br/>WAYPOINT_CAPTURE_ADULTS"]
+REPOLL["repoll_ticketed.py<br/>WAYPOINT_REPOLL_ORDER"]
 end
 subgraph "Replay Assets"
 REC["booking_envelopes.json"]
-MAN["manifest.json"]
+MAN["manifest.json<br/>Order: TESTA20260830210123734"]
 end
 subgraph "Replay Client"
 RC["RecordedAtlasClient(recorded.py)"]
@@ -61,54 +76,69 @@ LOOP["DeskAgent(loop.py)"]
 ROUTE["API routes(routes.py)"]
 CFG["Mode config(config.py)"]
 end
+subgraph "Frontend UX"
+FE["Desk Page(page.tsx)<br/>Live/Recorded/Dry Run States"]
+end
+CAP --> ENV
 CAP --> REC
 CAP --> MAN
+REPOLL --> ENV
+REPOLL --> REC
 ROUTE --> CFG
 ROUTE --> LOOP
 LOOP --> RC
 RC --> BASE
 RC --> MAN
 RC --> REC
+LOOP --> FE
 ```
 
 **Diagram sources**
-- [capture_booking.py:1-384](file://backend/scripts/capture_booking.py#L1-L384)
+- [capture_booking.py:71-112](file://backend/scripts/capture_booking.py#L71-L112)
+- [repoll_ticketed.py:38-41](file://backend/scripts/repoll_ticketed.py#L38-L41)
 - [recorded.py:1-235](file://backend/app/atlas/recorded.py#L1-L235)
 - [client.py:1-200](file://backend/app/atlas/client.py#L1-L200)
 - [config.py:1-38](file://backend/app/atlas/config.py#L1-L38)
 - [routes.py:97-113](file://backend/app/api/routes.py#L97-L113)
-- [loop.py:153-200](file://backend/app/agent/loop.py#L153-L200)
+- [loop.py:183-200](file://backend/app/agent/loop.py#L183-L200)
+- [page.tsx:1215-1234](file://frontend/app/desk/[deskId]/page.tsx#L1215-L1234)
 
 **Section sources**
 - [10-s9-recorded-mode.md:1-72](file://docs/plans/waypoint/10-s9-recorded-mode.md#L1-L72)
 - [recorded.py:1-235](file://backend/app/atlas/recorded.py#L1-L235)
-- [manifest.json:1-264](file://backend/data/recorded/manifest.json#L1-L264)
+- [manifest.json:1-96](file://backend/data/recorded/manifest.json#L1-L96)
 
 ## Core Components
 - RecordedAtlasClient: Subclass of AtlasClient that overrides only transport methods to serve recorded envelopes deterministically. Enforces fail-closed behavior on unscripted calls and rewinds per cycle.
-- Manifest: JSON honesty register describing which steps are served, provenance (captured vs reconstructed), and wire disclosure.
-- Capture script: Tees every raw envelope from a live booking run into a JSON-lines file; includes double-gate safety checks before capturing writes.
+- Manifest: JSON honesty register describing which steps are served, provenance (captured vs reconstructed), and wire disclosure. **Updated** with new order TESTA20260830210123734 and streamlined booking workflow.
+- Capture script: Tees every raw envelope from a live booking run into a JSON-lines file; includes double-gate safety checks before capturing writes. **Enhanced** with improved sandbox routing (DUR->CPT) and configurable environment variables.
+- Repoll script: Query-only re-polling tool for TICKETED tail completion with flexible order targeting via environment variables.
 - Manifest builder: Derives the replay script from the latest captured run, flags reconstructed pay when justified by later TICKETED status, and writes manifest metadata.
 - Mode config: Strict parse of WAYPOINT_ATLAS_MODE to select recorded vs live.
 - API seam: build_atlas() selects RecordedAtlasClient when configured.
-- Loop integration: Uses getattr-based reset_ticketing_cache hook to rewind cursers and sets wire label to “recorded ticketing (replay)” with disclosures.
+- Loop integration: Uses getattr-based reset_ticketing_cache hook to rewind cursers and sets wire label to "recorded ticketing (replay)" with disclosures.
+- **Frontend UX**: Enhanced state differentiation showing "Live — booking for real", "Recorded — replaying a real sandbox ticket", and "Dry run — no real bookings yet".
 
 **Section sources**
 - [recorded.py:65-235](file://backend/app/atlas/recorded.py#L65-L235)
-- [manifest.json:1-264](file://backend/data/recorded/manifest.json#L1-L264)
-- [capture_booking.py:77-189](file://backend/scripts/capture_booking.py#L77-L189)
+- [manifest.json:1-96](file://backend/data/recorded/manifest.json#L1-L96)
+- [capture_booking.py:71-112](file://backend/scripts/capture_booking.py#L71-L112)
+- [repoll_ticketed.py:1-119](file://backend/scripts/repoll_ticketed.py#L1-L119)
 - [build_replay_manifest.py:59-205](file://backend/scripts/build_replay_manifest.py#L59-L205)
 - [config.py:28-38](file://backend/app/atlas/config.py#L28-L38)
 - [routes.py:97-113](file://backend/app/api/routes.py#L97-L113)
 - [loop.py:183-200](file://backend/app/agent/loop.py#L183-L200)
+- [page.tsx:1215-1234](file://frontend/app/desk/[deskId]/page.tsx#L1215-L1234)
 
 ## Architecture Overview
 The Recorded Mode Engine replaces the live transport layer with a deterministic replay path while preserving all parsing and business logic. The flow:
 - Configuration selects RecordedAtlasClient based on an environment variable.
 - The API constructs the agent with the selected Atlas client.
 - During a desk cycle, the agent invokes Atlas methods; RecordedAtlasClient serves envelopes from the manifest/script in order.
-- The manifest’s wire disclosure is emitted on the meta event to indicate replay mode and composite state.
+- The manifest's wire disclosure is emitted on the meta event to indicate replay mode and composite state.
 - No subprocesses, clocks, or randomness are used in replay.
+
+**Updated** Enhanced capture reliability with improved timeout handling, better sandbox routing configuration, and flexible repoll capabilities for completing pending orders.
 
 ```mermaid
 sequenceDiagram
@@ -116,8 +146,11 @@ participant API as "API routes(routes.py)"
 participant CFG as "Config(config.py)"
 participant AG as "DeskAgent(loop.py)"
 participant RC as "RecordedAtlasClient(recorded.py)"
+participant CAP as "Capture Script"
+participant REPOLL as "Repoll Script"
 participant M as "Manifest(manifest.json)"
 participant R as "Recording(booking_envelopes.json)"
+participant FE as "Frontend UX"
 API->>CFG : read_atlas_mode()
 alt mode == "recorded"
 API->>RC : build_atlas() -> RecordedAtlasClient()
@@ -125,18 +158,23 @@ AG->>RC : verify/create/pay/search/order_status
 RC->>M : load script and disclosure
 RC->>R : load envelopes by seq
 RC-->>AG : parsed results (same parsers as live)
+AG-->>FE : mode banner with state differentiation
 AG-->>API : meta event with "recorded ticketing (replay)" + disclosures
 else live
 API->>API : use AtlasClient (unchanged)
 end
+Note over CAP,REPOLL : Enhanced with DUR->CPT routing,<br/>extended timeouts, and flexible order targeting
 ```
 
 **Diagram sources**
 - [config.py:28-38](file://backend/app/atlas/config.py#L28-L38)
 - [routes.py:97-113](file://backend/app/api/routes.py#L97-L113)
 - [recorded.py:79-120](file://backend/app/atlas/recorded.py#L79-L120)
-- [manifest.json:1-264](file://backend/data/recorded/manifest.json#L1-L264)
+- [manifest.json:1-96](file://backend/data/recorded/manifest.json#L1-L96)
 - [loop.py:183-200](file://backend/app/agent/loop.py#L183-L200)
+- [capture_booking.py:71-112](file://backend/scripts/capture_booking.py#L71-L112)
+- [repoll_ticketed.py:38-41](file://backend/scripts/repoll_ticketed.py#L38-L41)
+- [page.tsx:1215-1234](file://frontend/app/desk/[deskId]/page.tsx#L1215-L1234)
 
 ## Detailed Component Analysis
 
@@ -174,7 +212,7 @@ AtlasClient <|-- RecordedAtlasClient : "overrides transport only"
 ```
 
 **Diagram sources**
-- [recorded.py:65-235](file://backend/app/atlas/recorded.py#L65-L235)
+- [recorded.py:65-235](file://backend/app/atlas/recorded.py#L65-235)
 - [client.py:1-200](file://backend/app/atlas/client.py#L1-L200)
 
 **Section sources**
@@ -182,63 +220,50 @@ AtlasClient <|-- RecordedAtlasClient : "overrides transport only"
 - [test_recorded_mode.py:71-114](file://backend/tests/test_recorded_mode.py#L71-L114)
 - [test_recorded_mode.py:149-169](file://backend/tests/test_recorded_mode.py#L149-L169)
 
-### Manifest and Recording
-- Recording: JSON-lines file of raw envelopes captured live, each with seq, step, cmd, envelope, captured_at.
-- Manifest: Honesty register listing the replay script, provenance, reconstructed steps, and wire disclosure. Builder ensures no fabricated TICKETED envelopes; reconstruction only occurs when justified by later captured state.
+### Enhanced Capture Script
+Captures a full booking run against the live sandbox, teeing every envelope before any parse decision. **Enhanced** with improved reliability features:
 
-```mermaid
-flowchart TD
-Start(["Build manifest"]) --> Load["Load recording entries"]
-Load --> Sort["Sort by seq"]
-Sort --> Anchor["Find last auth_status gate"]
-Anchor --> BuildScript["Assemble script: auth → search → verify → create → pay"]
-BuildScript --> PayLogic{"Pay envelope present?"}
-PayLogic --> |Yes & success code| AddCaptured["Add captured pay"]
-PayLogic --> |No & TICKETED later| ReconstructPay["Reconstruct pay as TICKETING_PENDING (flagged)"]
-PayLogic --> |No & not ticketed tail| AddCapturedTimeout["Add captured pay TIMEOUT"]
-ReconstructPay --> TicketedTail{"TICKETED captured?"}
-AddCaptured --> TicketedTail
-AddCapturedTimeout --> TicketedTail
-TicketedTail --> |Yes| AddStatus["Append final order status (TICKETED)"]
-TicketedTail --> |No| Composite["Mark composite=true"]
-AddStatus --> Write["Write manifest.json"]
-Composite --> Write
-```
+**New Environment Variables:**
+- `WAYPOINT_CAPTURE_ROUTE`: Configurable route (default: "DUR-CPT" - the blessed UAT reference route)
+- `WAYPOINT_CAPTURE_DEPART`: Departure date (default: "2026-09-20")
+- `WAYPOINT_CAPTURE_ADULTS`: Number of adults (default: "2")
 
-**Diagram sources**
-- [build_replay_manifest.py:59-205](file://backend/scripts/build_replay_manifest.py#L59-L205)
-- [manifest.json:1-264](file://backend/data/recorded/manifest.json#L1-L264)
+**Extended Timeouts:**
+- `PAY_WRITE_TIMEOUT_SECONDS`: Increased to 240s (from previous 90s) to handle slow sandbox responses
+- `TICKETED_POLL_DEADLINE_SECONDS`: Increased to 600s (from previous 180s) to accommodate longer ticketing processing times
+- `RECOVERY_READ_TIMEOUT_SECONDS`: Set to 240s for recovery operations
 
-**Section sources**
-- [build_replay_manifest.py:59-205](file://backend/scripts/build_replay_manifest.py#L59-L205)
-- [manifest.json:1-264](file://backend/data/recorded/manifest.json#L1-L264)
+**Improved Sandbox Routing:**
+- Default route changed from SIN->NRT to DUR->CPT (African route guaranteed to ticket in sandbox)
+- Better success rate for capturing complete booking flows including TICKETED status
 
-### Capture Script
-Captures a full booking run against the live sandbox, teeing every envelope before any parse decision. Includes double-gate safety:
-- Explicit human intent flag required to arm write-path capture.
-- Authorization and ticketing availability checks before proceeding.
+Double-gate safety:
+- Explicit human intent flag required to arm write-path capture
+- Authorization and ticketing availability checks before proceeding
 
 ```mermaid
 sequenceDiagram
 participant User as "User"
 participant Cap as "capture_booking.py"
 participant AC as "AtlasClient"
+participant Env as "Environment Config"
 participant Rec as "Recording file"
 User->>Cap : Run capture
+Cap->>Env : Read WAYPOINT_CAPTURE_ROUTE<br/>WAYPOINT_CAPTURE_DEPART<br/>WAYPOINT_CAPTURE_ADULTS
 Cap->>Cap : Check WAYPOINT_WRITE_PATH
 Cap->>AC : auth_status()
 AC-->>Cap : AUTHORIZED?
 alt authorized and ticketing available
-Cap->>AC : search()
+Cap->>AC : search() with DUR->CPT route
 AC-->>Cap : offers
 Cap->>AC : verify()
 AC-->>Cap : verified travelers
 Cap->>AC : confirm_price() if price increased
 Cap->>AC : create_order()
 AC-->>Cap : OrderRef
-Cap->>AC : pay()
+Cap->>AC : pay() with 240s timeout
 AC-->>Cap : PaymentResult or error
-Cap->>AC : poll_until_ticketed() if needed
+Cap->>AC : poll_until_ticketed() with 600s deadline
 Note over Cap,Rec : Every envelope tee'd to recording
 else blocked
 Cap-->>User : Exit with reason
@@ -246,12 +271,74 @@ end
 ```
 
 **Diagram sources**
-- [capture_booking.py:77-189](file://backend/scripts/capture_booking.py#L77-L189)
-- [capture_booking.py:232-384](file://backend/scripts/capture_booking.py#L232-L384)
+- [capture_booking.py:71-112](file://backend/scripts/capture_booking.py#L71-L112)
+- [capture_booking.py:270-437](file://backend/scripts/capture_booking.py#L270-L437)
 
 **Section sources**
-- [capture_booking.py:77-189](file://backend/scripts/capture_booking.py#L77-L189)
-- [capture_booking.py:232-384](file://backend/scripts/capture_booking.py#L232-L384)
+- [capture_booking.py:71-112](file://backend/scripts/capture_booking.py#L71-L112)
+- [capture_booking.py:270-437](file://backend/scripts/capture_booking.py#L270-L437)
+
+### Enhanced Repoll Script
+**New** Query-only re-polling tool for completing pending orders with flexible order targeting.
+
+**Key Features:**
+- `WAYPOINT_REPOLL_ORDER` environment variable for specifying which order to poll (default: TESTA20260825233427052)
+- Bounded polling session (~10 minutes budget)
+- Read-only discipline - only executes `order status` commands
+- Appends envelopes to recording file with globally monotonic sequence numbers
+- Stops immediately upon receiving TICKETED envelope
+
+**Usage:**
+```bash
+# Poll specific order
+export WAYPOINT_REPOLL_ORDER=TESTA20260830210123734
+python scripts/repoll_ticketed.py
+
+# Use default historical order
+python scripts/repoll_ticketed.py
+```
+
+```mermaid
+sequenceDiagram
+participant User as "User"
+participant Repoll as "repoll_ticketed.py"
+participant Env as "Environment Config"
+participant CLI as "atlas-flight CLI"
+participant Rec as "Recording file"
+User->>Repoll : Run repoll
+Repoll->>Env : Read WAYPOINT_REPOLL_ORDER
+loop Until TICKETED or budget exhausted
+Repoll->>CLI : order status --order-no ORDER_NO --json
+CLI-->>Repoll : Envelope response
+Repoll->>Rec : Append envelope with seq number
+alt TICKETED received
+Repoll-->>User : Success (exit 0)
+else Continue polling
+Repoll->>Repoll : Sleep 45 seconds
+end
+end
+Note over Repoll : Read-only, bounded session<br/>~10 minute budget
+```
+
+**Diagram sources**
+- [repoll_ticketed.py:38-41](file://backend/scripts/repoll_ticketed.py#L38-L41)
+- [repoll_ticketed.py:72-109](file://backend/scripts/repoll_ticketed.py#L72-L109)
+
+**Section sources**
+- [repoll_ticketed.py:1-119](file://backend/scripts/repoll_ticketed.py#L1-L119)
+
+### Enhanced Frontend UX
+**Updated** The frontend now provides clear state differentiation between different operational modes:
+
+- **"Live — booking for real"**: When running in live mode with actual bookings
+- **"Recorded — replaying a real sandbox ticket"**: When replaying recorded sessions  
+- **"Dry run — no real bookings yet"**: When in comparison/dry run mode
+
+This enhancement improves user understanding of the current operational state and prevents confusion about whether bookings are being made for real or just simulated.
+
+**Section sources**
+- [page.tsx:1215-1234](file://frontend/app/desk/[deskId]/page.tsx#L1215-L1234)
+- [page.tsx:528-534](file://frontend/app/desk/[deskId]/page.tsx#L528-L534)
 
 ### Integration Points
 - Mode selection: read_atlas_mode() strictly parses WAYPOINT_ATLAS_MODE; only exact "recorded" enables replay.
@@ -267,12 +354,14 @@ ROUTE --> |live| LC["AtlasClient"]
 RC --> LOOP["DeskAgent.run()"]
 LC --> LOOP
 LOOP --> META["Meta event: mode + disclosures"]
+LOOP --> FE["Frontend: State Differentiation"]
 ```
 
 **Diagram sources**
 - [config.py:28-38](file://backend/app/atlas/config.py#L28-L38)
 - [routes.py:97-113](file://backend/app/api/routes.py#L97-L113)
 - [loop.py:183-200](file://backend/app/agent/loop.py#L183-L200)
+- [page.tsx:1215-1234](file://frontend/app/desk/[deskId]/page.tsx#L1215-L1234)
 
 **Section sources**
 - [config.py:28-38](file://backend/app/atlas/config.py#L28-L38)
@@ -286,36 +375,46 @@ LOOP --> META["Meta event: mode + disclosures"]
   - Models for OrderStatus and related types
 - Manifest builder depends on recording file and outputs manifest.json
 - Capture script depends on AtlasClient and writes recording file
+- Repoll script depends on atlas-flight CLI and writes to recording file
 - API routes depend on config to select client
 - Loop depends on client interface and optional reset_ticketing_cache hook
+- **Frontend depends on meta events for state differentiation**
 
 ```mermaid
 graph TB
 RC["RecordedAtlasClient"] --> AC["AtlasClient"]
-RC --> MAN["manifest.json"]
+RC --> MAN["manifest.json<br/>Order: TESTA20260830210123734"]
 RC --> REC["booking_envelopes.json"]
 BLD["build_replay_manifest.py"] --> REC
 BLD --> MAN
 CAP["capture_booking.py"] --> REC
+CAP --> ENV["Environment Config"]
+REPOLL["repoll_ticketed.py"] --> REC
+REPOLL --> ENV
 RT["routes.py"] --> CFG["config.py"]
 RT --> RC
 RT --> AC
 LOOP["loop.py"] --> RC
 LOOP --> AC
+LOOP --> FE["Frontend UX"]
+FE --> STATE["State Differentiation"]
 ```
 
 **Diagram sources**
 - [recorded.py:1-235](file://backend/app/atlas/recorded.py#L1-L235)
 - [build_replay_manifest.py:1-210](file://backend/scripts/build_replay_manifest.py#L1-L210)
-- [capture_booking.py:1-384](file://backend/scripts/capture_booking.py#L1-L384)
+- [capture_booking.py:1-437](file://backend/scripts/capture_booking.py#L1-L437)
+- [repoll_ticketed.py:1-119](file://backend/scripts/repoll_ticketed.py#L1-L119)
 - [routes.py:97-113](file://backend/app/api/routes.py#L97-L113)
 - [config.py:28-38](file://backend/app/atlas/config.py#L28-L38)
 - [loop.py:183-200](file://backend/app/agent/loop.py#L183-L200)
+- [page.tsx:1215-1234](file://frontend/app/desk/[deskId]/page.tsx#L1215-L1234)
 
 **Section sources**
 - [recorded.py:1-235](file://backend/app/atlas/recorded.py#L1-L235)
 - [build_replay_manifest.py:1-210](file://backend/scripts/build_replay_manifest.py#L1-L210)
-- [capture_booking.py:1-384](file://backend/scripts/capture_booking.py#L1-L384)
+- [capture_booking.py:1-437](file://backend/scripts/capture_booking.py#L1-L437)
+- [repoll_ticketed.py:1-119](file://backend/scripts/repoll_ticketed.py#L1-L119)
 - [routes.py:97-113](file://backend/app/api/routes.py#L97-L113)
 - [config.py:28-38](file://backend/app/atlas/config.py#L28-L38)
 - [loop.py:183-200](file://backend/app/agent/loop.py#L183-L200)
@@ -324,6 +423,9 @@ LOOP --> AC
 - Deterministic replay eliminates network latency and subprocess overhead; performance is bounded by file I/O and Python parsing.
 - Per-cycle rewind ensures consistent replay cost across cycles.
 - Search and write paths reuse inherited parsers, avoiding duplicated logic and ensuring predictable performance characteristics.
+- **Enhanced timeouts improve capture reliability** by accommodating slower sandbox responses without premature failures.
+- **Improved routing reduces capture failures** by using a more reliable sandbox route (DUR->CPT).
+- **Flexible repoll capabilities** allow targeted polling of specific orders without affecting other test scenarios.
 
 [No sources needed since this section provides general guidance]
 
@@ -334,15 +436,23 @@ Common issues and resolutions:
 - Composite recording without TICKETED: The replay ends honestly with the captured state; do not expect a TICKETED envelope unless captured.
 - Time-related failures in polling: Recorded poll_until_ticketed does not sleep or use time; exhaustion leads to NO_RECORDING if the script ends before TICKETED.
 - Subprocess tripwires: Tests assert zero subprocess spawns in recorded mode; if subprocess calls occur, ensure RecordedAtlasClient is selected and no live path is invoked.
+- **Capture failures**: Verify environment variables (WAYPOINT_CAPTURE_ROUTE, WAYPOINT_CAPTURE_DEPART, WAYPOINT_CAPTURE_ADULTS) are set correctly.
+- **Timeout issues**: Ensure PAY_WRITE_TIMEOUT_SECONDS and TICKETED_POLL_DEADLINE_SECONDS are appropriately configured for your sandbox environment.
+- **Repoll failures**: Check that WAYPOINT_REPOLL_ORDER is set to a valid order number and atlas-flight CLI is available on PATH.
+- **Order-specific issues**: Use WAYPOINT_REPOLL_ORDER to target specific orders for polling when dealing with multiple concurrent test scenarios.
 
 **Section sources**
 - [test_recorded_mode.py:171-189](file://backend/tests/test_recorded_mode.py#L171-L189)
 - [test_recorded_mode.py:134-147](file://backend/tests/test_recorded_mode.py#L134-L147)
 - [test_recorded_mode.py:149-169](file://backend/tests/test_recorded_mode.py#L149-L169)
 - [test_recorded_mode.py:191-210](file://backend/tests/test_recorded_mode.py#L191-L210)
+- [capture_booking.py:71-112](file://backend/scripts/capture_booking.py#L71-L112)
+- [repoll_ticketed.py:38-41](file://backend/scripts/repoll_ticketed.py#L38-L41)
 
 ## Conclusion
 The Recorded Mode Engine delivers a robust, deterministic replay capability for the Atlas ticketing subsystem. It preserves all parsing and business logic while replacing transport with recorded envelopes, enforcing strict honesty rules, and providing clear wire disclosures. The design minimizes risk by failing closed on missing artifacts or unscripted calls and ensures reproducibility across cycles.
+
+**Enhanced** with improved capture reliability through better sandbox routing, extended timeouts, enhanced frontend UX that clearly differentiates between live, recorded, and dry run modes, and flexible repoll capabilities for completing pending orders. The latest recording features order TESTA20260830210123734 with a streamlined booking workflow that successfully captures complete booking flows.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -352,8 +462,23 @@ The Recorded Mode Engine delivers a robust, deterministic replay capability for 
 - Set environment variables to enable recorded mode and allow comparison-mode execution where appropriate.
 - Seed a desk and stream events to observe the recorded cycle.
 
+**Updated** Capture configuration options:
+- `WAYPOINT_CAPTURE_ROUTE`: Configure flight route (default: "DUR-CPT")
+- `WAYPOINT_CAPTURE_DEPART`: Set departure date (default: "2026-09-20")  
+- `WAYPOINT_CAPTURE_ADULTS`: Specify number of adults (default: "2")
+- `PAY_WRITE_TIMEOUT_SECONDS`: Adjust payment timeout (default: 240s)
+- `TICKETED_POLL_DEADLINE_SECONDS`: Set ticketing poll deadline (default: 600s)
+
+**New** Repoll configuration options:
+- `WAYPOINT_REPOLL_ORDER`: Specify order number to poll (default: TESTA20260825233427052)
+- `DEADLINE_SECONDS`: Overall polling budget (default: 600s)
+- `READ_TIMEOUT_SECONDS`: Individual read timeout (default: 180s)
+- `POLL_INTERVAL_SECONDS`: Interval between polls (default: 45s)
+
 **Section sources**
 - [10-s9-recorded-mode.md:63-72](file://docs/plans/waypoint/10-s9-recorded-mode.md#L63-L72)
+- [capture_booking.py:71-112](file://backend/scripts/capture_booking.py#L71-L112)
+- [repoll_ticketed.py:38-41](file://backend/scripts/repoll_ticketed.py#L38-L41)
 
 ### Test Evidence
 - Unit tests validate strict mode parsing, identical parsing through live parsers, fail-closed behavior, contract drift guard, and determinism across two cycles.
@@ -364,3 +489,19 @@ The Recorded Mode Engine delivers a robust, deterministic replay capability for 
 - [test_recorded_mode.py:134-147](file://backend/tests/test_recorded_mode.py#L134-L147)
 - [test_recorded_mode.py:191-210](file://backend/tests/test_recorded_mode.py#L191-L210)
 - [test_recorded_determinism.py:153-184](file://backend/tests/test_recorded_determinism.py#L153-L184)
+
+### Latest Recording Details
+**Updated** The current manifest contains order TESTA20260830210123734 with a streamlined booking workflow:
+
+- **Order Number**: TESTA20260830210123734
+- **Composite Status**: true (no TICKETED envelope captured)
+- **Ticketing Captured**: false (sandbox flapped during capture)
+- **Script Steps**: auth status → search → offer verify → order create → order pay
+- **Captured Inventory**: 8 sequential envelopes ending in TICKETING_PENDING status
+- **Wire Disclosure**: Records the composite nature of the capture with honest disclosure about missing TICKETED envelope
+
+This recording demonstrates the engine's ability to handle incomplete captures gracefully while maintaining strict honesty guarantees about what was actually observed versus what might be inferred.
+
+**Section sources**
+- [manifest.json:1-96](file://backend/data/recorded/manifest.json#L1-L96)
+- [build_replay_manifest.py:173-197](file://backend/scripts/build_replay_manifest.py#L173-L197)

@@ -14,6 +14,7 @@
 - [loop.py](file://backend/app/agent/loop.py)
 - [routes.py](file://backend/app/api/routes.py)
 - [models.py](file://backend/app/models.py)
+- [capture_booking.py](file://backend/scripts/capture_booking.py)
 - [test_atlas_sandbox_live.py](file://backend/tests/test_atlas_sandbox_live.py)
 - [test_atlas_mapping.py](file://backend/tests/test_atlas_mapping.py)
 - [test_atlas_write_path.py](file://backend/tests/test_atlas_write_path.py)
@@ -23,12 +24,9 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced with complete S2 Atlas write path implementation including verification, price confirmation, order creation, payment processing, and seat management
-- Added comprehensive error handling with typed exceptions (AtlasError, AtlasNoResults, AtlasQueryOnly, AtlasUnknownOrder) and robust retry logic for read-only operations while preventing retries on write operations
-- Updated API endpoint documentation to include full booking lifecycle beyond read-only search
-- Enhanced architecture diagrams to show complete write-path flow with conditional branches and error handling
-- Added detailed sections on structured response types, idempotency enforcement, and query-only signal handling
-- Documented the complete desk cycle execution pattern with guard rails and fallback mechanisms for the write path
+- Enhanced Atlas client pay() method now accepts optional timeout parameter for individual calls, allowing extended timeouts specifically for payment operations while maintaining standard timeouts elsewhere
+- Updated documentation to reflect improved booking capture tooling with better handling of slow sandbox responses
+- Added comprehensive timeout configuration guidance for different operational scenarios
 
 ## Table of Contents
 1. Introduction
@@ -69,6 +67,7 @@ ADR["docs/adr/0001-fork-atlas-skill-sandbox-auto-approve.md"]
 end
 subgraph "Production Client"
 CLIENT["backend/app/atlas/client.py"]
+CAPTURE["backend/scripts/capture_booking.py"]
 TESTS["backend/tests/test_*.py"]
 MODELS["backend/app/models.py"]
 LOOP["backend/app/agent/loop.py"]
@@ -81,6 +80,7 @@ EXT --> PLAN
 PLAN --> ADR
 CLIENT --> TESTS
 CLIENT --> MODELS
+CLIENT --> CAPTURE
 LOOP --> CLIENT
 ```
 
@@ -93,7 +93,8 @@ LOOP --> CLIENT
 - [atlas-integration.md:1-37](file://docs/external/atlas-integration.md#L1-L37)
 - [03-program-design.md:36-162](file://docs/plans/waypoint/03-program-design.md#L36-L162)
 - [0001-fork-atlas-skill-sandbox-auto-approve.md:1-29](file://docs/adr/0001-fork-atlas-skill-sandbox-auto-approve.md#L1-L29)
-- [client.py:1-526](file://backend/app/atlas/client.py#L1-L526)
+- [client.py:1-565](file://backend/app/atlas/client.py#L1-L565)
+- [capture_booking.py:1-437](file://backend/scripts/capture_booking.py#L1-L437)
 - [loop.py:1-696](file://backend/app/agent/loop.py#L1-L696)
 
 **Section sources**
@@ -101,7 +102,8 @@ LOOP --> CLIENT
 - [atlas-integration.md:1-37](file://docs/external/atlas-integration.md#L1-L37)
 - [03-program-design.md:36-162](file://docs/plans/waypoint/03-program-design.md#L36-L162)
 - [0001-fork-atlas-skill-sandbox-auto-approve.md:1-29](file://docs/adr/0001-fork-atlas-skill-sandbox-auto-approve.md#L1-L29)
-- [client.py:1-526](file://backend/app/atlas/client.py#L1-L526)
+- [client.py:1-565](file://backend/app/atlas/client.py#L1-L565)
+- [capture_booking.py:1-437](file://backend/scripts/capture_booking.py#L1-L437)
 - [loop.py:1-696](file://backend/app/agent/loop.py#L1-L696)
 
 ## Core Components
@@ -116,18 +118,19 @@ Key behaviors:
 - Search responses include segments with airport codes and times; client-side filtering is required for direct-only routes.
 - Offer pricing states determine bookability; only offers with current or verified price status can proceed to order.
 - **Enhanced**: Complete booking workflow with formalized error handling codes, structured response types, comprehensive guard rails, and idempotency enforcement throughout the process.
+- **Enhanced**: Configurable timeout support for payment operations to handle slow sandbox responses.
 
 **Section sources**
 - [atlas-integration.md:5-21](file://docs/external/atlas-integration.md#L5-L21)
 - [atlas-integration.md:23-37](file://docs/external/atlas-integration.md#L23-L37)
 - [03-program-design.md:71-80](file://docs/plans/waypoint/03-program-design.md#L71-L80)
 - [0001-fork-atlas-skill-sandbox-auto-approve.md:6-29](file://docs/adr/0001-fork-atlas-skill-sandbox-auto-approve.md#L6-L29)
-- [client.py:186-526](file://backend/app/atlas/client.py#L186-L526)
+- [client.py:186-565](file://backend/app/atlas/client.py#L186-L565)
 
 ## Architecture Overview
 Waypoint integrates with Atlas via a production-ready client that wraps the Atlas CLI through subprocess calls. The architecture uses the installed atlas-flight tool which handles all authentication via OS keyring, eliminating the need for secret management in the application layer. The flow starts with search, proceeds to verify and order, then pays in sandbox with auto-approval, and finally queries order details to assert ticket issuance. Webhooks from Atlas can trigger incident handling, with a fallback to simulated cancellation when webhooks are unavailable.
 
-**Enhanced**: The complete booking workflow now includes comprehensive error handling with typed exceptions, robust retry logic for read-only operations, strict idempotency enforcement for write operations, and conditional branches for price increases, seat selection, and payment confirmation.
+**Enhanced**: The complete booking workflow now includes comprehensive error handling with typed exceptions, robust retry logic for read-only operations, strict idempotency enforcement for write operations, conditional branches for price increases, seat selection, and payment confirmation, and configurable timeout support for handling slow sandbox responses.
 
 ```mermaid
 sequenceDiagram
@@ -160,9 +163,9 @@ RA->>AC : "follow_up_query_only(signal)"
 AC->>CLI : "execute order status"
 CLI-->>AC : "OrderStatus"
 else "normal flow"
-RA->>AC : "pay(payment_confirmation_id)"
+RA->>AC : "pay(payment_confirmation_id, timeout=extended_timeout)"
 alt "sandbox auto-approve"
-AC->>CLI : "execute order pay (auto-approve)"
+AC->>CLI : "execute order pay (auto-approve, extended timeout)"
 CLI-->>AC : "payment success"
 else "production"
 AC->>CLI : "execute order pay (human confirm)"
@@ -182,7 +185,8 @@ Note over WP,ATLAS : "Webhooks from Atlas may notify incidents<br/>Fallback : si
 - [atlas-integration.md:33-37](file://docs/external/atlas-integration.md#L33-L37)
 - [03-program-design.md:82-111](file://docs/plans/waypoint/03-program-design.md#L82-L111)
 - [0001-fork-atlas-skill-sandbox-auto-approve.md:11-29](file://docs/adr/0001-fork-atlas-skill-sandbox-auto-approve.md#L11-L29)
-- [client.py:331-526](file://backend/app/atlas/client.py#L331-L526)
+- [client.py:331-565](file://backend/app/atlas/client.py#L331-L565)
+- [capture_booking.py:367-395](file://backend/scripts/capture_booking.py#L367-L395)
 - [loop.py:454-599](file://backend/app/agent/loop.py#L454-L599)
 
 ## Detailed Component Analysis
@@ -198,6 +202,7 @@ Note over WP,ATLAS : "Webhooks from Atlas may notify incidents<br/>Fallback : si
 - **Robust Retry Logic**: Read-only operations support at most one identical retry when envelope indicates `retryable=true`; write operations are never retried even if `retryable=true` appears.
 - **Idempotency Enforcement**: Critical write operations (order create, order pay, seat select) are never retried to prevent duplicate bookings or payments.
 - **Graceful Degradation**: Malformed offers are skipped rather than crashing the entire search operation, ensuring partial results are still returned.
+- **Enhanced**: Configurable Timeout Support: The `pay()` method now accepts an optional timeout parameter that allows extending timeouts specifically for payment operations while maintaining standard timeouts elsewhere. This supports improved booking capture tooling with better handling of slow sandbox responses.
 
 Operational guidance:
 - The client is injectable for testing purposes, allowing deterministic test scenarios without live Atlas calls.
@@ -205,11 +210,13 @@ Operational guidance:
 - The search operation runs asynchronously via `asyncio.to_thread()` to prevent blocking the event loop.
 - **Enhanced**: Write-path methods follow strict idempotency rules - never retry order creation or payment operations.
 - **Enhanced**: Query-only signals (PRICE_CHANGED, ORDER_CREATION_UNKNOWN, PAYMENT_STATUS_UNKNOWN) require following up with order status queries instead of re-executing writes.
+- **Enhanced**: Payment operations can use extended timeouts (default 90 seconds, configurable up to 240 seconds for capture tooling) to handle slow sandbox responses.
 
 **Section sources**
-- [client.py:1-526](file://backend/app/atlas/client.py#L1-L526)
+- [client.py:1-565](file://backend/app/atlas/client.py#L1-L565)
+- [capture_booking.py:101-107](file://backend/scripts/capture_booking.py#L101-L107)
 - [test_atlas_mapping.py:1-209](file://backend/tests/test_atlas_mapping.py#L1-L209)
-- [test_atlas_write_path_unit.py:1-500](file://backend/tests/test_atlas_write_path_unit.py#L1-L500)
+- [test_atlas_write_path_unit.py:1-543](file://backend/tests/test_atlas_write_path_unit.py#L1-L543)
 - [03-program-design.md:71-80](file://docs/plans/waypoint/03-program-design.md#L71-L80)
 
 ### Sandbox Configuration and Authentication
@@ -268,7 +275,7 @@ Operational guidance:
   - Verify: `offer verify --offer-id` returns price change information and booking ID
   - Confirm Price: `booking confirm-price --booking-id` for price increase approval
   - Create Order: `order create --booking-id` with passenger JSON input
-  - Pay: `order pay` with payment confirmation ID from create response
+  - Pay: `order pay` with payment confirmation ID from create response, now supporting optional timeout parameter
   - Order Status: `order status` polling until TICKETED
   - Seat Select: `booking seat select` pre-order seat selection
 
@@ -278,11 +285,13 @@ Data notes:
 - **Enhanced**: Offers are sorted cheapest-first and include comprehensive segment information with layover calculations.
 - **Enhanced**: Structured response types (VerifyResult, OrderRef, OrderStatus, SeatSelection) provide type-safe interactions.
 - **Enhanced**: Comprehensive error handling with typed exceptions and query-only signal handling.
+- **Enhanced**: Payment operations now support configurable timeouts to handle slow sandbox responses.
 
 **Section sources**
 - [atlas-integration.md:15-21](file://docs/external/atlas-integration.md#L15-L21)
 - [atlas-integration.md:33-37](file://docs/external/atlas-integration.md#L33-L37)
-- [client.py:331-526](file://backend/app/atlas/client.py#L331-L526)
+- [client.py:331-565](file://backend/app/atlas/client.py#L331-L565)
+- [capture_booking.py:367-395](file://backend/scripts/capture_booking.py#L367-L395)
 - [03-program-design.md:71-80](file://docs/plans/waypoint/03-program-design.md#L71-L80)
 
 ### Formalized Error Handling Codes and Typed Exceptions
@@ -308,7 +317,7 @@ Best practices:
 - Centralized error mapping to consistent error types with descriptive codes.
 - Structured logging including endpoint, request IDs, and error codes.
 - User-facing guidance for known failure modes (e.g., ticketing activation required).
-- **Enhanced**: Subprocess timeout handling with configurable timeouts (default 60 seconds for reads, 90 seconds for writes).
+- **Enhanced**: Subprocess timeout handling with configurable timeouts (default 60 seconds for reads, 90 seconds for writes, extendable to 240 seconds for capture tooling).
 - **Enhanced**: Strict idempotency enforcement - never retry order creation or payment operations.
 - **Enhanced**: Query-only signal handling - never re-create orders or re-pay when uncertainty signals are received.
 
@@ -316,7 +325,8 @@ Best practices:
 - [error-handling.md:1-200](file://.agents/skills/atlas-flight-booking/references/error-handling.md#L1-L200)
 - [atlas-integration.md:26-32](file://docs/external/atlas-integration.md#L26-L32)
 - [client.py:73-106](file://backend/app/atlas/client.py#L73-L106)
-- [client.py:331-526](file://backend/app/atlas/client.py#L331-L526)
+- [client.py:331-565](file://backend/app/atlas/client.py#L331-L565)
+- [capture_booking.py:101-107](file://backend/scripts/capture_booking.py#L101-L107)
 - [models.py:154-218](file://backend/app/models.py#L154-L218)
 - [03-program-design.md:52-58](file://docs/plans/waypoint/03-program-design.md#L52-L58)
 
@@ -344,7 +354,7 @@ Operational guidance:
 - Use passenger input patterns to construct valid requests and handle optional fields.
 - **Enhanced**: Ensure segment mapping and time parsing align with expected formats; validate layover calculations based on arrival/departure times using full datetime arithmetic.
 - **Enhanced**: Seat selection workflow with fallback handling for unavailable seats.
-- **Enhanced**: Payment confirmation workflow with explicit user approval requirements.
+- **Enhanced**: Payment confirmation workflow with explicit user approval requirements and configurable timeout support.
 - **Enhanced**: Query-only signal handling for uncertain states requiring order status follow-up.
 
 Operational guidance:
@@ -355,11 +365,13 @@ Operational guidance:
 - **Enhanced**: Implement seat selection with continue-without-seat fallback policy.
 - **Enhanced**: Enforce explicit payment confirmation before executing payment operations.
 - **Enhanced**: Handle uncertain states (PRICE_CHANGED, ORDER_CREATION_UNKNOWN) with appropriate query-only follow-up procedures.
+- **Enhanced**: Configure appropriate timeouts for payment operations based on expected response times.
 
 **Section sources**
 - [booking-workflow.md:1-46](file://.agents/skills/atlas-flight-booking/references/booking-workflow.md#L1-L46)
 - [passenger-input.md:1-200](file://.agents/skills/atlas-flight-booking/references/passenger-input.md#L1-L200)
-- [client.py:331-526](file://backend/app/atlas/client.py#L331-L526)
+- [client.py:331-565](file://backend/app/atlas/client.py#L331-L565)
+- [capture_booking.py:367-395](file://backend/scripts/capture_booking.py#L367-L395)
 - [03-program-design.md:97-107](file://docs/plans/waypoint/03-program-design.md#L97-L107)
 
 ### Enhanced Integration with Recovery Agent
@@ -416,7 +428,7 @@ PriceCheck --> |Increased| ConfirmPrice["Confirm Price Increase"]
 PriceCheck --> |Unchanged/Decreased| SeatSelect["Seat Selection"]
 ConfirmPrice --> SeatSelect
 SeatSelect --> CreateOrder["Create Order"]
-CreateOrder --> Pay{"Pay"}
+CreateOrder --> Pay{"Pay with Extended Timeout"}
 Pay --> |Sandbox| AutoApprove["Auto-approve Payment"]
 Pay --> |Production| HumanConfirm["Require Human Confirmation"]
 Pay --> |Uncertain State| QueryOnly["Query Order Status"]
@@ -435,7 +447,7 @@ Success --> End
 
 ## Dependency Analysis
 Waypoint depends on:
-- **Enhanced**: Production-Ready AtlasClient: Provides subprocess-based communication with the atlas-flight CLI, handling all authentication and error management internally with complete S2 write-path support, typed exceptions, and robust retry logic.
+- **Enhanced**: Production-Ready AtlasClient: Provides subprocess-based communication with the atlas-flight CLI, handling all authentication and error management internally with complete S2 write-path support, typed exceptions, robust retry logic, and configurable timeout support.
 - Atlas CLI (atlas-flight): Executed via subprocess calls, leveraging installed tool's authentication and configuration.
 - OS Keyring: Stores OAuth tokens and credentials securely, accessed by the atlas-flight CLI.
 - Webhook Infrastructure: Receives incident notifications from Atlas.
@@ -452,6 +464,7 @@ WEBHOOK["Webhook Receiver"]
 ATLAS["Atlas Services"]
 TYPES["Response Types"]
 EXCEPTIONS["Typed Exceptions"]
+CAPTURE["Capture Tooling"]
 WP --> RA
 RA --> AC
 AC --> CLI
@@ -461,13 +474,15 @@ WEBHOOK --> WP
 ATLAS --> WEBHOOK
 AC --> TYPES
 AC --> EXCEPTIONS
+AC --> CAPTURE
 ```
 
 **Diagram sources**
 - [atlas-integration.md:5-21](file://docs/external/atlas-integration.md#L5-L21)
 - [03-program-design.md:52-58](file://docs/plans/waypoint/03-program-design.md#L52-L58)
 - [0001-fork-atlas-skill-sandbox-auto-approve.md:11-29](file://docs/adr/0001-fork-atlas-skill-sandbox-auto-approve.md#L11-L29)
-- [client.py:186-526](file://backend/app/atlas/client.py#L186-L526)
+- [client.py:186-565](file://backend/app/atlas/client.py#L186-L565)
+- [capture_booking.py:1-437](file://backend/scripts/capture_booking.py#L1-L437)
 - [loop.py:35-696](file://backend/app/agent/loop.py#L35-L696)
 - [models.py:154-218](file://backend/app/models.py#L154-L218)
 
@@ -475,7 +490,8 @@ AC --> EXCEPTIONS
 - [atlas-integration.md:5-21](file://docs/external/atlas-integration.md#L5-L21)
 - [03-program-design.md:52-58](file://docs/plans/waypoint/03-program-design.md#L52-L58)
 - [0001-fork-atlas-skill-sandbox-auto-approve.md:11-29](file://docs/adr/0001-fork-atlas-skill-sandbox-auto-approve.md#L11-L29)
-- [client.py:1-526](file://backend/app/atlas/client.py#L1-L526)
+- [client.py:1-565](file://backend/app/atlas/client.py#L1-L565)
+- [capture_booking.py:1-437](file://backend/scripts/capture_booking.py#L1-L437)
 - [models.py:154-218](file://backend/app/models.py#L154-L218)
 
 ## Performance Considerations
@@ -485,11 +501,12 @@ AC --> EXCEPTIONS
 - Monitor rate limits and implement queuing/backoff to prevent throttling-induced latency spikes.
 - Optimize webhook processing to handle bursts of incident notifications without blocking core booking flows.
 - **Enhanced**: Subprocess calls are executed asynchronously to prevent blocking the main event loop.
-- **Enhanced**: Configurable timeouts (60 seconds for reads, 90 seconds for writes) prevent hanging subprocesses.
+- **Enhanced**: Configurable timeouts (60 seconds for reads, 90 seconds for writes, extendable to 240 seconds for capture tooling) prevent hanging subprocesses while accommodating slow sandbox responses.
 - **Enhanced**: Graceful handling of malformed offers ensures partial results are still processed.
 - **Enhanced**: Meter-gated search operations prevent system overload during high-volume scenarios.
 - **Enhanced**: Idempotency enforcement reduces redundant network calls for critical operations.
 - **Enhanced**: Robust retry logic for read-only operations improves resilience without risking write consistency.
+- **Enhanced**: Payment timeout configuration allows balancing between responsiveness and reliability for slow sandbox responses.
 
 [No sources needed since this section provides general guidance]
 
@@ -501,40 +518,43 @@ Common issues and resolutions:
 - Webhook Failures: Inspect registration and payload validation; log failures and route to fallback simulation if necessary.
 - Rate Limiting: Observe retry policies and backoff strategies; adjust concurrency to stay within limits.
 - Network Errors: Implement retries with exponential backoff; surface diagnostic information including endpoint and error codes.
-- **Enhanced**: Subprocess Timeouts: Configure appropriate timeouts based on expected Atlas response times; monitor for slow network conditions.
+- **Enhanced**: Subprocess Timeouts: Configure appropriate timeouts based on expected Atlas response times; monitor for slow network conditions. Payment operations can use extended timeouts (up to 240 seconds) for capture tooling to handle slow sandbox responses.
 - **Enhanced**: Write-Path Errors: Check structured error codes from VerifyResult, OrderRef, and other response types for specific failure reasons.
-- **Enhanced**: Payment Confirmation Issues: Ensure payment confirmation IDs are used exactly once and never reused across different orders.
+- **Enhanced**: Payment Confirmation Issues: Ensure payment confirmation IDs are used exactly once and never reused across different orders. Configure appropriate timeouts for payment operations based on expected response times.
 - **Enhanced**: Query-Only Signal Handling: When receiving PRICE_CHANGED, ORDER_CREATION_UNKNOWN, or PAYMENT_STATUS_UNKNOWN, follow up with order status queries instead of re-executing writes.
 
 Debugging techniques:
 - Enable structured logging for all Atlas interactions, including request/response summaries and error traces.
 - Use environment-specific logs to distinguish sandbox vs production behavior.
 - Validate webhook delivery and signature verification; test with mock payloads.
-- **Enhanced**: Monitor subprocess execution times and error outputs for performance tuning.
+- **Enhanced**: Monitor subprocess execution times and error outputs for performance tuning. Configure appropriate timeouts based on observed response patterns.
 - **Enhanced**: Test datetime parsing with various upstream formats to ensure compatibility.
 - **Enhanced**: Trace complete booking workflow execution with detailed logging at each stage.
 - **Enhanced**: Monitor meter usage and step counts to identify performance bottlenecks.
 - **Enhanced**: Track typed exception propagation and error code distribution for better operational visibility.
+- **Enhanced**: Monitor payment timeout configurations and adjust based on sandbox response patterns.
 
 Monitoring approaches:
 - Track metrics for search, verify, order, pay, and query endpoints (latency, success rates, error categories).
 - Alert on ticketing activation status changes and webhook delivery failures.
 - Correlate incidents with webhook events and fallback activations.
-- **Enhanced**: Monitor subprocess health and resource usage to prevent memory leaks or zombie processes.
+- **Enhanced**: Monitor subprocess health and resource usage to prevent memory leaks or zombie processes. Track timeout configurations and their effectiveness.
 - **Enhanced**: Track error code distribution for better operational visibility.
 - **Enhanced**: Monitor complete booking workflow completion rates and failure points.
 - **Enhanced**: Track P&L and losses admitted for financial accountability.
 - **Enhanced**: Monitor query-only signal frequency and resolution rates for operational insights.
+- **Enhanced**: Monitor payment timeout configurations and adjust based on observed response patterns.
 
 **Section sources**
 - [atlas-integration.md:26-32](file://docs/external/atlas-integration.md#L26-L32)
 - [error-handling.md:1-200](file://.agents/skills/atlas-flight-booking/references/error-handling.md#L1-L200)
-- [client.py:186-526](file://backend/app/atlas/client.py#L186-L526)
+- [client.py:186-565](file://backend/app/atlas/client.py#L186-L565)
+- [capture_booking.py:101-107](file://backend/scripts/capture_booking.py#L101-L107)
 - [test_atlas_sandbox_live.py:1-35](file://backend/tests/test_atlas_sandbox_live.py#L1-L35)
-- [test_atlas_write_path_unit.py:1-500](file://backend/tests/test_atlas_write_path_unit.py#L1-L500)
+- [test_atlas_write_path_unit.py:1-543](file://backend/tests/test_atlas_write_path_unit.py#L1-L543)
 - [03-program-design.md:113-131](file://docs/plans/waypoint/03-program-design.md#L113-L131)
 
 ## Conclusion
-The Waypoint integration leverages a production-ready AtlasClient implementation that provides robust, subprocess-based communication with the Atlas Flight Booking system. The client handles authentication via OS keyring, provides comprehensive error handling with custom typed exceptions, and includes sophisticated datetime parsing for multiple formats. Combined with the forked Atlas Skill library's sandbox-only auto-approval capabilities and careful environment management, the integration delivers reliable flight search functionality while maintaining strict security boundaries. The enhanced S2 write path implementation now supports the complete booking workflow from search through ticketed confirmation with formalized error handling codes, structured response types, comprehensive guard rails, robust retry logic for read-only operations, and strict idempotency enforcement for write operations. The modular architecture supports future expansion and the desk cycle execution pattern ensures safe deployment and effective troubleshooting across environments. Adhering to the documented workflows, monitoring practices, and security safeguards ensures reliable operation of the complete booking lifecycle with comprehensive error handling and operational resilience.
+The Waypoint integration leverages a production-ready AtlasClient implementation that provides robust, subprocess-based communication with the Atlas Flight Booking system. The client handles authentication via OS keyring, provides comprehensive error handling with custom typed exceptions, and includes sophisticated datetime parsing for multiple formats. Combined with the forked Atlas Skill library's sandbox-only auto-approval capabilities and careful environment management, the integration delivers reliable flight search functionality while maintaining strict security boundaries. The enhanced S2 write path implementation now supports the complete booking workflow from search through ticketed confirmation with formalized error handling codes, structured response types, comprehensive guard rails, robust retry logic for read-only operations, strict idempotency enforcement for write operations, and configurable timeout support for handling slow sandbox responses. The modular architecture supports future expansion and the desk cycle execution pattern ensures safe deployment and effective troubleshooting across environments. Adhering to the documented workflows, monitoring practices, and security safeguards ensures reliable operation of the complete booking lifecycle with comprehensive error handling and operational resilience.
 
 [No sources needed since this section summarizes without analyzing specific files]
