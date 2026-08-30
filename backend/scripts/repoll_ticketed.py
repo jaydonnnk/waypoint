@@ -24,6 +24,7 @@ Run from the backend directory:  python scripts/repoll_ticketed.py
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -34,7 +35,10 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_ROOT))
 
 RECORDING_PATH = BACKEND_ROOT / "data" / "recorded" / "booking_envelopes.json"
-ORDER_NO = "TESTA20260825233427052"
+# The order to re-poll. Override via env for a fresh capture's pending
+# order; the historical default is the Slice 0 order this script was
+# first written for.
+ORDER_NO = os.environ.get("WAYPOINT_REPOLL_ORDER", "TESTA20260825233427052")
 
 # Overall budget for the whole re-poll session (~10 minutes, per the plan).
 DEADLINE_SECONDS = 600.0

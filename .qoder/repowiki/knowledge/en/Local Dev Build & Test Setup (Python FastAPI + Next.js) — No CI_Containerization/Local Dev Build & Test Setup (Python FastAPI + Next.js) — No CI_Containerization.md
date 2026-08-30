@@ -15,12 +15,12 @@ source_files:
 
 ## What system/approach is used
 
-For local development, each subproject manages its own dependencies and uses the framework's built-in tooling (containerization and deployment are covered by the "Docker-based Multi-Service Build & Deployment (Recorded vs Live Backend Images)" knowledge card; this card covers local dev only):
+This repository has no centralized build orchestration (no Makefile, no Dockerfile, no CI pipeline). Each subproject manages its own dependencies and uses the framework's built-in tooling:
 
 - **Backend** (`backend/`): Python FastAPI application. Dependencies are pinned via `requirements.txt`. The server is run with `uvicorn` (declared as a dependency). Tests are executed with `pytest`, configured in `pytest.ini`.
 - **Frontend** (`frontend/`): Next.js 15 / React 19 app. Build/dev/start commands are declared in `package.json` scripts (`next dev`, `next build`, `next start`).
 
-Locally, developers run each subproject directly with its framework's native commands (e.g., `uvicorn` for the backend, `next dev`/`next start` for the frontend); containerized builds and deployment are handled by the per-service Dockerfiles and `docker-compose.yml` (see the Docker deployment card).
+There is no cross-compilation, container image, or release artifact produced by this repo. Deployment is assumed to happen outside the repository (e.g., manually running `uvicorn` and `next start` on a host).
 
 ## Key files and packages
 
@@ -36,7 +36,7 @@ Locally, developers run each subproject directly with its framework's native com
 - **Per-subproject dependency management**: each language stack keeps its own manifest (`requirements.txt` for Python, `package.json` + `package-lock.json` for Node). There is no monorepo-level lockfile or workspace manager.
 - **Framework-native tooling**: the backend relies on `uvicorn` directly rather than a WSGI/ASGI entrypoint script; the frontend relies on `next build`/`next start` rather than a custom webpack config.
 - **Test isolation convention**: integration tests that touch external services are marked with `@pytest.mark.live` and require opt-in execution via `pytest -m live`; they also need keyring-based auth for the Atlas sandbox.
-- **No shared local build root**: for day-to-day development there is no top-level `Makefile` or `build.sh`; developers enter each subdirectory and run the framework's native commands. Container orchestration lives in the per-service `Dockerfile`s and `docker-compose.yml` (covered by the Docker deployment card).
+- **No shared build root**: there is no top-level `Makefile`, `build.sh`, `Dockerfile`, or CI directory. Developers are expected to enter each subdirectory and run the framework's native commands.
 
 ## Conventions and constraints
 
@@ -44,4 +44,4 @@ Locally, developers run each subproject directly with its framework's native com
 - Frontend dependencies are pinned by `package-lock.json`; versions are specified exactly in `package.json` (e.g., `next: 15.5.23`, `react: 19.2.8`).
 - Tests that call external APIs must be explicitly opted into via the `live` marker; default `pytest` runs do not hit the Atlas sandbox.
 - Environment variables for the backend are loaded from `backend/.env`; secrets are excluded from version control via `.gitignore`.
-- Locally there is no automated packaging or version bumping step; containerized deployment is handled separately via `docker-compose.yml` (see the Docker deployment card).
+- There is no automated packaging, version bumping, or deployment step defined in this repository.

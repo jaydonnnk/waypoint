@@ -2,11 +2,17 @@
 
 Slice 0 of the Recorded-Mode Engine plan: drives ONE real sandbox booking
 (search -> verify -> [confirm-price if increased] -> create -> pay ->
-poll until TICKETED) on the confirmed-live UAT route SIN->NRT 2026-09-04
-(2 adults), while a subclass of AtlasClient tees every raw CLI envelope
-to backend/data/recorded/booking_envelopes.json (JSON-lines) BEFORE any
-parse decision is made. The recording feeds S9's RecordedAtlasClient
-replay fixture.
+poll until TICKETED) on ATRIP's blessed Flight Booking UAT reference route
+(default DIRECT leg FA DUR->CPT; override via WAYPOINT_CAPTURE_ROUTE /
+_DEPART / _ADULTS), while a subclass of AtlasClient tees every raw CLI
+envelope to backend/data/recorded/booking_envelopes.json (JSON-lines)
+BEFORE any parse decision is made. The recording feeds S9's
+RecordedAtlasClient replay fixture.
+
+The original SIN->NRT 2-adult default gave rich inventory but never left
+TICKETING_PENDING (2026-08-25) and tripped PASSENGER_INFO_INVALID; the
+blessed UAT route plus a widened pay timeout and a 10-min TICKETED poll
+window (see the *_SECONDS consts below) target a clean TICKETED capture.
 
 Transport tee discipline (same surface S9 will override):
 - `_run_json` tees every envelope returned by ONE subprocess (writes and
@@ -62,16 +68,48 @@ from app.models import OrderStatus  # noqa: E402
 # discloses any composite recording).
 RECORDING_PATH = BACKEND_ROOT / "data" / "recorded" / "booking_envelopes.json"
 
-# The ONE capture route (confirmed live sandbox inventory 2026-08-25).
-ORIGIN, DESTINATION = "SIN", "NRT"
-DEPART = date(2026, 9, 4)
-ADULTS = 2
+# The capture route. Default: ATRIP's blessed Flight Booking UAT reference
+# route, DIRECT leg FA DUR->CPT — the route ATRIP guarantees tickets in
+# sandbox, so a clean TICKETED capture is far more likely than the old
+# SIN->NRT default (rich inventory, but that route's run never left
+# TICKETING_PENDING).
+#
+# ADULTS defaults to 2 — Waypoint's demo portfolio has multi-passenger
+# trips, so the recorded ticket should be a genuine 2-pax order. The old
+# 2-adult PASSENGER_INFO_INVALID was a payload bug (two travelers sharing
+# one identity), fixed in _build_pax_json below (per-index distinct name +
+# document number). Set WAYPOINT_CAPTURE_ADULTS="1" for a single-pax
+# capture.
+# Overridable without editing this file:
+#   WAYPOINT_CAPTURE_ROUTE="AMS-MAA"   (the blessed CONNECTION route, 6E)
+#   WAYPOINT_CAPTURE_DEPART="2026-09-20"
+#   WAYPOINT_CAPTURE_ADULTS="1"
+_ROUTE = os.environ.get("WAYPOINT_CAPTURE_ROUTE", "DUR-CPT")
+_parts = [p.strip().upper() for p in _ROUTE.split("-", 1)]
+ORIGIN, DESTINATION = (_parts + ["", ""])[:2]
+DEPART = date.fromisoformat(
+    os.environ.get("WAYPOINT_CAPTURE_DEPART", "2026-09-20")
+)
+ADULTS = int(os.environ.get("WAYPOINT_CAPTURE_ADULTS", "2"))
 
 # Widened READ timeout for status polling/recovery (capture tooling
 # only — writes always keep the client's own caps). The sandbox proved
 # slow-but-alive on 2026-08-25: order status answered after ~3 minutes
 # once the wrapper's 60s cap was bypassed by a patient direct probe.
 RECOVERY_READ_TIMEOUT_SECONDS = 240.0
+
+# Widened WRITE timeout for the ONE pay call (capture tooling only, passed
+# explicitly to client.pay). The 2026-08-25 capture's pay hit the client's
+# 90s write cap and raised TIMEOUT while the payment had actually landed —
+# a false alarm that forced query-only recovery. Retry policy is unchanged
+# (pay is still never retried); this only lets a slow-but-alive sandbox
+# answer in-band.
+PAY_WRITE_TIMEOUT_SECONDS = 240.0
+
+# How long to keep polling `order status` for the TICKETED tail. The
+# sandbox has taken 5-10 min to flip TICKETING_PENDING -> TICKETED; the
+# old 180s deadline gave up long before that.
+TICKETED_POLL_DEADLINE_SECONDS = 600.0
 
 
 class CapturingAtlasClient(AtlasClient):
@@ -237,6 +275,17 @@ def main() -> int:
     except (AttributeError, OSError, ValueError):
         pass
 
+    # Route sanity (env-overridable consts parsed at import) — fail loud
+    # before arming anything if WAYPOINT_CAPTURE_ROUTE was malformed.
+    if len(ORIGIN) != 3 or len(DESTINATION) != 3:
+        print(
+            f"capture refused: bad route {ORIGIN!r}->{DESTINATION!r} "
+            "(set WAYPOINT_CAPTURE_ROUTE like 'DUR-CPT')"
+        )
+        return 2
+    print(f"route: {ORIGIN}->{DESTINATION} depart={DEPART.isoformat()} "
+          f"adults={ADULTS}")
+
     # GATE 1 — explicit human intent (mirrors test_atlas_write_path.py).
     if os.environ.get("WAYPOINT_WRITE_PATH") != "1":
         print(
@@ -321,7 +370,9 @@ def main() -> int:
         #    ONE legal follow-up: query-only recovery via `order status`.
         client.step = "pay"
         try:
-            payment = client.pay(ref.payment_confirmation_id)
+            payment = client.pay(
+                ref.payment_confirmation_id, timeout=PAY_WRITE_TIMEOUT_SECONDS
+            )
         except AtlasError as exc:
             print(f"pay failed: code={exc.code} — never re-pay; "
                   "query-only recovery via order status")
@@ -329,7 +380,7 @@ def main() -> int:
             client.step = "order_status_recovery"
             try:
                 status, ticketed = client.poll_until_ticketed(
-                    ref.order_no, deadline=120.0
+                    ref.order_no, deadline=TICKETED_POLL_DEADLINE_SECONDS
                 )
                 print(f"recovery final: code={status.code} "
                       f"ticket_asserted={ticketed}")
@@ -363,7 +414,9 @@ def main() -> int:
         #    the capture widens its READ timeout here (reads only).
         client.read_timeout = RECOVERY_READ_TIMEOUT_SECONDS
         client.step = "order_status"
-        status, ticketed = client.poll_until_ticketed(ref.order_no, deadline=180.0)
+        status, ticketed = client.poll_until_ticketed(
+            ref.order_no, deadline=TICKETED_POLL_DEADLINE_SECONDS
+        )
         print(f"final: code={status.code} ticket_asserted={ticketed}")
         if not ticketed:
             print(f"capture failed: never ticketed (code={status.code})")

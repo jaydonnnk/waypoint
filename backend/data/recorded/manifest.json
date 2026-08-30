@@ -3,32 +3,32 @@
   "mode_label": "recorded",
   "composite": true,
   "ticketed_captured": false,
-  "order_no": "TESTA20260825233427052",
+  "order_no": "TESTA20260830210123734",
   "reconstructed_steps": [],
   "script": [
     {
       "verb": "auth status",
-      "seq": 5,
+      "seq": 1,
       "provenance": "captured"
     },
     {
       "verb": "search",
-      "seq": 6,
+      "seq": 2,
       "provenance": "captured"
     },
     {
       "verb": "offer verify",
-      "seq": 7,
+      "seq": 3,
       "provenance": "captured"
     },
     {
       "verb": "order create",
-      "seq": 8,
+      "seq": 4,
       "provenance": "captured"
     },
     {
       "verb": "order pay",
-      "seq": 9,
+      "seq": 5,
       "provenance": "captured"
     }
   ],
@@ -38,224 +38,56 @@
       "step": "auth_status",
       "verb": "auth status",
       "code": "AUTHORIZED",
-      "captured_at": "2026-08-25T15:33:02.581421+00:00"
+      "captured_at": "2026-08-30T13:01:18.610368+00:00"
     },
     {
       "seq": 2,
       "step": "search",
       "verb": "search",
       "code": "FLIGHT_SEARCHED",
-      "captured_at": "2026-08-25T15:33:04.116430+00:00"
+      "captured_at": "2026-08-30T13:01:20.370505+00:00"
     },
     {
       "seq": 3,
       "step": "verify",
       "verb": "offer verify",
       "code": "OFFER_VERIFIED",
-      "captured_at": "2026-08-25T15:33:05.549025+00:00"
+      "captured_at": "2026-08-30T13:01:22.161587+00:00"
     },
     {
       "seq": 4,
       "step": "create_order",
       "verb": "order create",
-      "code": "PASSENGER_INFO_INVALID",
-      "captured_at": "2026-08-25T15:33:07.123121+00:00"
+      "code": "PAYMENT_CONFIRMATION_REQUIRED",
+      "captured_at": "2026-08-30T13:01:25.461843+00:00"
     },
     {
       "seq": 5,
-      "step": "auth_status",
-      "verb": "auth status",
-      "code": "AUTHORIZED",
-      "captured_at": "2026-08-25T15:34:18.213718+00:00"
+      "step": "pay",
+      "verb": "order pay",
+      "code": "TICKETING_PENDING",
+      "captured_at": "2026-08-30T13:03:27.387302+00:00"
     },
     {
       "seq": 6,
-      "step": "search",
-      "verb": "search",
-      "code": "FLIGHT_SEARCHED",
-      "captured_at": "2026-08-25T15:34:19.763167+00:00"
+      "step": "order_status",
+      "verb": "order status",
+      "code": "TICKETING_PENDING",
+      "captured_at": "2026-08-30T13:05:28.544836+00:00"
     },
     {
       "seq": 7,
-      "step": "verify",
-      "verb": "offer verify",
-      "code": "OFFER_VERIFIED",
-      "captured_at": "2026-08-25T15:34:21.642564+00:00"
+      "step": "order_status",
+      "verb": "order status",
+      "code": "TICKETING_PENDING",
+      "captured_at": "2026-08-30T13:07:31.905033+00:00"
     },
     {
       "seq": 8,
-      "step": "create_order",
-      "verb": "order create",
-      "code": "PAYMENT_CONFIRMATION_REQUIRED",
-      "captured_at": "2026-08-25T15:34:23.426466+00:00"
-    },
-    {
-      "seq": 9,
-      "step": "pay",
-      "verb": "order pay",
-      "code": "TIMEOUT",
-      "captured_at": "2026-08-25T15:35:53.444336+00:00"
-    },
-    {
-      "seq": 10,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TIMEOUT",
-      "captured_at": "2026-08-25T15:37:10.730530+00:00"
-    },
-    {
-      "seq": 11,
-      "step": "order_status_recovery",
+      "step": "order_status",
       "verb": "order status",
       "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T15:40:26.317455+00:00"
-    },
-    {
-      "seq": 12,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T15:42:29.451272+00:00"
-    },
-    {
-      "seq": 13,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T15:44:34.414939+00:00"
-    },
-    {
-      "seq": 14,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T15:46:46.127010+00:00"
-    },
-    {
-      "seq": 15,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T15:49:03.038253+00:00"
-    },
-    {
-      "seq": 16,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T15:51:13.469259+00:00"
-    },
-    {
-      "seq": 17,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T15:53:22.438515+00:00"
-    },
-    {
-      "seq": 18,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T15:55:31.394810+00:00"
-    },
-    {
-      "seq": 19,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T15:57:47.470720+00:00"
-    },
-    {
-      "seq": 20,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T16:00:21.078053+00:00"
-    },
-    {
-      "seq": 21,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T16:02:30.743956+00:00"
-    },
-    {
-      "seq": 22,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T16:04:41.185203+00:00"
-    },
-    {
-      "seq": 23,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T16:06:53.636859+00:00"
-    },
-    {
-      "seq": 24,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T16:09:54.515154+00:00"
-    },
-    {
-      "seq": 25,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T16:12:04.615351+00:00"
-    },
-    {
-      "seq": 26,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T16:14:14.479734+00:00"
-    },
-    {
-      "seq": 27,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T16:16:23.769809+00:00"
-    },
-    {
-      "seq": 28,
-      "step": "order_status_recovery",
-      "verb": "order status",
-      "code": "SERVICE_REQUEST_FAILED",
-      "captured_at": "2026-08-25T16:16:33.146282+00:00"
-    },
-    {
-      "seq": 29,
-      "step": "order_status_s9_poll",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T16:25:04.309746+00:00"
-    },
-    {
-      "seq": 30,
-      "step": "order_status_s9_poll",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T16:27:49.970303+00:00"
-    },
-    {
-      "seq": 31,
-      "step": "order_status_s9_poll",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T16:30:35.671451+00:00"
-    },
-    {
-      "seq": 32,
-      "step": "order_status_s9_poll",
-      "verb": "order status",
-      "code": "TICKETING_PENDING",
-      "captured_at": "2026-08-25T16:33:21.393966+00:00"
+      "captured_at": "2026-08-30T13:09:37.097344+00:00"
     }
   ],
   "wire_disclosure": "recorded Atlas replay — composite capture with NO TICKETED envelope (sandbox flapped); the cycle replays the capture exactly as recorded, never live",

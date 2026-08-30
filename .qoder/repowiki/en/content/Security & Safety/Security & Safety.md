@@ -13,30 +13,36 @@
 - [brain.py](file://backend/app/agent/brain.py)
 - [auditor.py](file://backend/app/agent/auditor.py)
 - [models.py](file://backend/app/models.py)
+- [codes.py](file://backend/app/codes.py)
+- [routes.py](file://backend/app/api/routes.py)
+- [config.py](file://backend/app/config.py)
+- [test_waybot_security.py](file://backend/tests/test_waybot_security.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced two-gate split architecture with dual-gate authorization (human switch + live ticketing probe)
-- Added real-time authority cap re-checking before write operations
-- Improved passenger data handling with dynamic payload construction from verify responses
-- Enhanced fail-closed security with comprehensive comparison mode support
-- Added risk auditor for second-pass policy breach detection
+- Added comprehensive documentation for the seven security guard layers implemented in Waybot
+- Enhanced PBKDF2 confirmation code implementation with OWASP 2023 standards and bounded concurrency protection
+- Documented sliding-window rate limiting for /confirm endpoint with per-desk isolation
+- Added detailed coverage of bounded ThreadPoolExecutor for KDF operations to prevent CPU exhaustion
+- Enhanced role separation and one-shot semantics documentation
+- Updated compliance requirements to include new security measures
 
 ## Table of Contents
 1. Introduction
 2. Project Structure
 3. Core Components
 4. Architecture Overview
-5. Detailed Component Analysis
-6. Dependency Analysis
-7. Performance Considerations
-8. Troubleshooting Guide
-9. Conclusion
-10. Appendices
+5. Seven Security Guard Layers
+6. Detailed Component Analysis
+7. Dependency Analysis
+8. Performance Considerations
+9. Troubleshooting Guide
+10. Conclusion
+11. Appendices
 
 ## Introduction
-This document provides comprehensive security and safety guidance for the Waypoint system, focusing on its fail-closed architecture and enhanced safety guards. It explains the dual-gate authorization system that separates AI reasoning (advise = open) from execution (execute = fail-closed wall), details three critical agent-failure guards including real-time authority cap verification, outlines data privacy considerations for sensitive passenger information with dynamic payload construction, documents compliance requirements for financial transactions and personal data handling, and describes monitoring and audit capabilities to track agent decisions and actions. It also addresses security implications of autonomous booking execution and safeguards for production deployment.
+This document provides comprehensive security and safety guidance for the Waypoint system, focusing on its fail-closed architecture and enhanced safety guards. It explains the dual-gate authorization system that separates AI reasoning (advise = open) from execution (execute = fail-closed wall), details the seven critical security guard layers including PBKDF2 confirmation codes, sliding-window rate limiting, and bounded concurrency protection, outlines data privacy considerations for sensitive passenger information with dynamic payload construction, documents compliance requirements for financial transactions and personal data handling, and describes monitoring and audit capabilities to track agent decisions and actions. It also addresses security implications of autonomous booking execution and safeguards for production deployment.
 
 ## Project Structure
 Waypoint is organized into a frontend (Next.js/React) and a backend (Python FastAPI). The backend hosts the recovery agent loop, rules engine, Atlas integration, Qwen calls, and SQLite persistence. The design intentionally keeps deterministic code responsible for rules checks, fare-difference math, and order/pay execution, while the AI focuses on reroute judgment.
@@ -45,10 +51,13 @@ Waypoint is organized into a frontend (Next.js/React) and a backend (Python Fast
 graph TB
 FE["Frontend<br/>Next.js/React"] --> API["Backend REST + SSE<br/>FastAPI"]
 API --> Agent["RecoveryAgent<br/>loop.py"]
+API --> Security["Security Guards<br/>codes.py, routes.py"]
 Agent --> Rules["Rules Engine<br/>visa.py, passport.py"]
 Agent --> Judge["RerouteJudge<br/>Qwen"]
 Agent --> Atlas["AtlasClient<br/>forked skill library"]
 API --> DB["SQLite<br/>passengers, trips, segments,<br/>offers, rule_verdicts, decisions, orders"]
+Security --> RateLimit["Rate Limiter<br/>Sliding Window"]
+Security --> KDF["PBKDF2 KDF<br/>Bounded Executor"]
 ```
 
 **Diagram sources**
@@ -61,6 +70,7 @@ API --> DB["SQLite<br/>passengers, trips, segments,<br/>offers, rule_verdicts, d
 
 ## Core Components
 - **Enhanced Two-Gate Split**: Advise gate is open; Execute gate requires BOTH human switch (`WAYPOINT_LIVE_BOOKING=1`) AND live ticketing availability check via `ticketing_live()` probe.
+- **Seven Security Guard Layers**: Comprehensive protection including PBKDF2 confirmation codes, sliding-window rate limiting, bounded concurrency, role separation, submission integrity, PII minimization, and one-shot semantics.
 - RecoveryAgent orchestrates bounded steps with explicit give-up behavior and real-time authority cap verification.
 - Rules engine enforces visa and passport validity with a three-state verdict model (allowed/blocked/unknown).
 - RerouteJudge uses Qwen to rank legal options and narrate rejections.
@@ -80,7 +90,7 @@ Key responsibilities:
 - [02-architecture.md:13-31](file://docs/plans/waypoint/02-architecture.md#L13-L31)
 
 ## Architecture Overview
-The system implements a strict separation between advice and execution with enhanced dual-gate authorization:
+The system implements a strict separation between advice and execution with enhanced dual-gate authorization and seven security guard layers:
 
 - **Advise gate**: All alternatives are visible and labeled allowed/blocked/unknown by the rules engine. The AI reasons over all options and explains why it rejects risky or illegal ones.
 - **Execute gate**: Requires BOTH human switch armed AND live ticketing available. Only offers where every rule is allowed can be auto-booked and auto-settled. Code re-checks executability after the LLM picks, including real-time authority cap verification.
@@ -89,12 +99,21 @@ The system implements a strict separation between advice and execution with enha
 sequenceDiagram
 participant Client as "Client"
 participant API as "FastAPI"
+participant Security as "Security Guards"
 participant Agent as "RecoveryAgent"
 participant Rules as "Rules Engine"
 participant Judge as "RerouteJudge (Qwen)"
 participant Atlas as "AtlasClient"
 participant DB as "SQLite"
-Client->>API : POST /api/disruptions
+Client->>API : POST /api/desk/seed
+API->>Security : Generate PBKDF2 hash
+Security-->>API : Hashed code + invite token
+API->>DB : Store mandate + hashed code
+Client->>API : POST /desk/{id}/confirm
+API->>Security : Sliding window rate limit
+Security-->>API : Allow/Deny based on window
+API->>Security : Verify PBKDF2 code
+Security-->>API : Constant-time verification
 API->>Agent : run(trip_id, emit)
 Agent->>DB : get_trip()
 Agent->>Atlas : search(broken leg)
@@ -127,6 +146,87 @@ end
 **Section sources**
 - [0003-advise-execute-two-gate-split.md:1-19](file://docs/adr/0003-advise-execute-two-gate-split.md#L1-L19)
 - [03-program-design.md:125-149](file://docs/plans/waypoint/03-program-design.md#L125-L149)
+
+## Seven Security Guard Layers
+
+### Guard 1: Confirmation Code Protection with PBKDF2
+- **Hashed-only storage**: Confirmation codes are never stored in plaintext; only PBKDF2-HMAC-SHA256 hashes with 260,000 iterations (OWASP 2023 minimum)
+- **Constant-time comparison**: Uses `hmac.compare_digest` to prevent timing attacks
+- **Attempt cap**: 5 wrong attempts trigger 429 throttling, but correct codes always release (verify-first ordering prevents DoS lockout)
+- **TTL expiry**: Codes expire after 24 hours (default, env-tunable via `WAYPOINT_CODE_TTL`)
+- **Bounded concurrency**: PBKDF2 verification runs on dedicated `ThreadPoolExecutor(2)` to prevent CPU exhaustion
+
+**Security impact**: Prevents brute-force attacks, timing attacks, and resource exhaustion while ensuring legitimate users can always access their desks.
+
+**Section sources**
+- [codes.py:22-78](file://backend/app/codes.py#L22-L78)
+- [routes.py:571-595](file://backend/app/api/routes.py#L571-L595)
+- [test_waybot_security.py:148-329](file://backend/tests/test_waybot_security.py#L148-L329)
+
+### Guard 2: Invite Token Isolation
+- **128-bit random tokens**: Generated using `secrets.token_urlsafe(16)` for cryptographic randomness
+- **Single-purpose binding**: Tokens bind chat-to-desk only; cannot be used to release desks
+- **Leakage protection**: Even if invite tokens are leaked, they cannot release desks without the confirmation code
+
+**Security impact**: Ensures that compromised invite links cannot be used to hijack desk control.
+
+**Section sources**
+- [routes.py:115-119](file://backend/app/api/routes.py#L115-L119)
+- [test_waybot_security.py:548-598](file://backend/tests/test_waybot_security.py#L548-L598)
+
+### Guard 3: Role Separation
+- **Traveler restrictions**: Bot-path/traveler sessions can submit passports but cannot call confirm/approve endpoints
+- **Authority isolation**: Release and approval authority lives only on the code path, which travelers never receive
+- **Credential separation**: Travelers have invite tokens; managers have confirmation codes and approval tokens
+
+**Security impact**: Prevents unauthorized travelers from controlling desk operations or approving bookings.
+
+**Section sources**
+- [routes.py:609-695](file://backend/app/api/routes.py#L609-L695)
+- [test_waybot_security.py:605-690](file://backend/tests/test_waybot_security.py#L605-L690)
+
+### Guard 4: Submission Integrity
+- **Checksum validation**: Data integrity checks before storage
+- **Team size caps**: Enforced limits on team sizes to prevent abuse
+- **Duplicate document rejection**: Prevents duplicate passport numbers (also enforced by sandbox)
+- **Photo size protection**: Oversized photos rejected before extraction via pre-download `file_size` gate and post-download verification
+
+**Security impact**: Ensures data integrity and prevents resource exhaustion through malformed or oversized submissions.
+
+**Section sources**
+- [02-architecture.md:81-89](file://docs/plans/waypoint/02-architecture.md#L81-L89)
+
+### Guard 5: PII Minimization
+- **Memory-only processing**: Image bytes never touch database or disk; deleted post-extraction
+- **Telegram cleanup**: `deleteMessage` called to remove uploaded images from Telegram servers
+- **Traveler row purging**: Traveler rows are purged at desk close to prevent PII retention
+- **Event masking**: Events and logs mask sensitive data patterns (document numbers, dates of birth)
+
+**Security impact**: Minimizes exposure of sensitive passenger information throughout the system lifecycle.
+
+**Section sources**
+- [02-architecture.md:81-89](file://docs/plans/waypoint/02-architecture.md#L81-L89)
+
+### Guard 6: Untrusted Text Containment
+- **MRZ-as-data**: MRZ-derived strings flow only into structured passenger JSON (stdin), never into brain prompts or CLI arguments
+- **Injection prevention**: Mirrored injection tests with hostile names ensure no command injection vulnerabilities
+- **Data boundary enforcement**: Strict separation between untrusted text and trusted command execution
+
+**Security impact**: Prevents command injection attacks through malicious passenger data.
+
+**Section sources**
+- [02-architecture.md:81-89](file://docs/plans/waypoint/02-architecture.md#L81-L89)
+
+### Guard 7: One-Shot Semantics
+- **Single-use confirmations**: Confirm and approve endpoints are single-use; second calls return 410 (gone)
+- **Approval slot protection**: Approval slots work like escalation slots - once decided, they cannot be replayed
+- **Atomic state transitions**: Compare-and-set operations prevent race conditions in critical state changes
+
+**Security impact**: Prevents replay attacks and ensures atomicity of critical security operations.
+
+**Section sources**
+- [routes.py:552-554](file://backend/app/api/routes.py#L552-L554)
+- [routes.py:644-647](file://backend/app/api/routes.py#L644-L647)
 
 ## Detailed Component Analysis
 
@@ -188,19 +288,6 @@ GiveUp --> End
 - [02-architecture.md:34-49](file://docs/plans/waypoint/02-architecture.md#L34-L49)
 - [03-program-design.md:50-55](file://docs/plans/waypoint/03-program-design.md#L50-L55)
 - [loop.py:706-720](file://backend/app/agent/loop.py#L706-L720)
-
-### Rules Engine and Data Freshness
-- Three-state verdicts: allowed, blocked, unknown. Unknown is intentionally preserved to enforce fail-closed behavior.
-- Curated transit hub table includes airside zone flags, nationality-specific allowances, max hours, source, and last_checked timestamps.
-- Freshness windows: airside cells trusted ≤ 6 months; entry-fallback cells trusted ≤ 3 months. Past window → unknown → fail-closed.
-
-Compliance and safety impact:
-- Transparent labeling and provenance support auditability and compliance.
-- Honest proxy for live verification avoids misleading claims about visa checks.
-
-**Section sources**
-- [03-program-design.md:34-48](file://docs/plans/waypoint/03-program-design.md#L34-L48)
-- [03-program-design.md:50-55](file://docs/plans/waypoint/03-program-design.md#L50-L55)
 
 ### Enhanced Booking Workflow and Payment Safeguards
 - **Dual-gate authorization**: Both human switch and live ticketing probe must be active for write operations
@@ -284,6 +371,10 @@ Agent --> Judge["RerouteJudge (Qwen)"]
 Agent --> Atlas["AtlasClient"]
 Agent --> DB["SQLite"]
 Agent --> Auditor["RiskAuditor"]
+Routes["API Routes"] --> Security["Security Guards"]
+Security --> KDF["PBKDF2 KDF"]
+Security --> RateLimit["Rate Limiter"]
+Security --> DB
 Rules --> Data["Curated Data<br/>transit_hubs.yaml, passport_index.csv, iata_country.csv"]
 Atlas --> External["Atlas Sandbox<br/>search/verify/order/pay/status"]
 ```
@@ -293,6 +384,7 @@ Coupling and cohesion:
 - Low coupling between AI judgment and deterministic execution paths
 - External dependencies isolated behind AtlasClient with stable contracts
 - RiskAuditor provides independent second-pass policy review
+- Security layer provides centralized protection across all endpoints
 
 Potential risks:
 - Over-reliance on curated data freshness; mitigated by unknown→blocked policy and explicit freshness windows
@@ -312,6 +404,8 @@ Potential risks:
 - Live verification reduces wasted downstream operations on stale offers
 - Minimal passenger input collection reduces I/O overhead and privacy exposure
 - **Single cache per cycle**: Ticketing availability cached per cycle to avoid repeated subprocess calls
+- **Bounded KDF verification**: PBKDF2 operations run on dedicated `ThreadPoolExecutor(2)` to prevent CPU exhaustion
+- **Sliding-window rate limiting**: Per-desk request volume control prevents resource exhaustion
 - SQLite persistence is lightweight for demo and small-scale deployments; consider scaling strategies for higher throughput
 
 ## Troubleshooting Guide
@@ -324,19 +418,22 @@ Common error scenarios and safe behaviors:
 - **Ticketing pending**: report processing status and provide order link when available; do not treat as failure
 - **Authority cap exceeded**: escalate to human operator with two priced options + recommendation
 - **Comparison mode**: clearly indicate which gate blocks write operations (human switch vs ticketing availability)
+- **Rate limiting**: 429 responses indicate temporary throttling; retry after window expires
+- **Code expiration**: 410 responses indicate expired confirmation codes; seed new desk if needed
 
 Operational tips:
 - Use normalized codes rather than parsing messages
 - Keep internal causes out of user-facing output
 - Respect retryable flags conservatively; never authorize different commands on retries
 - Monitor comparison mode indicators for production deployments
+- Watch for rate limiting patterns that may indicate attack attempts
 
 **Section sources**
 - [error-handling.md:1-74](file://.agents/skills/atlas-flight-booking/references/error-handling.md#L1-L74)
 - [booking-workflow.md:1-63](file://.agents/skills/atlas-flight-booking/references/booking-workflow.md#L1-L63)
 
 ## Conclusion
-Waypoint's enhanced fail-closed architecture with dual-gate authorization and three-agent-failure guards provides strong safety guarantees for autonomous disruption recovery. The enhanced two-gate split ensures AI reasoning remains open while execution stays conservative and deterministic, requiring both human authorization and live ticketing availability. Robust privacy practices protect sensitive passenger data through dynamic payload construction, and comprehensive auditability supports compliance and operational oversight. Production deployments should enforce explicit human approvals for financial actions, maintain strict adherence to the execute gate, and leverage comparison mode for safe development and testing environments.
+Waypoint's enhanced fail-closed architecture with dual-gate authorization and seven security guard layers provides strong safety guarantees for autonomous disruption recovery. The seven guard layers include PBKDF2 confirmation codes with OWASP 2023 standards, sliding-window rate limiting, bounded concurrency protection, role separation, submission integrity, PII minimization, and one-shot semantics. The enhanced two-gate split ensures AI reasoning remains open while execution stays conservative and deterministic, requiring both human authorization and live ticketing availability. Robust privacy practices protect sensitive passenger data through dynamic payload construction, and comprehensive auditability supports compliance and operational oversight. Production deployments should enforce explicit human approvals for financial actions, maintain strict adherence to the execute gate, leverage comparison mode for safe development and testing environments, and monitor the seven security guard layers for optimal protection.
 
 ## Appendices
 
@@ -353,9 +450,20 @@ Waypoint's enhanced fail-closed architecture with dual-gate authorization and th
   - One-time delivery via stdin; no echoing, saving, or logging of payloads
   - Safe correction without repeating rejected personal data
   - Unique identity generation for multi-passenger bookings
+- **Security authentication**:
+  - PBKDF2-HMAC-SHA256 with 260,000 iterations (OWASP 2023 minimum)
+  - Constant-time comparison to prevent timing attacks
+  - Attempt caps with verify-first ordering to prevent DoS lockouts
+  - Sliding-window rate limiting per desk (default 10 requests/60 seconds)
+  - Bounded concurrency for KDF operations (ThreadPoolExecutor with 2 workers)
+  - One-shot semantics for confirm and approve endpoints
+  - Role separation between travelers and managers
 
 **Section sources**
 - [booking-workflow.md:31-63](file://.agents/skills/atlas-flight-booking/references/booking-workflow.md#L31-L63)
 - [passenger-input.md:1-52](file://.agents/skills/atlas-flight-booking/references/passenger-input.md#L1-L52)
 - [loop.py:951-977](file://backend/app/agent/loop.py#L951-L977)
 - [client.py:337-353](file://backend/app/atlas/client.py#L337-L353)
+- [codes.py:22-78](file://backend/app/codes.py#L22-L78)
+- [routes.py:448-595](file://backend/app/api/routes.py#L448-L595)
+- [config.py:17-31](file://backend/app/config.py#L17-L31)

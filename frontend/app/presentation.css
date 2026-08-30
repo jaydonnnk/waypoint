@@ -373,6 +373,22 @@
   border-color: rgba(127, 227, 201, 0.45);
   color: #a9f0dc;
 }
+/* Recorded replay — a real captured sandbox ticket chain being replayed. It
+   is neither live nor a dry run, so it gets the THIRD tone the mode banner
+   on main introduced, in this banner's own anatomy. The hue is that change's
+   own informational blue (#a9d4f0); the text is one step lighter for the same
+   reason dry and live are (their tint is the base, their text a lighter step),
+   because inside a 0.16 pill the ground lifts and the base hue would land at
+   4.98:1 where the other two sit near 6.
+   MEASURED on the painted app bar (the teal gradient at the bar's own centre,
+   under .appbar's rgba(8,51,47,0.62)): pill #245A5A, text #b9e4ff = 5.81:1,
+   L* 88.5 — the same register as dry (6.22, L* 91.3) and live (5.96, L* 89.8).
+   Colour is never load-bearing here: the banner always prints the word. */
+.phase-recorded {
+  background: rgba(169, 212, 240, 0.16);
+  border-color: rgba(169, 212, 240, 0.45);
+  color: #b9e4ff;
+}
 .phase-pending {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.22);

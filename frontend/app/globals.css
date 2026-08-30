@@ -650,6 +650,7 @@ body {
 .teal-app > .wrap > .record > .record-toggle:focus-visible { color: #fff; }
 /* connection / mode line — tuned so each state reads on teal */
 .teal-app .mode-banner.live { color: #7fe3c9; }
+.teal-app .mode-banner.recorded { color: #a9d4f0; }
 .teal-app .mode-banner.pending { color: rgba(255, 255, 255, 0.6); }
 .teal-app .r-tag.err { color: #ffb4ac; }
 .teal-app .status.err { color: #ffb4ac; }
@@ -900,6 +901,9 @@ td.num { font-family: var(--mono); }
 .mode-banner { margin-top: 3px; font-size: 12.5px; font-weight: 700; }
 .mode-banner.comparison { color: var(--warn); }
 .mode-banner.live { color: var(--good); }
+/* recorded replay: a real captured sandbox ticket, replayed — not live,
+   not a dry run. Its own informational blue between the two. */
+.mode-banner.recorded { color: #3b82c4; }
 .mode-banner.pending { color: var(--faint); font-weight: 600; }
 
 /* ---- per-rail provenance strip (S12, ADR 0006; additive, token-only).

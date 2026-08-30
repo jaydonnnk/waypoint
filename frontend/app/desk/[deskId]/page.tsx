@@ -643,6 +643,12 @@ export default function DeskPage() {
   // just means "render without a symbol", never a guess.
   const currency = screen.mandate?.currency;
   const live = screen.mode === "live ticketing";
+  // Recorded replay (S9): the backend emits mode "recorded ticketing
+  // (replay)" — a real captured sandbox ticket chain replayed, NOT live.
+  // `live` stays false (no interactive escalation slots exist in a
+  // replay), but the top banner gets its own honest state instead of
+  // reading "Dry run — no real bookings yet".
+  const recorded = screen.mode?.startsWith("recorded") ?? false;
 
   const scopeRef = useRef<HTMLElement>(null);
   const bigFigRef = useRef<HTMLDivElement>(null);
@@ -1644,7 +1650,8 @@ export default function DeskPage() {
                 )}
                 {!live && (
                   <div className="esc-note">
-                    Dry run — I went with {event.recommendation} (
+                    {recorded ? "Recorded run" : "Dry run"} — I went with{" "}
+                    {event.recommendation} (
                     {shortLabel(event.options, event.recommendation)}) on this
                     one; nothing needs clicking.
                   </div>
@@ -1796,8 +1803,8 @@ export default function DeskPage() {
         )}
         {!live && (
           <div className="decide-note">
-            Dry run — I went with my pick on this one; nothing needs
-            clicking.
+            {recorded ? "Recorded run" : "Dry run"} — I went with my pick on
+            this one; nothing needs clicking.
           </div>
         )}
         {decision.state === "gone" && (
@@ -1866,13 +1873,23 @@ export default function DeskPage() {
                 ? "phase phase-pending"
                 : live
                   ? "phase phase-live"
-                  : "phase phase-dry"
+                  : recorded
+                    ? "phase phase-recorded"
+                    : "phase phase-dry"
             }
           >
             {/* The mode arrives on the `meta` event. If the stream died
                 before that, we genuinely do not know which mode this desk
                 would have run in — and saying "connecting" next to
-                "Connection closed" would be a lie in two directions. */}
+                "Connection closed" would be a lie in two directions.
+
+                THREE modes, not two: a recorded replay is a real captured
+                sandbox ticket chain being replayed, so calling it a dry run
+                ("no real bookings") understates what it is, and calling it
+                live overstates it. It gets its own state and its own words.
+                `live` stays false in a replay — no interactive escalation
+                slot exists — which is why `recorded` is a separate flag and
+                not a third value of `live`. */}
             <b className="phase-k">
               {screen.mode == null
                 ? streamDead
@@ -1880,7 +1897,9 @@ export default function DeskPage() {
                   : "Starting"
                 : live
                   ? "Live"
-                  : "Dry run"}
+                  : recorded
+                    ? "Recorded"
+                    : "Dry run"}
             </b>
             <span className="phase-v">
               {screen.mode == null
@@ -1889,7 +1908,9 @@ export default function DeskPage() {
                   : "connecting to the desk"
                 : live
                   ? "booking for real"
-                  : "no real bookings"}
+                  : recorded
+                    ? "replaying a real sandbox ticket"
+                    : "no real bookings"}
             </span>
           </span>
         </div>
