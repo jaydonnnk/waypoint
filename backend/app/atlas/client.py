@@ -440,13 +440,22 @@ class AtlasClient:
             raise AtlasQueryOnly(code, order_no)
         raise AtlasError(code or "SERVICE_REQUEST_FAILED")
 
-    def pay(self, payment_confirmation_id: str) -> PaymentResult:
+    def pay(
+        self, payment_confirmation_id: str, timeout: float | None = None
+    ) -> PaymentResult:
         """`order pay --confirmation-id` — WRITE, single-use, NEVER
         retried. The confirmation ID is the one from THAT create_order
-        response. Branches on result codes; never pays twice."""
+        response. Branches on result codes; never pays twice.
+
+        `timeout` overrides the default WRITE_TIMEOUT_SECONDS write cap for
+        THIS call only — capture tooling widens it because the sandbox has
+        been seen to answer pay after >90s while the payment still landed
+        (a spurious TIMEOUT then forces the query-only recovery path). The
+        retry policy is unchanged: still never retried, still branch-on-code.
+        """
         envelope = self._run_json(
             ["order", "pay", "--confirmation-id", payment_confirmation_id, "--json"],
-            timeout=WRITE_TIMEOUT_SECONDS,
+            timeout=timeout if timeout is not None else WRITE_TIMEOUT_SECONDS,
         )
         code = envelope.get("code", "")
         data = envelope.get("data") or {}

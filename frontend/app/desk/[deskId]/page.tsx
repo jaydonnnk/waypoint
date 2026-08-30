@@ -526,6 +526,12 @@ export default function DeskPage() {
   // just means "render without a symbol", never a guess.
   const currency = screen.mandate?.currency;
   const live = screen.mode === "live ticketing";
+  // Recorded replay (S9): the backend emits mode "recorded ticketing
+  // (replay)" — a real captured sandbox ticket chain replayed, NOT live.
+  // `live` stays false (no interactive escalation slots exist in a
+  // replay), but the top banner gets its own honest state instead of
+  // reading "Dry run — no real bookings yet".
+  const recorded = screen.mode?.startsWith("recorded") ?? false;
 
   const scopeRef = useRef<HTMLElement>(null);
   const bigFigRef = useRef<HTMLDivElement>(null);
@@ -1013,7 +1019,8 @@ export default function DeskPage() {
                 )}
                 {!live && (
                   <div className="esc-note">
-                    Dry run — I went with {event.recommendation} (
+                    {recorded ? "Recorded run" : "Dry run"} — I went with{" "}
+                    {event.recommendation} (
                     {shortLabel(event.options, event.recommendation)}) on this
                     one; nothing needs clicking.
                   </div>
@@ -1165,8 +1172,8 @@ export default function DeskPage() {
         )}
         {!live && (
           <div className="decide-note">
-            Dry run — I went with my pick on this one; nothing needs
-            clicking.
+            {recorded ? "Recorded run" : "Dry run"} — I went with my pick on
+            this one; nothing needs clicking.
           </div>
         )}
         {decision.state === "gone" && (
@@ -1205,21 +1212,25 @@ export default function DeskPage() {
                 ? "Connection closed"
                 : "Connecting…"}
           </div>
-          {/* comparison-mode / live-ticketing disclosure, in plain words */}
+          {/* comparison / recorded / live-ticketing disclosure, plain words */}
           <div
             className={
               screen.mode == null
                 ? "mode-banner pending"
                 : live
                   ? "mode-banner live"
-                  : "mode-banner comparison"
+                  : recorded
+                    ? "mode-banner recorded"
+                    : "mode-banner comparison"
             }
           >
             {screen.mode == null
               ? "Starting up…"
               : live
                 ? "Live — booking for real"
-                : "Dry run — no real bookings yet"}
+                : recorded
+                  ? "Recorded — replaying a real sandbox ticket"
+                  : "Dry run — no real bookings yet"}
           </div>
         </div>
       </div>
