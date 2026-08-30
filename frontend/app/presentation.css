@@ -713,128 +713,205 @@
 }
 
 /* ==================================================================== */
-/* §11 — Pass 7: the trips, ONE CARD PER TRIP. The per-event rows       */
-/* become dots on a small timeline inside each trip's card, the route   */
-/* draws as a line instead of reading as text, and the plain-language   */
-/* phrase appears once per trip. Same palette, same data — the ticks    */
-/* keep the `.trip[data-ix]` anchor the entrance tween targets.         */
+/* §11 — Pass 8: the trips as BOARDING-PASS CARDS. Each card carries    */
+/* the picture (route drawn end to end, date + headcount as icons, the  */
+/* fare and its movement) and nothing else; the step-by-step wording    */
+/* opens per card behind its "N updates" toggle. The footer dots keep   */
+/* the `.trip[data-ix]` anchor the entrance tween targets.              */
 /* ==================================================================== */
-.board .tg {
-  border-top: 1px solid var(--line);
-  padding: 14px 22px 15px;
+.tgrid {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
-  column-gap: 14px;
-  align-items: start;
-  transition: background var(--t-fast) var(--ease-out);
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  padding: 4px 16px 18px;
 }
-.board .tg:hover { background: var(--paper); }
-.board .tg .avatar {
-  width: 38px;
-  height: 38px;
-  font-size: 12px;
-  margin-top: 2px;
-}
-/* a trip whose LATEST word is a drop/issue gets the quiet red inset */
-.board .tg.blocked { box-shadow: inset 3px 0 0 var(--bad); }
-.board .tg.blocked:hover { background: var(--badbg); }
-
-.tg-body {
+.tcard {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 15px 16px 8px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  min-width: 0;
+  gap: 11px;
+  transition:
+    border-color var(--t-fast) var(--ease-out),
+    box-shadow var(--t-fast) var(--ease-out);
 }
-.tg-head {
+.tcard:hover {
+  border-color: var(--line2);
+  box-shadow: var(--shadow-1);
+}
+/* a trip whose latest word is a drop/issue gets the quiet red edge */
+.tcard.blocked {
+  border-color: #f0d3d3;
+  box-shadow: inset 3px 0 0 var(--bad);
+}
+
+.tc-top {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 10px;
-  flex-wrap: wrap;
 }
-.tg-label {
-  font-size: 15px;
+.tc-name {
+  font-size: 14.5px;
   font-weight: 700;
   letter-spacing: -0.1px;
   color: var(--ink);
+  line-height: 1.3;
 }
-.tg-sub { font-size: 12.5px; color: var(--mut); }
+.tc-top .badge { flex: none; }
 
-/* the route, drawn instead of written */
-.tg-route {
+/* the route, drawn end to end — the card's picture */
+.tc-route {
   display: flex;
   align-items: center;
-  gap: 10px;
-  max-width: 420px;
+  gap: 12px;
+  padding: 4px 2px 2px;
 }
-.tg-city {
-  font-size: 13px;
+.tc-code {
+  font-size: 18px;
   font-weight: 600;
-  letter-spacing: 0.6px;
+  letter-spacing: 1px;
   color: var(--ink);
+  flex: none;
 }
-.tg-path {
+.tc-route-none .tc-code {
+  font-size: 15px;
+  letter-spacing: 0.4px;
+  color: var(--mut);
+}
+.tc-path {
   flex: 1;
   display: flex;
   align-items: center;
-  min-width: 60px;
+  min-width: 40px;
 }
-.tg-path .tg-dot {
-  width: 5px;
-  height: 5px;
+.tc-path .tc-dot {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--brand);
   flex: none;
 }
-.tg-path .tg-line {
+.tc-path .tc-line {
   flex: 1;
   height: 0;
   border-top: 1.5px dashed var(--line2);
 }
-.tg-plane {
+.tc-plane {
   display: flex;
   flex: none;
   color: var(--brand);
-  margin: 0 6px;
+  margin: 0 5px;
 }
-.tg-plane svg {
-  width: 14px;
-  height: 14px;
+.tc-plane svg {
+  width: 15px;
+  height: 15px;
   transform: rotate(90deg);
 }
 
-/* the trip's events as a timeline of dots — each dot is the same
-   `.trip[data-ix]` element the entrance tween has always targeted */
-.tg-track {
+/* date + headcount as icons — the numbers speak, the words go away */
+.tc-facts {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  row-gap: 6px;
+  gap: 14px;
+  margin-top: -2px;
 }
-.board .tg .trip.tick {
+.tc-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--mut);
+}
+.tc-fact svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tc-money {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.tc-fare {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  color: var(--ink);
+}
+.tc-was {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--faint);
+  margin-left: 7px;
+  text-decoration-thickness: 1.5px;
+}
+.tc-delta {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+}
+.tc-delta.up { color: var(--good); background: var(--goodbg); }
+.tc-delta.down { color: var(--bad); background: var(--badbg); }
+
+.tc-note {
+  font-size: 12.5px;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* the footer: status dots + the only affordance for the wordy detail */
+.tc-more {
+  margin: 2px -16px 0;
+  padding: 9px 16px;
+  border: none;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  border-radius: 0 0 16px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background var(--t-fast) var(--ease-out);
+}
+.tc-more:hover { background: var(--card); }
+.tc-more:focus-visible { outline: var(--ring); outline-offset: -2px; }
+.tc-track {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+.tcard .trip.tick {
   margin: 0;
   border: none;
   border-radius: 0;
-  border-top: none;
   background: transparent;
   box-shadow: none;
   padding: 0;
   display: inline-flex;
-  grid-template-columns: none;
-  column-gap: 0;
   align-items: center;
-  gap: 6px;
 }
-.board .tg .trip.tick:hover { background: transparent; }
-.tg-track .trip.tick + .trip.tick::before {
+.tc-track .trip.tick + .trip.tick::before {
   content: "";
-  width: 16px;
+  width: 12px;
   height: 0;
   border-top: 1.5px solid var(--line2);
-  margin-right: 6px;
 }
 .tick-dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--line2);
   flex: none;
@@ -842,12 +919,11 @@
 .trip.tick.good .tick-dot { background: var(--good); }
 .trip.tick.wait .tick-dot { background: var(--warn); }
 .trip.tick.stop .tick-dot { background: var(--bad); }
-/* the newest dot is the big one */
-.tg-track .trip.tick:last-child .tick-dot {
-  width: 12px;
-  height: 12px;
+.tc-track .trip.tick:last-child .tick-dot {
+  width: 11px;
+  height: 11px;
 }
-/* dots stay quiet; the words live in .tg-now and the badge */
+/* the dot's word stays available to screen readers and the tooltip */
 .tick-word {
   position: absolute;
   width: 1px;
@@ -856,44 +932,73 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
-.tg-now { font-size: 12.5px; color: var(--mut); }
-
-.tg-right {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-  text-align: right;
-  padding-top: 2px;
-}
-.tg-right .fare { font-size: 14.5px; font-weight: 600; }
-.tg-right .fare s {
-  color: var(--faint);
-  font-weight: 500;
-  margin-right: 2px;
-  text-decoration-thickness: 1.5px;
-}
-.tg-right .saved {
-  font-size: 12.5px;
-  color: var(--good);
+.tc-more-text {
+  font-size: 12px;
+  color: var(--mut);
   font-weight: 600;
 }
-.tg-right .tg-down { color: var(--bad); }
+.tc-chev {
+  margin-left: auto;
+  display: flex;
+  color: var(--faint);
+  transition: transform var(--t-fast) var(--ease-out);
+}
+.tc-chev svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tc-more[aria-expanded="true"] .tc-chev { transform: rotate(180deg); }
 
-/* phone: identity gets the full width; badge + fare drop to a row below */
+/* the detail — every step, only once asked for */
+.tc-detail[hidden] { display: none; }
+.tc-detail {
+  margin: 0 -16px;
+  padding: 4px 16px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 0 0 16px 16px;
+  display: flex;
+  flex-direction: column;
+}
+.tc-step {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 9px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+.tc-step:last-child { border-bottom: none; }
+.tc-step-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line2);
+  align-self: center;
+}
+.tc-step-dot.good { background: var(--good); }
+.tc-step-dot.wait { background: var(--warn); }
+.tc-step-dot.stop { background: var(--bad); }
+.tc-step-word {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.tc-step-val {
+  font-size: 12.5px;
+  color: var(--mut);
+  text-align: right;
+}
+.tc-step-val s { color: var(--faint); margin-right: 2px; }
+
+/* phone: one card per row, everything already stacks */
 @media (max-width: 560px) {
-  .board .tg {
+  .tgrid {
     grid-template-columns: minmax(0, 1fr);
-    padding: 13px 16px;
-  }
-  .board .tg .avatar { display: none; }
-  .tg-route { max-width: none; }
-  .tg-right {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    margin-top: 9px;
-    padding-top: 0;
+    padding: 4px 12px 14px;
   }
 }

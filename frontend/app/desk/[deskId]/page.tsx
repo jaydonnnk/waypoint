@@ -294,6 +294,19 @@ function shortDate(iso: string): string {
   return `${mon} ${Number(m[3])}`;
 }
 
+/** Pass 8: the word for one step inside a card's opened detail. Identical
+    to tripTitle EXCEPT for a book decision the snapshot has not confirmed:
+    that step must not read "Booked" (positions are the source of truth, and
+    a book judgment fires before the execute wall). */
+function stepWord(event: StreamEvent, snap: Position | undefined): string {
+  if (event.type === "trade" && event.kind === "book") {
+    return snap && snap.status === "booked" && snap.ticket_asserted
+      ? "Booked"
+      : "Book decision logged";
+  }
+  return tripTitle(event);
+}
+
 /** Pass 7: timeline-dot tone per event — colors only, never words. Book
     dots go green ONLY when the snapshot confirms the booking (positions
     are the source of truth); waiting states are amber; drops and errors
@@ -390,6 +403,11 @@ export default function DeskPage() {
   // or writes it, and toggling only flips a boolean, so the stream render
   // (row keys, EventSource, reducer) is never disturbed.
   const [recordOpen, setRecordOpen] = useState(false);
+  // Pass 8: which trip cards have their step-by-step detail open, keyed by
+  // the group key. Same shape of local-only UI state as recordOpen above —
+  // the stream, the reducer and the replay never read or write it, and a
+  // card whose key is absent is simply collapsed.
+  const [openTrips, setOpenTrips] = useState<Record<string, boolean>>({});
   const ixRef = useRef(0);
 
   // Waybot invite gate (S1). A gated desk in 'awaiting_travelers' has no
@@ -848,13 +866,15 @@ export default function DeskPage() {
 
   // ---------- render helpers ----------------------------------------------
 
-  /** Pass 7: ONE CARD PER TRIP. The header is the trip's identity (label,
-      date, people) with the route DRAWN as a line; the trip's events render
-      as a compact timeline of dots. Every dot is still a `.trip[data-ix]`
-      element, so the entrance tween and the replay wipe behave exactly as
-      before — nothing is dropped, the words just stop repeating. Every
-      figure is the stream's own value (fares from mark events, saved/drop
-      amounts from alloc/loss events, booked state from the snapshot). */
+  /** Pass 8: ONE BOARDING-PASS CARD PER TRIP. The card carries the picture
+      — route drawn end to end, date and headcount as icons, the fare and
+      its movement — and NOTHING ELSE. The step-by-step wording (what used
+      to read as a log) lives behind the card's own "N updates" toggle, so
+      the detail appears only when someone asks for it. Every dot in the
+      footer is still a `.trip[data-ix]` element, so the entrance tween and
+      the replay wipe behave exactly as before, and every figure is the
+      stream's own value (fares from mark events, saved/drop amounts from
+      alloc/loss events, booked state from the snapshot). */
   function renderTripGroup(group: {
     key: string;
     pos: string | null;
@@ -864,76 +884,68 @@ export default function DeskPage() {
     const snapPos = pos ? positions[pos] : undefined;
     const last = rows[rows.length - 1].event;
     const blocked = last.type === "loss" || last.type === "error";
-    const avatarCls = `avatar a${(rows[0].ix % 4) + 2}`;
     // Snapshot-confirmed booking outranks the latest event — positions are
     // the source of truth (same test the KPI booked count uses).
     const booked = Boolean(
       snapPos && snapPos.status === "booked" && snapPos.ticket_asserted
     );
 
-    let badge: ReactNode;
+    // Status = a color AND a word (never color alone).
+    let stateWord = "";
+    let stateTone = "plain";
     if (booked) {
-      badge = <span className="badge ok">Booked</span>;
+      stateWord = "Booked";
+      stateTone = "ok";
     } else {
       switch (last.type) {
         case "trade":
-          badge =
-            last.kind === "book" ? (
-              <span className="badge plain">Book decision logged</span>
-            ) : last.kind === "hold" ? (
-              <span className="badge plain">Holding</span>
-            ) : (
-              <span className="badge wait">Needs your OK</span>
-            );
+          if (last.kind === "book") {
+            stateWord = "Book decision logged";
+            stateTone = "plain";
+          } else if (last.kind === "hold") {
+            stateWord = "Holding";
+            stateTone = "plain";
+          } else {
+            stateWord = "Needs your OK";
+            stateTone = "wait";
+          }
           break;
         case "mark":
-          badge = last.stale ? (
-            <span className="badge wait">Holding for now</span>
-          ) : (
-            <span className="badge plain">Checked</span>
-          );
+          stateWord = last.stale ? "Holding for now" : "Checked";
+          stateTone = last.stale ? "wait" : "plain";
           break;
         case "alloc":
-          badge = <span className="badge ok">Saved</span>;
+          stateWord = "Saved";
+          stateTone = "ok";
           break;
         case "loss":
-          badge = <span className="badge no">Dropped in value</span>;
+          stateWord = "Dropped in value";
+          stateTone = "no";
           break;
         case "reconcile":
-          badge = <span className="badge plain">Handled</span>;
+          stateWord = "Handled";
+          stateTone = "plain";
           break;
         case "error":
-          badge = <span className="badge no">On it</span>;
+          stateWord = "On it";
+          stateTone = "no";
           break;
         default:
-          badge = null;
+          stateWord = "";
       }
     }
 
-    // Latest fare: the newest mark event's own figures — struck old -> new
-    // when the price moved, the single value when it didn't (old === new,
-    // so nothing is hidden). An error with no mark yet shows its code.
-    let fare: ReactNode = null;
+    // The fare is the newest mark's own figures: the current price large,
+    // the previous one struck through beside it ONLY when it actually moved.
+    let fareNow: string | null = null;
+    let fareWas: string | null = null;
     for (let i = rows.length - 1; i >= 0; i--) {
       const e = rows[i].event;
       if (e.type === "mark") {
-        fare = (
-          <div className="fare num">
-            {e.old !== e.new ? (
-              <>
-                <s>{money(e.old, currency)}</s> →{" "}
-                {money(e.new, currency)}
-              </>
-            ) : (
-              money(e.new, currency)
-            )}
-          </div>
-        );
+        fareNow = money(e.new, currency);
+        if (e.old !== e.new) fareWas = money(e.old, currency);
         break;
       }
-    }
-    if (!fare && last.type === "error") {
-      fare = <div className="fare num">{last.code}</div>;
     }
 
     // Money moment: the newest alloc ("saved …") or loss ("↓ …") — each
@@ -942,25 +954,26 @@ export default function DeskPage() {
     for (let i = rows.length - 1; i >= 0; i--) {
       const e = rows[i].event;
       if (e.type === "alloc") {
-        delta = <div className="saved">saved {money(e.amount, currency)}</div>;
+        delta = (
+          <span className="tc-delta up num">
+            saved {money(e.amount, currency)}
+          </span>
+        );
         break;
       }
       if (e.type === "loss") {
         delta = (
-          <div className="fare num tg-down">
+          <span className="tc-delta down num">
             ↓ {money(e.amount, currency).replace("−", "")}
-          </div>
+          </span>
         );
         break;
       }
     }
 
-    // The plain-language line — same Pass 4 phrases, and ONLY when the
-    // latest event needs words a badge can't carry (stale data, a question
-    // for the manager, an issue). Routine states stay visual: the badge
-    // word + the dots + the fare already say it, so repeating "Waiting for
-    // a better fare" on five quiet cards is exactly the wall Jaydon read.
-    const now =
+    // The one sentence a card is allowed — only when the latest event needs
+    // words that a status chip cannot carry.
+    const note =
       last.type === "trade" && last.kind === "escalate"
         ? "Asking you first"
         : last.type === "mark" && last.stale
@@ -971,63 +984,156 @@ export default function DeskPage() {
 
     const label = snapPos?.trip_label?.trim();
     const hasRoute = Boolean(snapPos && snapPos.origin && snapPos.dest);
-    const sub: string[] = [];
-    if (snapPos?.depart_date) sub.push(shortDate(snapPos.depart_date));
-    if (snapPos && typeof snapPos.pax === "number" && snapPos.pax >= 1) {
-      sub.push(snapPos.pax === 1 ? "1 person" : `${snapPos.pax} people`);
-    }
+    const open = Boolean(openTrips[group.key]);
+    const detailId = `trip-detail-${group.key}`;
 
     return (
-      <div key={group.key} className={blocked ? "tg blocked" : "tg"}>
-        <div className={avatarCls}>{tripInitials(snapPos, pos)}</div>
-        <div className="tg-body">
-          <div className="tg-head">
-            <span className="tg-label">{label || friendlyTrip(pos)}</span>
-            {sub.length > 0 && (
-              <span className="tg-sub">{sub.join(" · ")}</span>
-            )}
-          </div>
-          {hasRoute && snapPos && (
-            <div
-              className="tg-route"
-              aria-label={`${snapPos.origin} to ${snapPos.dest}`}
-            >
-              <span className="tg-city num">{snapPos.origin}</span>
-              <span className="tg-path" aria-hidden="true">
-                <i className="tg-dot" />
-                <i className="tg-line" />
-                <span className="tg-plane">
-                  <svg viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" />
-                  </svg>
-                </span>
-                <i className="tg-line" />
-                <i className="tg-dot" />
-              </span>
-              <span className="tg-city num">{snapPos.dest}</span>
-            </div>
+      <article
+        key={group.key}
+        className={blocked ? "tcard blocked" : "tcard"}
+      >
+        <div className="tc-top">
+          <span className="tc-name">{label || friendlyTrip(pos)}</span>
+          {stateWord && (
+            <span className={`badge ${stateTone}`}>{stateWord}</span>
           )}
-          <div className="tg-track">
+        </div>
+
+        {hasRoute && snapPos ? (
+          <div
+            className="tc-route"
+            aria-label={`${snapPos.origin} to ${snapPos.dest}`}
+          >
+            <span className="tc-code num">{snapPos.origin}</span>
+            <span className="tc-path" aria-hidden="true">
+              <i className="tc-dot" />
+              <i className="tc-line" />
+              <span className="tc-plane">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" />
+                </svg>
+              </span>
+              <i className="tc-line" />
+              <i className="tc-dot" />
+            </span>
+            <span className="tc-code num">{snapPos.dest}</span>
+          </div>
+        ) : (
+          <div className="tc-route tc-route-none">
+            <span className="tc-code num">{friendlyTrip(pos)}</span>
+          </div>
+        )}
+
+        <div className="tc-facts">
+          {snapPos?.depart_date && (
+            <span className="tc-fact">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="16" rx="3" />
+                <path d="M3 10h18M8 3v4M16 3v4" />
+              </svg>
+              <span className="num">{shortDate(snapPos.depart_date)}</span>
+            </span>
+          )}
+          {snapPos && typeof snapPos.pax === "number" && snapPos.pax >= 1 && (
+            <span
+              className="tc-fact"
+              aria-label={snapPos.pax === 1 ? "1 person" : `${snapPos.pax} people`}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="8" r="3.4" />
+                <path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6" />
+              </svg>
+              <span className="num">{snapPos.pax}</span>
+            </span>
+          )}
+        </div>
+
+        <div className="tc-money">
+          {fareNow && (
+            <span className="tc-fare num">
+              {fareNow}
+              {fareWas && <s className="tc-was">{fareWas}</s>}
+            </span>
+          )}
+          {delta}
+        </div>
+
+        {note && <div className="tc-note">{note}</div>}
+
+        <button
+          type="button"
+          className="tc-more"
+          aria-expanded={open}
+          aria-controls={detailId}
+          onClick={() =>
+            setOpenTrips((prev) => ({ ...prev, [group.key]: !prev[group.key] }))
+          }
+        >
+          <span className="tc-track">
             {rows.map(({ event, ix }) => (
-              <div
+              <span
                 key={ix}
                 data-ix={ix}
                 className={`trip tick ${tickTone(event, snapPos)}`}
-                title={tripTitle(event)}
+                title={stepWord(event, snapPos)}
               >
                 <span className="tick-dot" aria-hidden="true" />
-                <span className="tick-word">{tripTitle(event)}</span>
-              </div>
+                <span className="tick-word">{stepWord(event, snapPos)}</span>
+              </span>
             ))}
-          </div>
-          {now && <div className="tg-now">{now}</div>}
+          </span>
+          <span className="tc-more-text">
+            {rows.length === 1 ? "1 update" : `${rows.length} updates`}
+          </span>
+          <span className="tc-chev" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M7 10l5 5 5-5" />
+            </svg>
+          </span>
+        </button>
+
+        {/* The step-by-step detail — the wording that used to sit on the
+            board, now opened per trip. Every line is the event's own type
+            word plus that event's own figures. */}
+        <div id={detailId} className="tc-detail" hidden={!open}>
+          {rows.map(({ event, ix }) => (
+            <div key={ix} className="tc-step">
+              <span className={`tc-step-dot ${tickTone(event, snapPos)}`} />
+              <span className="tc-step-word">{stepWord(event, snapPos)}</span>
+              <span className="tc-step-val num">
+                {event.type === "mark" ? (
+                  event.old !== event.new ? (
+                    <>
+                      <s>{money(event.old, currency)}</s> →{" "}
+                      {money(event.new, currency)}
+                    </>
+                  ) : (
+                    money(event.new, currency)
+                  )
+                ) : event.type === "alloc" ? (
+                  `saved ${money(event.amount, currency)}`
+                ) : event.type === "loss" ? (
+                  `↓ ${money(event.amount, currency).replace("−", "")}`
+                ) : event.type === "reconcile" ? (
+                  money(event.delta, currency)
+                ) : event.type === "error" ? (
+                  event.code
+                ) : event.type === "trade" ? (
+                  event.kind === "book" ? (
+                    "Price looked good"
+                  ) : event.kind === "hold" ? (
+                    "Waiting for a better fare"
+                  ) : (
+                    "Asking you first"
+                  )
+                ) : (
+                  ""
+                )}
+              </span>
+            </div>
+          ))}
         </div>
-        <div className="tg-right">
-          {badge}
-          {fare}
-          {delta}
-        </div>
-      </div>
+      </article>
     );
   }
 
@@ -1670,7 +1776,7 @@ export default function DeskPage() {
         </aside>
 
         <div className="desk-main">
-          {/* ---- the trips — one board, ONE CARD PER TRIP (Pass 7) ------ */}
+          {/* ---- the trips — a grid of boarding-pass cards (Pass 8) ----- */}
           <section className="board">
           <div className="sec">The trips</div>
           {tripGroups.length === 0 ? (
@@ -1699,7 +1805,7 @@ export default function DeskPage() {
               )}
             </>
           ) : (
-            tripGroups.map(renderTripGroup)
+            <div className="tgrid">{tripGroups.map(renderTripGroup)}</div>
           )}
           </section>
 
