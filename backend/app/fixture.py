@@ -7,11 +7,27 @@ carry provenance notes and are disclosed on the mandate card / meta event
 """
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
 from app.models import Budget, Mandate, Position
+
+# Fail-closed demo-only override: when set to exactly "1", the real seed
+# endpoint (POST /desk/seed — the landing page's "Start booking" button)
+# returns ONE position — DUR->CPT, 1 adult, 2026-09-20 — matching
+# `backend/data/recorded/booking_envelopes.json`'s genuinely captured
+# TICKETED sandbox ticket verbatim, instead of the six-position demo
+# portfolio below. Unset (default) is byte-identical to before this
+# existed. Exists so a recorded-mode demo can go through the REAL landing
+# page + button (not a side endpoint) and reach a clean Booked ticket:
+# the six-position portfolio fans one search per position, but the
+# recording only carries ONE scripted search, so five of six positions
+# fail closed to a disclosed stale mark (by design — see
+# docs/external/atlas-integration.md). One position means one search,
+# one clean reprice, no stale-mark noise.
+SINGLE_DEMO_ENV = "WAYPOINT_DEMO_SINGLE_POSITION"
 
 # Curated per-route-type volatility bands (fraction-of-fare move considered
 # "normal" between reprices). Provenance is part of the data — the desk
@@ -87,6 +103,39 @@ def seeded_portfolio(
     budget_total = budget_total.quantize(Decimal("0.01"))
     desk_id = f"desk-{uuid4().hex[:8]}"
     now = datetime.now(timezone.utc)
+
+    if os.environ.get(SINGLE_DEMO_ENV) == "1":
+        mandate = Mandate(
+            id=desk_id,
+            holder="Waypoint Demo Desk",
+            team_size=team_size,
+            destination_label=destination_label,
+            trip_purpose=trip_purpose,
+            created_at=now,
+            budget_total=budget_total,
+            authority_cap=authority_cap,
+            contingency_pct=contingency_pct,
+            currency="USD",
+        )
+        positions = [Position(
+            id=f"{desk_id}-pos-1",
+            trip_label="Durban → Cape Town (recorded capture)",
+            origin="DUR", dest="CPT", depart_date=date(2026, 9, 20),
+            pax=1, status="held",
+            # Below the capture's real $64.11 fare on purpose: trips the
+            # fallback brain's "book" branch, not "hold".
+            cost_basis=Decimal("50.00"), mark_price=Decimal("50.00"),
+            mark_at=now, mark_stale=False,
+        )]
+        cents = Decimal("0.01")
+        pct = Decimal(str(contingency_pct))
+        budgets = [Budget(
+            desk_id=desk_id, period="2026-W38",
+            allocated=budget_total,
+            contingency=(budget_total * pct).quantize(cents),
+        )]
+        return mandate, positions, budgets
+
     if inject_scenario:
         spike_label = "London client meeting"
         spike_mark = Decimal("1790.00")   # over the 1500 cap — arms the beat
