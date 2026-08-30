@@ -24,8 +24,10 @@ import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -44,7 +46,7 @@ from app.agent.auditor import (
 from app.agent.loop import DEFAULT_ESCALATION_WAIT, METER_MAX, DeskAgent
 from app.db.store import DeskStore
 from app.events import SINK
-from app.models import CloseReport, DeskResult
+from app.models import Budget, CloseReport, DeskResult, Mandate, Position
 
 router = APIRouter(prefix="/api", tags=["waypoint"])
 
@@ -428,6 +430,87 @@ async def seed_desk(request: SeedRequest | None = None) -> dict:
         "invite_token": invite_token,
         "confirmation_code": confirmation_code,
     }
+
+
+# Fail-closed dev gate (INJECT_SCENARIO_ENV precedent): the debug seed
+# below only exists when this reads exactly "1" — unset or anything else
+# is a 404, never reachable in a normal deploy or linked from the UI.
+DEBUG_SEED_ENV = "WAYPOINT_ALLOW_DEBUG_SEED"
+
+
+def _debug_seed_armed() -> bool:
+    return os.environ.get(DEBUG_SEED_ENV) == "1"
+
+
+@router.post("/desk/seed-demo-single")
+async def seed_demo_single(request: SeedRequest | None = None) -> dict:
+    """DEV-ONLY: seed exactly ONE position — DUR->CPT, 1 adult, 2026-09-20
+    — matching `backend/data/recorded/booking_envelopes.json`'s genuinely
+    captured TICKETED sandbox ticket (order TESTA20260830223723623, PNR
+    S22178) verbatim.
+
+    Exists for a clean recorded-mode demo: the real 6-position portfolio
+    (`/desk/seed`) fans one search per position, but the recording only
+    carries ONE scripted search, so five of six positions fail closed to
+    a disclosed stale mark (by design, not a bug — see
+    docs/external/atlas-integration.md). One position means one search,
+    one clean reprice, no stale-mark noise.
+
+    `cost_basis` is set below the capture's $64.11 fare on purpose, so
+    the fallback brain's book/lock branch fires and the write path
+    (verify -> create -> pay -> order status) runs end-to-end against the
+    same single scripted envelope per verb, ending in a genuine TICKETED.
+
+    404s unless WAYPOINT_ALLOW_DEBUG_SEED=1. Never wired into the seed
+    form; hit it directly (curl / Postman) for demo prep, then open
+    /desk/{desk_id} in the browser.
+    """
+    if not _debug_seed_armed():
+        raise HTTPException(status_code=404, detail="not found")
+
+    req = request or SeedRequest()
+    desk_id = f"desk-{uuid4().hex[:8]}"
+    now = datetime.now(timezone.utc)
+    mandate = Mandate(
+        id=desk_id,
+        holder="Waypoint Debug Seed — DUR-CPT capture",
+        team_size=1,
+        destination_label="Cape Town, South Africa",
+        trip_purpose="Demo — matches the recorded sandbox ticket",
+        created_at=now,
+        budget_total=req.budget_total,
+        authority_cap=req.authority_cap,
+        contingency_pct=req.contingency_pct,
+        currency="USD",
+    )
+    position = Position(
+        id=f"{desk_id}-pos-1",
+        trip_label="Durban → Cape Town (recorded capture)",
+        origin="DUR",
+        dest="CPT",
+        depart_date=date(2026, 9, 20),
+        pax=1,
+        status="held",
+        # Below the capture's real $64.11 fare on purpose (see docstring):
+        # trips the fallback brain's "book" branch, not "hold".
+        cost_basis=Decimal("50.00"),
+        mark_price=Decimal("50.00"),
+        mark_at=now,
+        mark_stale=False,
+    )
+    cents = Decimal("0.01")
+    pct = Decimal(str(req.contingency_pct))
+    budget = Budget(
+        desk_id=desk_id, period="2026-W38",
+        allocated=req.budget_total,
+        contingency=(req.budget_total * pct).quantize(cents),
+    )
+
+    seeded_id = await asyncio.to_thread(
+        STORE.seed_desk, mandate, [position], [budget]
+    )
+    _start_cycle(seeded_id)
+    return {"desk_id": seeded_id}
 
 
 # Shared tolerant int env read (app.config, M-new2 consolidation): a
