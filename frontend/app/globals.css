@@ -70,6 +70,190 @@
   --t-med: 220ms;
   --t-slow: 320ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* ==================================================================
+     PASS 10 TOKEN LAYER — definitions only.
+     Everything above stays for backward compatibility; the aliases at
+     the end of this block map the old names onto the new scale so no
+     existing rule changes meaning. Components should reference the
+     SEMANTIC names (--text-*, --surface-*, --border-*, --status-*),
+     never a raw hue: a component that references --good cannot be
+     re-themed, one that references --status-ok-text can.
+     Rationale + measurements: docs/design-research-pass10.md
+     ================================================================== */
+
+  /* ---- 1. Spacing. 4px base (Primer/Carbon/Atlassian all ship a 4px
+       grid with sub-4px steps for icon-adjacent gaps). ------------- */
+  --space-0: 0;
+  --space-1: 2px;    /* icon-adjacent hairline gaps */
+  --space-2: 4px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --space-8: 32px;
+  --space-9: 40px;
+  --space-10: 48px;
+  --space-11: 64px;
+
+  /* Semantic spacing — chosen by RELATIONSHIP, not by element, so card
+     padding is never an ad-hoc per-component decision (Polaris ships
+     space-card-padding for exactly this reason). */
+  --space-icon: var(--space-3);          /* icon <-> its own label */
+  --space-stack: var(--space-4);         /* items within one group */
+  --space-card-gap: var(--space-5);      /* between groups inside a card */
+  --space-card-padding: var(--space-6);  /* a card's own inset */
+  --space-group: var(--space-7);         /* between components */
+  --space-section: var(--space-9);       /* between page-level sections */
+
+  /* ---- 2. Type. Size / line-height / tracking are bound per step.
+       Tracking CROSSES ZERO (positive below 16px, zero at 16-22px,
+       negative above) and the line-height ratio tightens as size grows
+       above ~22px — both confirmed against Material 3 and Carbon. ---- */
+  --font-fine-size: 12px;   --font-fine-lh: 16px;  --font-fine-track: 0.16px;
+  --font-small-size: 13px;  --font-small-lh: 18px; --font-small-track: 0.08px;
+  --font-body-size: 14px;   --font-body-lh: 20px;  --font-body-track: 0.04px;
+  --font-lead-size: 16px;   --font-lead-lh: 24px;  --font-lead-track: 0;
+  --font-title-size: 18px;  --font-title-lh: 24px; --font-title-track: -0.1px;
+  --font-h2-size: 22px;     --font-h2-lh: 28px;    --font-h2-track: -0.2px;
+  --font-h1-size: 28px;     --font-h1-lh: 36px;    --font-h1-track: -0.4px;
+  --font-display-size: 36px; --font-display-lh: 44px; --font-display-track: -0.6px;
+
+  /* KPI figures get their OWN ramp (Atlassian's font.metric.*), so a
+     metric is never a heading in disguise. Bold, tabular, tight. */
+  --metric-sm-size: 16px;  --metric-sm-lh: 20px;
+  --metric-md-size: 24px;  --metric-md-lh: 28px;
+  --metric-lg-size: 28px;  --metric-lg-lh: 32px;
+  --metric-hero-size: clamp(28px, 2.6vw, 36px); --metric-hero-lh: 1.12;
+
+  /* ---- 3. Elevation. Polaris-derived, NOT Primer's (see research §1.1):
+       never pure black — the shadow is --ink, the background's own hue
+       family; the light source is directly overhead, so the bottom edge
+       is darker than the sides; opacity RISES with elevation and that
+       direction is applied consistently. Level 4 is reserved for lifted
+       / dragged states only (M3 reserves its top two the same way). --- */
+  --elevation-0: none;
+  --elevation-1:
+    0 0 0 1px rgba(27, 36, 48, 0.05),
+    0 1px 2px -1px rgba(27, 36, 48, 0.09);
+  --elevation-2:
+    0 0 0 1px rgba(27, 36, 48, 0.05),
+    0 2px 4px -2px rgba(27, 36, 48, 0.10),
+    0 5px 12px -5px rgba(27, 36, 48, 0.11);
+  --elevation-3:
+    0 0 0 1px rgba(27, 36, 48, 0.06),
+    0 4px 8px -3px rgba(27, 36, 48, 0.13),
+    0 12px 24px -8px rgba(27, 36, 48, 0.15);
+  --elevation-4:
+    0 0 0 1px rgba(27, 36, 48, 0.07),
+    0 8px 16px -6px rgba(27, 36, 48, 0.17),
+    0 22px 44px -14px rgba(27, 36, 48, 0.22);
+  /* On the dark surfaces elevation is LIGHTNESS, not shadow (M3): a
+     shadow is invisible on near-black. See --surface-inverse-* below. */
+
+  /* ---- 4. Radius. Outer and gap are chosen TOGETHER so that
+       inner = outer - gap lands on a value that is itself a good
+       radius (concentric corners; Apple's ConcentricRectangle). ----- */
+  --radius-xs: 4px;
+  --radius-sm: 8px;    /* status lozenges (M3 chip 8px; Polaris badge 8px) */
+  --radius-md: 10px;   /* buttons, inputs, inner trays */
+  --radius-lg: 14px;   /* = --radius-xl minus the 6px board inset */
+  --radius-xl: 20px;   /* top-level surfaces */
+  --radius-pill: 999px; /* avatars and true pills ONLY */
+  /* Use for any child flush inside a padded parent:
+       --radius-inner: calc(var(--radius-outer) - var(--pad)); */
+
+  /* ---- 5. Semantic colour. Derived steps are OKLCH-stepped from the
+       existing hues (hue held, chroma reduced only where the colour
+       left sRGB) — no new hue families. Every ratio below is measured;
+       the full table is in docs/design-research-pass10.md §4. ------- */
+
+  /* surfaces */
+  --surface-page: var(--paper);
+  --surface-card: var(--card);
+  --surface-sunken: var(--paper);
+  --surface-inverse: #141B24;          /* white 17.33:1  --good 5.52:1 */
+  --surface-inverse-raised: #1B2430;   /* == --ink; white 15.65  --good 4.99 */
+  --surface-inverse-high: #232D3A;     /* white 13.93  --good 4.44 */
+
+  /* text */
+  --text-primary: var(--ink);          /* 15.00 on paper */
+  --text-secondary: var(--mut);        /* 4.42 on paper — AA body */
+  --text-tertiary: var(--mut);         /* --faint is 2.45 and MUST NOT hold text on light */
+  --text-on-inverse: #FFFFFF;
+  --text-on-inverse-secondary: rgba(255, 255, 255, 0.74);
+  --text-on-inverse-tertiary: var(--faint);   /* 6.79 on --surface-inverse */
+  --text-on-brand: #FFFFFF;            /* 5.47 on --brand */
+
+  /* borders */
+  --border-subtle: var(--line);
+  --border-default: var(--line2);
+  --border-strong: #C9C2B4;
+  --border-inverse: rgba(255, 255, 255, 0.12);
+  --border-inverse-strong: rgba(255, 255, 255, 0.26);
+
+  /* status — text/mark steps that actually clear AA on their own tint.
+     MEASURED: the raw hues fail (good 2.85, warn 2.88, bad 3.82 on
+     their tints). These clear 4.8+. NOTE (research §4.2): all three
+     land at L* ~45, so they are INDISTINGUISHABLE IN GREYSCALE and
+     under deuteranopia. Colour therefore carries NO status meaning on
+     its own anywhere in this app — the word and the pip SHAPE do. */
+  --status-ok-text: #007B49;     /* 4.85 on --goodbg, 5.34 on --card */
+  --status-wait-text: #995D00;   /* 4.86 on --warnbg, 5.36 on --card */
+  --status-no-text: #C23140;     /* 4.84 on --badbg,  5.52 on --card */
+  --status-flat-text: var(--mut);
+  --status-ok-bg: var(--goodbg);
+  --status-wait-bg: var(--warnbg);
+  --status-no-bg: var(--badbg);
+  --status-flat-bg: var(--paper);
+  /* lifted steps for the dark record surface (M3: accents get LIGHTER
+     in dark, never darker). --bad is 3.60 on the raised dark surface,
+     so red text on dark must use --status-no-on-dark, not --bad. */
+  --status-ok-on-dark: #17A76B;    /* 5.05 on --surface-inverse-raised */
+  --status-wait-on-dark: #C9821F;  /* 4.99 */
+  --status-no-on-dark: #F05D65;    /* 4.81 */
+  --brand-on-dark: #449D94;        /* 4.84 */
+
+  /* ---- 6. Focus. ONE token, two tones, so it reads on every surface
+       this app has: on light the brand ring carries it (5.47:1 on
+       white); on the near-black record the white inner ring does
+       (17.33:1). --brand alone is only 2.86:1 there and would fail.
+       box-shadow is used because it can be two colours — NOT because
+       outline ignores border-radius, which stopped being true in
+       Safari 16.4 (Baseline March 2023). See research §1.2. -------- */
+  --focus-ring:
+    0 0 0 2px var(--surface-card),
+    0 0 0 4px var(--brand);
+  --focus-ring-inverse:
+    0 0 0 2px var(--surface-inverse),
+    0 0 0 4px #FFFFFF;
+
+  /* ---- 7. Motion. Carbon's tokens, each with a stated job; entering
+       decelerates, exiting accelerates and is shorter. ------------- */
+  --motion-micro: 70ms;    /* press feedback */
+  --motion-fade: 110ms;    /* hover, colour */
+  --motion-move: 150ms;    /* small movement, state change */
+  --motion-expand: 240ms;  /* disclosure, toast */
+  --ease-standard: cubic-bezier(0.2, 0, 0.38, 0.9);
+  --ease-enter: cubic-bezier(0, 0, 0.38, 0.9);   /* decelerate */
+  --ease-exit: cubic-bezier(0.2, 0, 1, 0.9);     /* accelerate */
+
+  /* ---- 8. Back-compat aliases. The old names keep resolving, so no
+       existing declaration changes meaning when it is not rewritten. */
+  --sp-2: var(--space-3);
+  --sp-3: var(--space-4);
+  --sp-4: var(--space-5);
+  --sp-5: var(--space-6);
+  --sp-6: var(--space-7);
+  --sp-7: var(--space-8);
+  --r-card: var(--radius-xl);
+  --r-trip: var(--radius-lg);
+  --r-btn: var(--radius-md);
+  --r-bar: var(--radius-sm);
+  --shadow-1: var(--elevation-1);
+  --shadow-2: var(--elevation-2);
+  --shadow-3: var(--elevation-3);
 }
 
 * { box-sizing: border-box; }
@@ -873,6 +1057,22 @@ td.num { font-family: var(--mono); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
+/* Reduced motion is a SAFETY NET, not a delete. Pass 10: this block used
+   to be `animation: none; transition: none`, which had two problems —
+   `transitionend` never fires, so any JS waiting on it stalls; and it
+   removes opacity fades, which are NOT vestibular triggers (the triggers
+   are scaling, spinning, parallax, plane-shifting and peripheral motion).
+   1ms keeps the events firing while removing the movement. Components
+   restore opacity-only alternatives beneath this in presentation.css. */
 @media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }
