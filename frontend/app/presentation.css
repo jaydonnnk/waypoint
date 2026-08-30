@@ -1218,9 +1218,19 @@
   grid-template-columns: 8px minmax(0, 1fr) auto;
   align-items: baseline;
   column-gap: var(--space-4);
+  row-gap: 2px;
   /* pad the item, never margin between items — no dead zones */
   padding: var(--space-3) 0;
   border-bottom: 1px solid var(--border-subtle);
+}
+/* a REASON is prose, so it sits under its word and reads left-to-right;
+   only FIGURES take the right-hand column, where they line up */
+.tc-step-why {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+  color: var(--text-secondary);
 }
 .tc-step:last-child { border-bottom: none; }
 .tc-step-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border-default); align-self: center; }

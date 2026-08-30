@@ -1273,42 +1273,57 @@ export default function DeskPage() {
             board, now opened per trip. Every line is the event's own type
             word plus that event's own figures. */}
         <div id={detailId} className="tc-detail" hidden={!open}>
-          {rows.map(({ event, ix }) => (
-            <div key={ix} className="tc-step">
-              <span className={`tc-step-dot ${tickTone(event, snapPos)}`} />
-              <span className="tc-step-word">{stepWord(event, snapPos)}</span>
-              <span className="tc-step-val num">
-                {event.type === "mark" ? (
-                  event.old !== event.new ? (
-                    <>
-                      <s>{money(event.old, currency)}</s> →{" "}
-                      {money(event.new, currency)}
-                    </>
-                  ) : (
-                    money(event.new, currency)
-                  )
-                ) : event.type === "alloc" ? (
-                  `saved ${money(event.amount, currency)}`
-                ) : event.type === "loss" ? (
-                  `↓ ${money(event.amount, currency).replace("−", "")}`
-                ) : event.type === "reconcile" ? (
-                  money(event.delta, currency)
-                ) : event.type === "error" ? (
-                  event.code
-                ) : event.type === "trade" ? (
-                  event.kind === "book" ? (
-                    "Price looked good"
-                  ) : event.kind === "hold" ? (
-                    "Waiting for a better fare"
-                  ) : (
-                    "Asking you first"
-                  )
-                ) : (
-                  ""
+          {/* A step has a WORD and, depending on the event, either a FIGURE
+              or a REASON. They are not the same kind of thing and they no
+              longer share a slot: a figure right-aligns in its own column
+              so figures line up down the card, while a reason is prose and
+              sits on its own line under the word. Previously both were
+              right-aligned, which put "On hold" and "Waiting for a better
+              fare" at opposite ends of a narrow card. */}
+          {rows.map(({ event, ix }) => {
+            const reason =
+              event.type === "trade"
+                ? event.kind === "book"
+                  ? "Price looked good"
+                  : event.kind === "hold"
+                    ? "Waiting for a better fare"
+                    : "Asking you first"
+                : null;
+            return (
+              <div key={ix} className="tc-step">
+                <span className={`tc-step-dot ${tickTone(event, snapPos)}`} />
+                <span className="tc-step-word">{stepWord(event, snapPos)}</span>
+                {!reason && (
+                  <span className="tc-step-val fig">
+                    {event.type === "mark" ? (
+                      event.old !== event.new ? (
+                        <>
+                          <s>
+                            <span className="visually-hidden">was </span>
+                            {money(event.old, currency)}
+                          </s>{" "}
+                          → {money(event.new, currency)}
+                        </>
+                      ) : (
+                        money(event.new, currency)
+                      )
+                    ) : event.type === "alloc" ? (
+                      `saved ${money(event.amount, currency)}`
+                    ) : event.type === "loss" ? (
+                      `↓ ${money(event.amount, currency).replace("−", "")}`
+                    ) : event.type === "reconcile" ? (
+                      money(event.delta, currency)
+                    ) : event.type === "error" ? (
+                      <span className="num">{event.code}</span>
+                    ) : (
+                      ""
+                    )}
+                  </span>
                 )}
-              </span>
-            </div>
-          ))}
+                {reason && <span className="tc-step-why">{reason}</span>}
+              </div>
+            );
+          })}
         </div>
       </article>
     );
