@@ -455,6 +455,13 @@ export default function DeskPage() {
   // or writes it, and toggling only flips a boolean, so the stream render
   // (row keys, EventSource, reducer) is never disturbed.
   const [recordOpen, setRecordOpen] = useState(false);
+  // Pass 11 (demo hardening): the record is the whole "it shows its work"
+  // proposition and a reader may never click it. Once the run has SETTLED
+  // it opens ITSELF, exactly once — but never while the run is live, where
+  // an accreting log under a live board is noise, and never against a
+  // reader who has already made their own choice.
+  const recordTouchedRef = useRef(false); // the reader took control
+  const recordAutoRef = useRef(false);    // the one auto-open already fired
   // Pass 8: which trip cards have their step-by-step detail open, keyed by
   // the group key. Same shape of local-only UI state as recordOpen above —
   // the stream, the reducer and the replay never read or write it, and a
@@ -882,6 +889,15 @@ export default function DeskPage() {
   ).length;
   const errCount = screen.blotter.filter((r) => r.event.type === "error").length;
   const settled = Boolean(screen.result) || screen.cycleFailed;
+  // The record opens itself on settle (see recordAutoRef above). It runs at
+  // most once per page load: a reconnect replay re-delivers the same result
+  // and must not re-open a panel the reader has since closed.
+  useEffect(() => {
+    if (!settled) return;
+    if (recordTouchedRef.current || recordAutoRef.current) return;
+    recordAutoRef.current = true;
+    setRecordOpen(true);
+  }, [settled]);
   // Pass 2 (Person A): the newest narration step, surfaced verbatim in the
   // main run card. Pure derivation — no state, no memo, no step mutation.
   const latestStep =
@@ -2344,12 +2360,28 @@ export default function DeskPage() {
           </div>
           {tripGroups.length === 0 ? (
             <>
+              {/* Pass 11. This used to read "we never reached this booking"
+                  for a dead stream and "Just starting" for everything else —
+                  so a run that SETTLED having booked nothing (every candidate
+                  dropped, the budget exhausted, every escalation declined)
+                  was told either that the agent never got there or that it
+                  was still warming up. Both are false, and on a product whose
+                  pitch is that it shows its work honestly, claiming the agent
+                  never arrived when it arrived and declined is exactly the
+                  wrong lie. Four states, four sentences, and none of them
+                  asserts a cause the screen cannot see. `settled` is checked
+                  FIRST because a result outranks a closed stream: the run
+                  finished, we just are not listening any more. */}
               <div className="trip empty">
-                {streamDead
-                  ? "No trips to show — we never reached this booking."
-                  : awaiting
+                <span className="empty-copy">
+                  {awaiting
                     ? "Nothing yet — the trips appear once you release the booking."
-                    : "Just starting — updates will appear here."}
+                    : settled
+                      ? "No trips on the board. This run reached the end of its work — whatever it considered is in the full record below."
+                      : streamDead
+                        ? "No trips arrived before the connection closed. We can't say what happened after that."
+                        : "Just starting — updates will appear here."}
+                </span>
               </div>
               {/* Honest skeletons — obvious placeholders (no text, no
                   numbers), rendered ONLY while a run is genuinely starting.
@@ -2400,7 +2432,10 @@ export default function DeskPage() {
             className="record-toggle"
             aria-expanded={recordOpen}
             aria-controls="full-record"
-            onClick={() => setRecordOpen((o) => !o)}
+            onClick={() => {
+              recordTouchedRef.current = true;
+              setRecordOpen((o) => !o);
+            }}
           >
             <span className="rt-main">
               <span className="rt-k">The full record</span>
