@@ -204,7 +204,6 @@
    release-code button on the gate, and the approval button — not just
    the ones on the desk. The hue never changes; only the text on it. */
 .btn.primary,
-.hero-form .start-btn.primary,
 .cta {
   color: var(--ink);
 }
@@ -1548,221 +1547,19 @@
       transparent 55%),
     linear-gradient(160deg, #0a4d47 0%, #0f766e 48%, #107a71 100%);
 }
-.mandate-screen {
-  background:
-    radial-gradient(120% 120% at 82% 30%, rgba(94, 234, 212, 0.13) 0%,
-      transparent 55%),
-    linear-gradient(105deg, #0a4d47 0%, #0f766e 50%, #107a71 78%, #12857b 100%);
+/* Screen 1 (landing + share card) was reverted to its pre-Pass-8 design.
+   globals.css still carries the whole two-pane teal hero for this screen
+   unchanged — the glass fields, the coral CTA + marker dots, the sizes —
+   so §9 no longer restyles any of it. It only puts back the base field
+   styling that the shared .constraint-* rules above (kept as-is for the
+   desk's decide / gate / approval panels) stopped providing here:
+   monospace uppercase labels, monospace inputs, the tighter corner. */
+.mandate-screen .constraint-field { border-radius: var(--r-bar); }
+.mandate-screen .constraint-k {
+  font-family: var(--mono);
+  text-transform: uppercase;
 }
-@media (max-width: 900px) {
-  .mandate-screen {
-    background:
-      radial-gradient(120% 70% at 82% 6%, rgba(94, 234, 212, 0.14) 0%,
-        transparent 55%),
-      linear-gradient(165deg, #0a4d47 0%, #0f766e 55%, #107a71 100%);
-  }
-}
-
-.hero-title {
-  font-size: clamp(34px, 4.2vw, 54px);
-  letter-spacing: -1.2px;
-  line-height: 1.06;
-}
-.hero-lead {
-  font-size: clamp(15px, 1.25vw, 18px);
-  max-width: 44ch;
-  color: #ffffff;
-  opacity: 0.92;
-}
-.hero .assure-chip {
-  min-height: 34px;
-  border-radius: var(--radius-sm);
-  border-width: 1px;
-  gap: var(--space-3);
-  font-size: var(--font-fine-size);
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.26);
-}
-
-.hero-form { align-items: center; }
-.hero-form .start {
-  background: var(--surface-page);
-  border-radius: var(--radius-xl);
-  box-shadow: 0 24px 60px -18px rgba(4, 32, 29, 0.55);
-  padding: var(--space-8) var(--space-8) var(--space-7);
-  max-width: 620px;
-  width: 100%;
-  margin-left: auto;
-  justify-content: flex-start;
-  gap: var(--space-6);
-  flex: none;
-}
-.hero-form .start-title {
-  color: var(--text-primary);
-  font-size: var(--font-h1-size);
-  line-height: var(--font-h1-lh);
-  letter-spacing: var(--font-h1-track);
-  font-weight: 800;
-}
-.hero-form .start-sub {
-  color: var(--text-secondary);
-  font-size: var(--font-body-size);
-  line-height: var(--font-body-lh);
-  font-weight: 500;
-}
-.hero-form .note-soft {
-  color: var(--text-secondary);
-  font-weight: 500;
-  font-size: var(--font-fine-size);
-  line-height: var(--font-fine-lh);
-  text-align: left;
-  margin: 0;
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--border-subtle);
-}
-
-/* the form itself */
-.hero-form .constraints {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-5);
-  align-content: start;
-  flex: none;
-}
-.hero-form .constraint-field {
-  background: transparent;
-  border: none;
-  padding: 0;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  min-width: 0;
-  gap: var(--space-3);
-  justify-content: flex-start;
-}
-/* labels leave monospace-uppercase: they are labels, not identifiers */
-.hero-form .constraint-k {
-  color: var(--text-secondary);
-  font-family: var(--sans);
-  font-size: var(--font-fine-size);
-  line-height: var(--font-fine-lh);
-  letter-spacing: var(--font-fine-track);
-  font-weight: 600;
-  text-transform: none;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-.hero-form .constraint-k::before { content: none; }
-/* 11.5px was the one hard-coded size left below the fine step; a hint the
-   user is meant to read while typing has no business being the smallest
-   text on the screen. */
-.constraint-hint {
-  color: var(--text-secondary);
-  font-weight: 500;
-  font-size: var(--font-fine-size);
-  line-height: var(--font-fine-lh);
-}
-.hero-form .constraint-field input {
-  border: 1px solid var(--border-default);
-  background: var(--surface-card);
-  color: var(--text-primary);
-  /* 16px minimum: below it, iOS zooms the page on focus */
-  font-family: var(--sans);
-  font-size: 16px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  border-radius: var(--radius-md);
-  min-height: 48px;
-  padding: var(--space-4) var(--space-4);
-  transition:
-    border-color var(--motion-fade) var(--ease-standard),
-    box-shadow var(--motion-fade) var(--ease-standard);
-}
-.hero-form .constraint-field input::placeholder {
-  font-family: var(--sans);
-  font-weight: 400;
-  color: var(--faint);
-}
-.hero-form .constraint-field input:focus-visible,
-.constraint-field input:focus {
-  outline: none;
-  border-color: var(--brand);
-  box-shadow: var(--focus-ring);
-}
-/* a validation affordance that is honest: the field says its own bound
-   and only turns amber once the value is actually outside it */
-.hero-form .constraint-field.invalid input {
-  border-color: var(--status-wait-text);
-  background: var(--status-wait-bg);
-}
-.constraint-err {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  color: var(--status-wait-text);
-  font-size: 11.5px;
-  font-weight: 600;
-}
-
-.hero-form .start-btn {
-  min-height: 52px;
-  width: 100%;
-  padding: 0 var(--space-6);
-  font-size: var(--font-lead-size);
-  border-radius: var(--radius-md);
-}
-/* the glow is deliberately shallow: a heavier coral shadow tinted the
-   paper beneath it enough to drag the footnote under 4.5:1 (measured
-   3.85 at the old 26px/0.6) */
-.hero-form .start-btn.primary {
-  background: var(--pop);
-  color: var(--ink);                 /* 5.57:1, vs 2.81:1 for white */
-  box-shadow: 0 6px 14px -10px rgba(242, 118, 75, 0.45);
-}
-.hero-form .start-btn:disabled { opacity: 0.55; }
-
-/* share card */
-.hero-form .share-card { justify-content: flex-start; gap: var(--space-6); }
-.share-card .constraint-field { flex: 0 0 auto; }
-.hero-form .share-link input {
-  font-size: var(--font-small-size);
-  font-family: var(--mono);          /* a URL is a path — mono is right */
-  color: var(--brand);
-  font-weight: 600;
-}
-.hero-form .share-code input {
-  font-size: 26px;
-  letter-spacing: 2px;
-  text-align: center;
-  padding: var(--space-4);
-  font-family: var(--mono);          /* a release code is a token */
-  border: 1.5px dashed var(--border-default);
-  min-height: 60px;
-}
-.hero-form .copy-row { display: flex; gap: var(--space-3); align-items: stretch; }
-.hero-form .copy-row input { flex: 1; min-width: 0; }
-.hero-form .copy-btn {
-  flex: none;
-  min-height: 48px;
-  padding: 0 var(--space-5);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-family: var(--sans);
-  font-size: var(--font-small-size);
-  font-weight: 700;
-  letter-spacing: 0;
-  color: var(--ink);
-  background: var(--pop);
-  border: 1px solid rgba(27, 36, 48, 0.12);
-  user-select: none;
-  touch-action: manipulation;
-  transition: filter var(--motion-fade) var(--ease-standard);
-}
-@media (hover: hover) {
-  .hero-form .copy-btn:hover { filter: brightness(1.05); }
-}
-.hero-form .copy-btn:active { transform: scale(0.98); }
+.mandate-screen .constraint-field input { font-family: var(--mono); }
 
 /* ==================================================================== */
 /* §10 — Screen 3: the wrap-up                                          */
@@ -2464,12 +2261,10 @@
   .record .rail { grid-template-columns: minmax(0, 1fr); }
   .record .rail-detail { grid-column: 1; }
   .run { padding: var(--space-6); }
-  .hero-form .start { padding: var(--space-7) var(--space-6) var(--space-6); }
 }
 
 @media (max-width: 560px) {
   .tgrid { grid-template-columns: minmax(0, 1fr); }
-  .hero-form .constraints { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Reduced motion: SUBSTITUTION, not deletion. The global reset in
@@ -2488,7 +2283,6 @@
   .fm-dot { animation: none; transition: none; }
   .cta:active:not(:disabled),
   .btn:active:not(:disabled) { transform: none; }
-  .hero-form .copy-btn:active { transform: none; }
   /* the chevrons still turn — a 1ms rotation is a state, not motion */
   .tc-chev,
   .rt-chev { transition: none; }

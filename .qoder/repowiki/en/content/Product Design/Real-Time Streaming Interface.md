@@ -3,13 +3,12 @@
 <cite>
 **Referenced Files in This Document**
 - [page.tsx](file://frontend/app/page.tsx)
-- [page.tsx](file://frontend/app/recovering/[tripId]/page.tsx)
-- [page.tsx](file://frontend/app/recovered/[tripId]/page.tsx)
+- [layout.tsx](file://frontend/app/layout.tsx)
+- [globals.css](file://frontend/app/globals.css)
+- [presentation.css](file://frontend/app/presentation.css)
 - [types.ts](file://frontend/lib/types.ts)
 - [api.ts](file://frontend/lib/api.ts)
 - [format.ts](file://frontend/lib/format.ts)
-- [globals.css](file://frontend/app/globals.css)
-- [layout.tsx](file://frontend/app/layout.tsx)
 - [routes.py](file://backend/app/api/routes.py)
 - [loop.py](file://backend/app/agent/loop.py)
 - [02-architecture.md](file://docs/plans/waypoint/02-architecture.md)
@@ -22,12 +21,12 @@
 
 ## Update Summary
 **Changes Made**
-- Updated frontend architecture section to reflect complete Next.js implementation with TypeScript
-- Added detailed documentation for three main screens: disrupted trip display, live recovery progress, and final results
-- Enhanced SSE event handling documentation with actual TypeScript types and event flow
-- Updated error handling strategies based on implemented error states and loading states
-- Added responsive design considerations using CSS modules approach
-- Documented proper cleanup and resource management patterns
+- Updated frontend architecture section to reflect complete Next.js implementation with TypeScript and comprehensive design system
+- Added detailed documentation for the new token-based design system with 249+ CSS variables
+- Enhanced responsive design considerations using semantic spacing tokens and self-hosted fonts
+- Updated visual design specifications with USWDS-style type scale and 4px base grid spacing
+- Added documentation for font optimization replacing runtime Google Fonts loading
+- Enhanced accessibility considerations with proper focus management and reduced motion support
 
 ## Table of Contents
 1. Introduction
@@ -42,11 +41,11 @@
 10. Appendices
 
 ## Introduction
-This document specifies the real-time streaming interface that powers the live agent recovery experience using Server-Sent Events (SSE). The system features a complete Next.js frontend with TypeScript support, implementing three main screens: disrupted trip scenario display, live recovery progress via SSE connection, and final recovery results with layover details. The implementation includes proper error handling, loading states, and responsive design using CSS modules. It covers connection establishment, message formats, event types across agent phases (searching, validating, deciding, booking), frontend streaming handling and reconnection logic, performance optimizations for high-frequency updates, error handling strategies, security considerations, extension guidelines, and monitoring approaches.
+This document specifies the real-time streaming interface that powers the live agent recovery experience using Server-Sent Events (SSE). The system features a complete Next.js frontend with TypeScript support and a comprehensive design system overhaul including 249 new CSS variables, semantic spacing tokens, refined type scale following USWDS-style tokens, and self-hosted fonts via Next.js font optimization. The implementation includes three main screens: disrupted trip scenario display, live recovery progress via SSE connection, and final recovery results with layover details. It covers connection establishment, message formats, event types across agent phases (searching, validating, deciding, booking), frontend streaming handling and reconnection logic, performance optimizations for high-frequency updates, error handling strategies, security considerations, extension guidelines, and monitoring approaches.
 
 ## Project Structure
 The system comprises:
-- **Frontend**: Complete Next.js 15 application with TypeScript, featuring three main screens driving the demo surface with an SSE client to render live agent reasoning steps.
+- **Frontend**: Complete Next.js 15 application with TypeScript, featuring a comprehensive design system with semantic tokens, three main screens driving the demo surface with an SSE client to render live agent reasoning steps.
 - **Backend**: Python FastAPI hosting the recovery agent loop, rules engine, Atlas integration, Qwen calls, and SQLite persistence.
 - **Data**: SQLite tables for trips, segments, offers, rule verdicts, decisions, and orders.
 
@@ -57,7 +56,7 @@ Key endpoints include:
 
 ```mermaid
 graph TB
-FE["Next.js Frontend<br/>TypeScript + React"] --> API["FastAPI REST + SSE"]
+FE["Next.js Frontend<br/>TypeScript + Design System"] --> API["FastAPI REST + SSE"]
 API --> Agent["RecoveryAgent"]
 Agent --> Rules["Rules Engine"]
 Agent --> Atlas["Atlas Client"]
@@ -68,12 +67,12 @@ API --> DB["SQLite"]
 **Diagram sources**
 - [routes.py:1-10](file://backend/app/api/routes.py#L1-L10)
 - [loop.py:1-9](file://backend/app/agent/loop.py#L1-L9)
-- [page.tsx:1-10](file://frontend/app/recovering/[tripId]/page.tsx#L1-L10)
+- [page.tsx:1-10](file://frontend/app/page.tsx#L1-L10)
 
 **Section sources**
 - [routes.py:1-10](file://backend/app/api/routes.py#L1-L10)
 - [loop.py:1-9](file://backend/app/agent/loop.py#L1-L9)
-- [page.tsx:1-10](file://frontend/app/recovering/[tripId]/page.tsx#L1-L10)
+- [page.tsx:1-10](file://frontend/app/page.tsx#L1-L10)
 
 ## Core Components
 - **RecoveryAgent**: Orchestrates the end-to-end recovery loop with guards (step budget, re-read/verify, assert outcome) and emits each step to the SSE stream.
@@ -100,7 +99,7 @@ Event phases mapped to agent steps:
 - [page.tsx:19-193](file://frontend/app/recovered/[tripId]/page.tsx#L19-L193)
 
 ## Architecture Overview
-The SSE stream exposes the agent's live reasoning to the UI through a complete three-screen user journey. The flow begins when a disruption is injected or received via webhook, triggering the agent loop. Each step is emitted as an SSE event; the frontend consumes these events to update the UI incrementally across all three screens.
+The SSE stream exposes the agent's live reasoning to the UI through a complete three-screen user journey with a comprehensive design system. The flow begins when a disruption is injected or received via webhook, triggering the agent loop. Each step is emitted as an SSE event; the frontend consumes these events to update the UI incrementally across all three screens using semantic tokens and responsive design patterns.
 
 ```mermaid
 sequenceDiagram
@@ -152,13 +151,15 @@ API-->>S3 : Final RecoveryResult
 - Displays risk status for downstream plans
 - Provides recovery button with loading state management
 - Handles error states and navigation to recovery screen
+- Uses comprehensive design system tokens for consistent styling
 
 **Screen 2 - Live Recovery Progress:**
 - Establishes SSE connection to `/api/trips/{tripId}/stream`
-- Renders real-time agent reasoning steps in monospace terminal style
+- Renders real-time agent reasoning steps with semantic typography
 - Displays option assessment table with pricing, routing, and visa verdicts
 - Shows step budget usage and agent progress
 - Auto-navigates to final results upon completion
+- Implements responsive design with mobile-first approach
 
 **Screen 3 - Final Recovery Results:**
 - Fetches final recovery result from `/api/trips/{tripId}/recovery`
@@ -259,7 +260,7 @@ end
 **Section sources**
 - [page.tsx:30-69](file://frontend/app/recovering/[tripId]/page.tsx#L30-L69)
 - [page.tsx:26-38](file://frontend/app/recovered/[tripId]/page.tsx#L26-L38)
-- [api.ts:1-30](file://frontend/lib/api.ts#L1-L30)
+- [api.ts:1-30](file://frontend/lib/api.ts#L1-30)
 
 ### Message Schema for Agent Progress Updates
 The TypeScript interface defines the complete event contract:
@@ -465,7 +466,7 @@ API --> DB["SQLite"]
 - [routes.py:95-138](file://backend/app/api/routes.py#L95-L138)
 
 ## Conclusion
-The SSE-based streaming interface provides transparent, real-time visibility into the agent's recovery process through a complete three-screen user journey. The Next.js frontend with TypeScript support delivers a robust, type-safe implementation with proper error handling, loading states, and responsive design. By defining clear event types, robust reconnection logic, and performance-oriented rendering, the system delivers a responsive user experience while maintaining correctness through server-side guards and auditability. The modular architecture supports easy extension and maintenance while ensuring reliability and trustworthiness at scale.
+The SSE-based streaming interface provides transparent, real-time visibility into the agent's recovery process through a complete three-screen user journey with a comprehensive design system. The Next.js frontend with TypeScript support delivers a robust, type-safe implementation with proper error handling, loading states, and responsive design. The new design system with semantic tokens, self-hosted fonts, and USWDS-style typography ensures consistency and accessibility across all screens. By defining clear event types, robust reconnection logic, and performance-oriented rendering, the system delivers a responsive user experience while maintaining correctness through server-side guards and auditability. The modular architecture supports easy extension and maintenance while ensuring reliability and trustworthiness at scale.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -523,13 +524,47 @@ This type safety ensures compile-time validation and better developer experience
 - [types.ts:1-100](file://frontend/lib/types.ts#L1-L100)
 
 ### Responsive Design Implementation
-The frontend uses CSS custom properties and modern CSS techniques for responsive design:
+The frontend uses CSS custom properties and modern CSS techniques for responsive design with a comprehensive design system:
 
-- **CSS Variables**: Consistent theming with custom properties for colors and spacing
+- **CSS Variables**: Consistent theming with 249+ custom properties for colors, spacing, typography, and elevation
+- **Semantic Spacing Scale**: 4px base grid with tokens --space-0 through --space-11 for consistent spacing
+- **USWDS-Style Typography**: Modular type scale with semantic tokens (--font-body-size, --font-h1-size, etc.)
+- **Self-Hosted Fonts**: Figtree and IBM Plex Mono loaded at build time via next/font/google
 - **Mobile-First**: Base styles designed for mobile with progressive enhancement
 - **Flexbox Layout**: Flexible layouts that adapt to different screen sizes
-- **Typography**: Scalable font sizes and line heights for readability
 - **Touch Targets**: Appropriately sized interactive elements for mobile devices
+- **Accessibility**: Proper focus management and reduced motion support
+
+**Updated** The design system overhaul includes comprehensive token layer with semantic spacing tokens for different relationship types, refined type scale with modular ratios, and self-hosted fonts replacing runtime Google Fonts loading for improved performance and reliability.
 
 **Section sources**
-- [globals.css:1-114](file://frontend/app/globals.css#L1-L114)
+- [globals.css:10-300](file://frontend/app/globals.css#L10-L300)
+- [presentation.css:1-2496](file://frontend/app/presentation.css#L1-L2496)
+- [layout.tsx:1-59](file://frontend/app/layout.tsx#L1-L59)
+
+### Design System Token Architecture
+The new design system provides a comprehensive foundation for consistent UI development:
+
+**Color Tokens**:
+- Semantic color system with --surface-* and --text-* tokens
+- Status colors with proper contrast ratios (--status-ok-text, --status-wait-text, --status-no-text)
+- Brand colors with accessibility compliance (--brand, --pop)
+
+**Spacing System**:
+- 4px base grid with --space-0 through --space-11
+- Semantic spacing for relationships (--space-icon, --space-card-padding, --space-section)
+- Consistent rhythm across all components
+
+**Typography Scale**:
+- USWDS-style modular ratios with precise line heights
+- Semantic tokens for different text roles (--font-body-size, --font-h1-size, etc.)
+- Metric-specific sizing for KPIs and important numbers
+
+**Elevation and Shadows**:
+- Polaris-derived elevation system with subtle shadows
+- Proper contrast ratios for accessibility
+- Dark mode support with inverse surfaces
+
+**Section sources**
+- [globals.css:93-300](file://frontend/app/globals.css#L93-L300)
+- [presentation.css:26-281](file://frontend/app/presentation.css#L26-L281)

@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: ""
-title: Waypoint Repository Root
+title: Waypoint Agent Workspace Root
 scope:
     - .gitignore
     - skills-lock.json

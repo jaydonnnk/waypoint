@@ -3,11 +3,11 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-08-30T14:37:25Z"
+exported_at: "2026-08-30T15:08:34Z"
 modules:
     "":
-        dir_name: Waypoint Repository Root
-        title: Waypoint Repository Root
+        dir_name: Waypoint Agent Workspace Root
+        title: Waypoint Agent Workspace Root
         scope:
             - .gitignore
             - skills-lock.json

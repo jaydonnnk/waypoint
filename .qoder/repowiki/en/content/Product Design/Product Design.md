@@ -26,6 +26,7 @@
 - Enhanced responsive design with immersive teal background and animated waypoint field
 - Updated API endpoints for treasury operations including seed, stream, snapshot, and close endpoints
 - Added comprehensive error handling and accessibility compliance throughout all screens
+- **Enhanced mandate page form validation with per-field validity checking, inline hints showing minimum values and acceptable ranges, improved error states with visual pip indicators, and numeric fields now display constraints as hints while preventing premature error states during user input**
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -156,10 +157,21 @@ Responsive behavior:
 
 **Updated** Enhanced with immersive teal background and animated waypoint field for visual appeal while maintaining accessibility standards.
 
+**Enhanced Form Validation System:**
+The mandate screen now features sophisticated per-field validation with intelligent error handling:
+- **Inline Hints**: Each numeric field displays its constraints directly in the label (e.g., "min $1,000", "0–25%") to guide users before they encounter errors
+- **Per-Field Validity Checking**: Individual fields are validated independently rather than waiting for form submission
+- **Visual Pip Indicators**: Error states use standardized pip shapes (hollow, half, solid, cross) that maintain accessibility across different viewing conditions
+- **Preventive Error States**: Fields are never marked as invalid while being actively typed - validation only triggers when a value is actually out of bounds
+- **Smart State Management**: NaN values (cleared fields) are treated as "not yet filled in" rather than "wrong", preventing premature error messages
+
 **Section sources**
 - [page.tsx:23-113](file://frontend/app/page.tsx#L23-L113)
 - [page.tsx:115-251](file://frontend/app/page.tsx#L115-L251)
+- [page.tsx:122-141](file://frontend/app/page.tsx#L122-L141)
+- [page.tsx:328-396](file://frontend/app/page.tsx#L328-L396)
 - [routes.py:285-314](file://backend/app/api/routes.py#L285-L314)
+- [presentation.css:1660-1706](file://frontend/app/presentation.css#L1660-L1706)
 
 ### Desk Screen
 Purpose:
@@ -349,7 +361,17 @@ The three-screen Waypoint interface delivers a transparent, trustworthy corporat
 - Spacing system: Consistent 8px grid with semantic spacing tokens for cards, buttons, and content areas.
 - Animation system: GSAP-powered animations with reduced motion support for accessibility.
 
+**Enhanced Form Validation Styling:**
+The form validation system uses a comprehensive styling approach:
+- **Constraint Hints**: Inline hints display minimum values and acceptable ranges directly in field labels
+- **Invalid State Styling**: Fields turn amber with warning background when values are out of bounds
+- **Error Messages**: Standardized error messages with pip indicators provide clear feedback
+- **Focus States**: Proper focus rings ensure keyboard navigation accessibility
+- **Responsive Design**: Form fields adapt to different screen sizes while maintaining usability
+
 **Section sources**
 - [globals.css:10-52](file://frontend/app/globals.css#L10-L52)
 - [presentation.css:1-34](file://frontend/app/presentation.css#L1-L34)
+- [presentation.css:43-88](file://frontend/app/presentation.css#L43-L88)
+- [presentation.css:1660-1706](file://frontend/app/presentation.css#L1660-L1706)
 - [WaypointField.tsx:18-106](file://frontend/app/WaypointField.tsx#L18-L106)
