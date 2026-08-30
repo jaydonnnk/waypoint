@@ -74,23 +74,22 @@ RECORDING_PATH = BACKEND_ROOT / "data" / "recorded" / "booking_envelopes.json"
 # SIN->NRT default (rich inventory, but that route's run never left
 # TICKETING_PENDING).
 #
-# ADULTS defaults to 2 — Waypoint's demo portfolio has multi-passenger
-# trips, so the recorded ticket should be a genuine 2-pax order. The old
-# 2-adult PASSENGER_INFO_INVALID was a payload bug (two travelers sharing
-# one identity), fixed in _build_pax_json below (per-index distinct name +
-# document number). Set WAYPOINT_CAPTURE_ADULTS="1" for a single-pax
-# capture.
+# ADULTS defaults to 1 — the only clean TICKETED captures observed so far
+# (AMS->MAA on 08-25) were single-pax; both 2-adult attempts (AMS->MAA,
+# 08-30) stalled at TICKETING_PENDING and never resolved. Set
+# WAYPOINT_CAPTURE_ADULTS="2" to retry a multi-pax capture once the
+# sandbox ticketing pipeline's 2-adult behavior is understood.
 # Overridable without editing this file:
 #   WAYPOINT_CAPTURE_ROUTE="AMS-MAA"   (the blessed CONNECTION route, 6E)
 #   WAYPOINT_CAPTURE_DEPART="2026-09-20"
-#   WAYPOINT_CAPTURE_ADULTS="1"
+#   WAYPOINT_CAPTURE_ADULTS="2"
 _ROUTE = os.environ.get("WAYPOINT_CAPTURE_ROUTE", "DUR-CPT")
 _parts = [p.strip().upper() for p in _ROUTE.split("-", 1)]
 ORIGIN, DESTINATION = (_parts + ["", ""])[:2]
 DEPART = date.fromisoformat(
     os.environ.get("WAYPOINT_CAPTURE_DEPART", "2026-09-20")
 )
-ADULTS = int(os.environ.get("WAYPOINT_CAPTURE_ADULTS", "2"))
+ADULTS = int(os.environ.get("WAYPOINT_CAPTURE_ADULTS", "1"))
 
 # Widened READ timeout for status polling/recovery (capture tooling
 # only — writes always keep the client's own caps). The sandbox proved
