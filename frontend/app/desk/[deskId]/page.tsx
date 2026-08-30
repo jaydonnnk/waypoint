@@ -2255,12 +2255,23 @@ export default function DeskPage() {
             {running && <span className="pa-beacon" aria-hidden="true" />}
           </div>
 
-          {/* (a) working-on — same guard, same aria-live, wrapper ALWAYS
+          {/* (a) working-on — same wrapper, same aria-live, wrapper ALWAYS
               mounted (gsap anchor). The narration is deliberately not a
               card: it is a status that is replaced in place, not an
-              artefact that accretes — the record is where things accrete. */}
+              artefact that accretes — the record is where things accrete.
+
+              Pass 11: the present-tense arm is keyed off `running`, not off
+              `!settled`. `settled` only becomes true on a result or an
+              explicit DESK_CYCLE_FAILED event, so a dropped connection left
+              this region announcing "Working on <stale step>" in the present
+              tense with the stream already dead — and this is an aria-live
+              region, so a screen-reader user got that claim without any of
+              the surrounding contradiction ("No result", "Connection
+              closed") a sighted user could see. The step itself is kept: it
+              genuinely arrived, so it is restated in the PAST tense rather
+              than dropped. */}
           <div className="pa-working" aria-live="polite">
-            {!settled && latestStep ? (
+            {running && latestStep ? (
               <>
                 <span className="pa-working-k">Working on</span>
                 <span
@@ -2270,6 +2281,10 @@ export default function DeskPage() {
                   {latestStep.text}
                 </span>
               </>
+            ) : streamDead && latestStep ? (
+              <span className="pa-working-idle">
+                Last step before the connection dropped — {latestStep.text}
+              </span>
             ) : settled ? (
               <span className="pa-working-idle">
                 Finished — nothing running.
