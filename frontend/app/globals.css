@@ -177,10 +177,19 @@
   --surface-inverse-raised: #1B2430;   /* == --ink; white 15.65  --good 4.99 */
   --surface-inverse-high: #232D3A;     /* white 13.93  --good 4.44 */
 
-  /* text */
+  /* text.
+     MEASURED, and this one bit: --mut #6B7684 is 4.42:1 on --paper —
+     it FAILS AA body text by 0.08, and it is the secondary text colour
+     used on every card, label, hint, date and chip in the product. On
+     --card it scrapes through at 4.62. Since --paper is the ground of
+     every trip card and the landing form, the token has to clear it
+     there. --text-secondary is therefore one OKLCH step darker, hue
+     held exactly (254.5deg, unchanged): 4.82 on --paper, 5.03 on --card,
+     4.57 on --goodbg, 4.56 on --warnbg. Same hue family, no new colour.
+     --mut itself is left alone so nothing else shifts. */
   --text-primary: var(--ink);          /* 15.00 on paper */
-  --text-secondary: var(--mut);        /* 4.42 on paper — AA body */
-  --text-tertiary: var(--mut);         /* --faint is 2.45 and MUST NOT hold text on light */
+  --text-secondary: #65707E;           /* 4.82 on paper, 5.03 on card */
+  --text-tertiary: #65707E;            /* --faint is 2.45 and MUST NOT hold text on light */
   --text-on-inverse: #FFFFFF;
   --text-on-inverse-secondary: rgba(255, 255, 255, 0.74);
   --text-on-inverse-tertiary: var(--faint);   /* 6.79 on --surface-inverse */
@@ -589,12 +598,15 @@ body {
 .teal-app .beacon {
   background: #fff; box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18);
 }
+/* pure white: translucent white measured 3.76:1 on the lighter end of
+   the gradient, which fails AA for body text */
 .teal-app .sub,
 .teal-app .r-tag,
 .teal-app .sec,
-.teal-app .note-soft { color: rgba(255, 255, 255, 0.86); }
+.teal-app .note-soft { color: #ffffff; }
+/* 0.6 alpha measured 3.11:1 on the painted teal — a fail on a text run */
 .teal-app .sub .run-id,
-.teal-app .r-tag .run-id { color: rgba(255, 255, 255, 0.6); }
+.teal-app .r-tag .run-id { color: rgba(255, 255, 255, 0.9); }
 /* "See the full record" toggle: white ONLY where .record sits directly on
    the teal (desk page, after the trip cards) — inside a light card (the
    close page's .run) it must stay dark or it vanishes on the white bg. */

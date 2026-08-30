@@ -199,8 +199,29 @@
   box-shadow: var(--elevation-1);
 }
 .cta-arrow { font-size: 1.05em; line-height: 1; }
+/* MEASURED: white on --pop is 2.81:1 and fails AA; --ink on --pop is
+   5.57:1. Applies to EVERY filled coral button — the landing CTA, the
+   release-code button on the gate, and the approval button — not just
+   the ones on the desk. The hue never changes; only the text on it. */
+.btn.primary,
+.hero-form .start-btn.primary,
+.cta {
+  color: var(--ink);
+}
 .btns .btn { min-height: 48px; font-size: var(--font-body-size); }
-.btn { font-size: var(--font-body-size); font-weight: 700; }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  font-size: var(--font-body-size);
+  font-weight: 700;
+  /* M3's published asymmetry for a trailing icon: tighten the icon side
+     by 8px (no icon 24/24, trailing icon 24/16) — without it a button
+     with an arrow reads as optically off-centre */
+  padding: var(--space-4) var(--space-6);
+}
+.btn:has(.cta-arrow) { padding-right: var(--space-5); }
 @media (hover: hover) {
   .cta:hover:not(:disabled) { filter: brightness(1.05); transform: none; }
   .btn.primary:hover:not(:disabled) { filter: brightness(1.05); }
@@ -492,7 +513,10 @@
 /* "still working through it" — a real, readable neutral rather than a
    near-invisible tint, so the segment that is usually the LARGEST is
    not the one you cannot see */
-.seg-flat { background: var(--faint); }
+/* MEASURED: --faint is 2.55:1 on --card and fails SC 1.4.11's 3:1 for a
+   graphic that carries meaning. One OKLCH step darker, hue held, clears
+   it (3.20 on --card, 3.06 on --paper). */
+.seg-flat { background: #88919B; }
 .seg-empty { background: var(--line); }
 
 .kpi-status .kpi-ctx.statusline {
@@ -1569,10 +1593,13 @@
   font-size: var(--font-lead-size);
   border-radius: var(--radius-md);
 }
+/* the glow is deliberately shallow: a heavier coral shadow tinted the
+   paper beneath it enough to drag the footnote under 4.5:1 (measured
+   3.85 at the old 26px/0.6) */
 .hero-form .start-btn.primary {
   background: var(--pop);
   color: var(--ink);                 /* 5.57:1, vs 2.81:1 for white */
-  box-shadow: 0 12px 26px -12px rgba(242, 118, 75, 0.6);
+  box-shadow: 0 6px 14px -10px rgba(242, 118, 75, 0.45);
 }
 .hero-form .start-btn:disabled { opacity: 0.55; }
 
@@ -1689,11 +1716,19 @@
   margin-top: var(--space-1);
 }
 .close-status-card .bar {
+  position: relative;
   height: 10px;
   border-radius: var(--radius-sm);
   background: var(--line);
   border: 1px solid var(--line);
   margin-top: var(--space-4);
+  overflow: hidden;
+}
+/* the dashed zero state has to win here too — same rule, same reason as
+   the desk's budget tile */
+.close-status-card .bar.is-zero {
+  background: transparent;
+  border: 1px dashed var(--border-default);
 }
 .close-status-card .bar .fill {
   background: linear-gradient(90deg, var(--status-ok-text), var(--good));
@@ -1810,25 +1845,30 @@
   border-top: 1px solid rgba(255, 255, 255, 0.16);
   justify-content: center;
 }
+/* A SOLID surface, not a translucent one. White text over a translucent
+   white panel on this teal tops out at 4.21:1 — it cannot reach AA at
+   any alpha, because the ground itself is too light. A white button with
+   ink text is 15:1 and matches every other surface on this ground. */
 .close-actions-foot .btn.ghost {
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.32);
-  color: #ffffff;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: var(--surface-card);
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  box-shadow: var(--elevation-2);
 }
 @media (hover: hover) {
-  .close-actions-foot .btn.ghost:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.5); }
+  .close-actions-foot .btn.ghost:hover { background: var(--surface-page); }
 }
 .close-actions-foot .btn.ghost:focus-visible { box-shadow: var(--focus-ring-inverse); }
 
 /* the close page's record bar is light and sits INSIDE the white card,
-   so it needs its own edge to separate from the card it lives on */
-.close-status-card .record {
+   so it needs its own edge to separate from the card it lives on.
+   .close-record is the stat tray, NOT a disclosure — it stays bare. */
+.close-status-card .record:not(.close-record) {
   margin-top: var(--space-7);
   border: 1px solid var(--border-subtle);
   box-shadow: none;
 }
+.record.close-record { border: none; }
 .close-status-card .record.is-open { border-color: transparent; }
 .close-status-card .record .fineprint { padding: var(--space-5) var(--space-6) var(--space-6); }
 .close-status-card .record.is-open .close-room.filled {
@@ -1982,7 +2022,9 @@
   font-variant-numeric: tabular-nums;
 }
 .fm-was { color: var(--text-on-inverse-tertiary); }
-.fm-to { color: rgba(255, 255, 255, 0.4); }
+/* was rgba(255,255,255,.4) = 3.79:1 on the dark base — a real AA fail on
+   a glyph that carries the "moved to" relationship */
+.fm-to { color: rgba(255, 255, 255, 0.55); }
 .fm-now { color: var(--text-on-inverse); font-weight: 700; }
 .fm-tags {
   display: flex;
@@ -1993,8 +2035,11 @@
 }
 .fm-word { font-size: 10.5px; letter-spacing: 0.2px; white-space: nowrap; }
 .fm-word.wait { color: var(--text-on-inverse-tertiary); }
+/* The tint this sits on composites to #352E23, where --status-wait-on-dark
+   measures 4.27:1 — a fail. One lighter step of the same hue clears it
+   (5.11:1 on the tint, 6.61:1 on the bare panel). */
 .fm-word.over {
-  color: var(--status-wait-on-dark);
+  color: #D8912E;
   font-weight: 700;
   background: rgba(201, 130, 31, 0.18);
   border-radius: var(--radius-xs);
@@ -2160,7 +2205,9 @@
   color: rgba(255, 255, 255, 0.88);
   padding: var(--space-4) var(--space-5);
 }
-.record .brow .b-ix { color: rgba(255, 255, 255, 0.36); font-family: var(--mono); }
+/* was 0.36 alpha = 3.27:1 on the raised dark surface — a fail on the one
+   column a reader uses to cross-check the record against the stream */
+.record .brow .b-ix { color: rgba(255, 255, 255, 0.55); font-family: var(--mono); }
 .record .brow .b-pos { color: var(--text-on-inverse-tertiary); font-family: var(--mono); }
 .record .brow .b-body { color: rgba(255, 255, 255, 0.86); font-size: var(--font-fine-size); }
 .record .brow .b-disc { color: var(--text-on-inverse-tertiary); font-style: normal; }
@@ -2212,9 +2259,13 @@
   color: rgba(255, 255, 255, 0.9);
   border-radius: var(--radius-sm);
 }
+/* Both of these sit on TINTED dark panels, not the bare surface, and the
+   tint costs contrast: --status-ok-on-dark measured 3.64:1 on the green
+   option tint and --status-wait-on-dark 4.40:1 on the amber esc panel.
+   One lighter step of each hue clears 4.8 there. */
 .record .esc-opt.rec { background: rgba(23, 167, 107, 0.14); border-color: rgba(23, 167, 107, 0.5); }
-.record .esc-opt .rec-flag { color: var(--status-ok-on-dark); }
-.record .esc-note { color: var(--status-wait-on-dark); }
+.record .esc-opt .rec-flag { color: #3DBF81; }     /* 4.82:1 on the tint */
+.record .esc-note { color: #D1892A; }              /* 4.81:1 on the tint */
 .record .esc-discs { color: var(--text-on-inverse-tertiary); }
 .record .esc-btn {
   background: rgba(255, 255, 255, 0.07);
