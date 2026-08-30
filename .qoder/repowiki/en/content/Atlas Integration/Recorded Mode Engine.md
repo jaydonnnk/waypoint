@@ -23,6 +23,7 @@
 - Enhanced repoll_ticketed.py with WAYPOINT_REPOLL_ORDER environment variable support for flexible testing
 - Improved capture reliability with extended timeouts and better sandbox routing
 - Added comprehensive environment variable documentation for capture configuration
+- **Updated default passenger configuration from 2 adults to 1 adult due to sandbox behavior issues with multi-passenger bookings**
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -39,7 +40,7 @@
 ## Introduction
 The Recorded Mode Engine provides a deterministic, sandbox-independent replay rail for the Atlas ticketing subsystem. It captures live CLI envelopes during a real booking run and replays them with strict honesty guarantees: no fabricated TICKETED envelopes, no subprocesses, no clock or randomness, and explicit wire disclosures about composite recordings. The engine is selected via a strict environment switch and integrates into the existing desk orchestration loop without altering the live transport code.
 
-**Updated** Enhanced booking capture reliability with improved sandbox routing (DUR->CPT), extended timeouts, and improved frontend UX for better state differentiation. The latest recording features order TESTA20260830210123734 with a streamlined booking workflow that successfully captures complete booking flows including TICKETING_PENDING status.
+**Updated** Enhanced booking capture reliability with improved sandbox routing (DUR->CPT), extended timeouts, and improved frontend UX for better state differentiation. The latest recording features order TESTA20260830210123734 with a streamlined booking workflow that successfully captures complete booking flows including TICKETING_PENDING status. **Default passenger configuration updated to 1 adult due to sandbox behavior issues with multi-passenger bookings.**
 
 ## Project Structure
 Recorded mode spans capture tooling, replay client, manifest generation, configuration, API wiring, and tests. Key locations:
@@ -111,7 +112,7 @@ LOOP --> FE
 ## Core Components
 - RecordedAtlasClient: Subclass of AtlasClient that overrides only transport methods to serve recorded envelopes deterministically. Enforces fail-closed behavior on unscripted calls and rewinds per cycle.
 - Manifest: JSON honesty register describing which steps are served, provenance (captured vs reconstructed), and wire disclosure. **Updated** with new order TESTA20260830210123734 and streamlined booking workflow.
-- Capture script: Tees every raw envelope from a live booking run into a JSON-lines file; includes double-gate safety checks before capturing writes. **Enhanced** with improved sandbox routing (DUR->CPT) and configurable environment variables.
+- Capture script: Tees every raw envelope from a live booking run into a JSON-lines file; includes double-gate safety checks before capturing writes. **Enhanced** with improved sandbox routing (DUR->CPT) and configurable environment variables. **Updated default passenger configuration to 1 adult due to sandbox behavior issues with multi-passenger bookings.**
 - Repoll script: Query-only re-polling tool for TICKETED tail completion with flexible order targeting via environment variables.
 - Manifest builder: Derives the replay script from the latest captured run, flags reconstructed pay when justified by later TICKETED status, and writes manifest metadata.
 - Mode config: Strict parse of WAYPOINT_ATLAS_MODE to select recorded vs live.
@@ -138,7 +139,7 @@ The Recorded Mode Engine replaces the live transport layer with a deterministic 
 - The manifest's wire disclosure is emitted on the meta event to indicate replay mode and composite state.
 - No subprocesses, clocks, or randomness are used in replay.
 
-**Updated** Enhanced capture reliability with improved timeout handling, better sandbox routing configuration, and flexible repoll capabilities for completing pending orders.
+**Updated** Enhanced capture reliability with improved timeout handling, better sandbox routing configuration, and flexible repoll capabilities for completing pending orders. **Default passenger configuration updated to improve sandbox compatibility.**
 
 ```mermaid
 sequenceDiagram
@@ -226,7 +227,7 @@ Captures a full booking run against the live sandbox, teeing every envelope befo
 **New Environment Variables:**
 - `WAYPOINT_CAPTURE_ROUTE`: Configurable route (default: "DUR-CPT" - the blessed UAT reference route)
 - `WAYPOINT_CAPTURE_DEPART`: Departure date (default: "2026-09-20")
-- `WAYPOINT_CAPTURE_ADULTS`: Number of adults (default: "2")
+- `WAYPOINT_CAPTURE_ADULTS`: Number of adults (**Updated default: "1"** - changed from "2" due to sandbox behavior issues with multi-passenger bookings)
 
 **Extended Timeouts:**
 - `PAY_WRITE_TIMEOUT_SECONDS`: Increased to 240s (from previous 90s) to handle slow sandbox responses
@@ -236,6 +237,11 @@ Captures a full booking run against the live sandbox, teeing every envelope befo
 **Improved Sandbox Routing:**
 - Default route changed from SIN->NRT to DUR->CPT (African route guaranteed to ticket in sandbox)
 - Better success rate for capturing complete booking flows including TICKETED status
+
+**Passenger Configuration Update:**
+- **Default passenger count reduced from 2 to 1 adult** due to sandbox behavior issues with multi-passenger bookings
+- Multi-passenger bookings experienced PASSENGER_INFO_INVALID errors and stalled at TICKETING_PENDING status
+- Users can still test with multiple passengers by explicitly setting `WAYPOINT_CAPTURE_ADULTS="2"`
 
 Double-gate safety:
 - Explicit human intent flag required to arm write-path capture
@@ -249,7 +255,7 @@ participant AC as "AtlasClient"
 participant Env as "Environment Config"
 participant Rec as "Recording file"
 User->>Cap : Run capture
-Cap->>Env : Read WAYPOINT_CAPTURE_ROUTE<br/>WAYPOINT_CAPTURE_DEPART<br/>WAYPOINT_CAPTURE_ADULTS
+Cap->>Env : Read WAYPOINT_CAPTURE_ROUTE<br/>WAYPOINT_CAPTURE_DEPART<br/>WAYPOINT_CAPTURE_ADULTS (default : 1)
 Cap->>Cap : Check WAYPOINT_WRITE_PATH
 Cap->>AC : auth_status()
 AC-->>Cap : AUTHORIZED?
@@ -403,7 +409,7 @@ FE --> STATE["State Differentiation"]
 **Diagram sources**
 - [recorded.py:1-235](file://backend/app/atlas/recorded.py#L1-L235)
 - [build_replay_manifest.py:1-210](file://backend/scripts/build_replay_manifest.py#L1-L210)
-- [capture_booking.py:1-437](file://backend/scripts/capture_booking.py#L1-L437)
+- [capture_booking.py:1-436](file://backend/scripts/capture_booking.py#L1-L436)
 - [repoll_ticketed.py:1-119](file://backend/scripts/repoll_ticketed.py#L1-L119)
 - [routes.py:97-113](file://backend/app/api/routes.py#L97-L113)
 - [config.py:28-38](file://backend/app/atlas/config.py#L28-L38)
@@ -413,7 +419,7 @@ FE --> STATE["State Differentiation"]
 **Section sources**
 - [recorded.py:1-235](file://backend/app/atlas/recorded.py#L1-L235)
 - [build_replay_manifest.py:1-210](file://backend/scripts/build_replay_manifest.py#L1-L210)
-- [capture_booking.py:1-437](file://backend/scripts/capture_booking.py#L1-L437)
+- [capture_booking.py:1-436](file://backend/scripts/capture_booking.py#L1-L436)
 - [repoll_ticketed.py:1-119](file://backend/scripts/repoll_ticketed.py#L1-L119)
 - [routes.py:97-113](file://backend/app/api/routes.py#L97-L113)
 - [config.py:28-38](file://backend/app/atlas/config.py#L28-L38)
@@ -426,6 +432,7 @@ FE --> STATE["State Differentiation"]
 - **Enhanced timeouts improve capture reliability** by accommodating slower sandbox responses without premature failures.
 - **Improved routing reduces capture failures** by using a more reliable sandbox route (DUR->CPT).
 - **Flexible repoll capabilities** allow targeted polling of specific orders without affecting other test scenarios.
+- **Updated passenger configuration improves sandbox compatibility** by reducing multi-passenger booking issues.
 
 [No sources needed since this section provides general guidance]
 
@@ -440,6 +447,7 @@ Common issues and resolutions:
 - **Timeout issues**: Ensure PAY_WRITE_TIMEOUT_SECONDS and TICKETED_POLL_DEADLINE_SECONDS are appropriately configured for your sandbox environment.
 - **Repoll failures**: Check that WAYPOINT_REPOLL_ORDER is set to a valid order number and atlas-flight CLI is available on PATH.
 - **Order-specific issues**: Use WAYPOINT_REPOLL_ORDER to target specific orders for polling when dealing with multiple concurrent test scenarios.
+- **Multi-passenger booking issues**: If experiencing PASSENGER_INFO_INVALID errors or stalls at TICKETING_PENDING, try reducing passenger count to 1 adult (default) or investigate sandbox behavior with multi-passenger bookings.
 
 **Section sources**
 - [test_recorded_mode.py:171-189](file://backend/tests/test_recorded_mode.py#L171-L189)
@@ -452,7 +460,7 @@ Common issues and resolutions:
 ## Conclusion
 The Recorded Mode Engine delivers a robust, deterministic replay capability for the Atlas ticketing subsystem. It preserves all parsing and business logic while replacing transport with recorded envelopes, enforcing strict honesty rules, and providing clear wire disclosures. The design minimizes risk by failing closed on missing artifacts or unscripted calls and ensures reproducibility across cycles.
 
-**Enhanced** with improved capture reliability through better sandbox routing, extended timeouts, enhanced frontend UX that clearly differentiates between live, recorded, and dry run modes, and flexible repoll capabilities for completing pending orders. The latest recording features order TESTA20260830210123734 with a streamlined booking workflow that successfully captures complete booking flows.
+**Enhanced** with improved capture reliability through better sandbox routing, extended timeouts, enhanced frontend UX that clearly differentiates between live, recorded, and dry run modes, and flexible repoll capabilities for completing pending orders. **Updated default passenger configuration to 1 adult due to sandbox behavior issues with multi-passenger bookings.** The latest recording features order TESTA20260830210123734 with a streamlined booking workflow that successfully captures complete booking flows.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -465,7 +473,7 @@ The Recorded Mode Engine delivers a robust, deterministic replay capability for 
 **Updated** Capture configuration options:
 - `WAYPOINT_CAPTURE_ROUTE`: Configure flight route (default: "DUR-CPT")
 - `WAYPOINT_CAPTURE_DEPART`: Set departure date (default: "2026-09-20")  
-- `WAYPOINT_CAPTURE_ADULTS`: Specify number of adults (default: "2")
+- `WAYPOINT_CAPTURE_ADULTS`: Specify number of adults (**Updated default: "1"** - changed from "2" due to sandbox behavior issues)
 - `PAY_WRITE_TIMEOUT_SECONDS`: Adjust payment timeout (default: 240s)
 - `TICKETED_POLL_DEADLINE_SECONDS`: Set ticketing poll deadline (default: 600s)
 

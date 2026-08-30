@@ -3,6 +3,7 @@
 <cite>
 **Referenced Files in This Document**
 - [routes.py](file://backend/app/api/routes.py)
+- [main.py](file://backend/app/main.py)
 - [loop.py](file://backend/app/agent/loop.py)
 - [client.py](file://backend/app/atlas/client.py)
 - [models.py](file://backend/app/models.py)
@@ -20,11 +21,11 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for escalation decision endpoints allowing human operators to respond to escalations triggered by execute wall
-- Documented asyncio.Event slots providing bounded wait times (DEFAULT_ESCALATION_WAIT = 300 seconds)
-- Enhanced escalation workflow documentation with slot lifecycle management and timeout handling
-- Updated desk-based API architecture to include human-in-the-loop decision making capabilities
-- Added detailed examples of escalation response patterns and error handling
+- Added documentation for three new API endpoints: POST /api/desk/{id}/confirm, POST /api/desk/{id}/approve, and GET /api/waybot
+- Updated desk state endpoint to include lifecycle information (awaiting_travelers, pending_approval, released)
+- Enhanced gated desk workflow documentation with manager code verification and approval flows
+- Added Waybot integration details for share link generation with live bot username retrieval
+- Updated error handling sections to cover new endpoint-specific status codes (410 Gone, 429 Too Many Requests)
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -39,10 +40,10 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document specifies the complete desk-based API architecture implemented for Waypoint, which replaces the previous trip/disruption recovery system with a sophisticated travel position management system featuring human-in-the-loop decision making. The desk-based approach provides mandate management, portfolio tracking, automated decision-making through Server-Sent Events (SSE) streaming, comprehensive audit trails, and **escalation decision endpoints** allowing human operators to respond to escalations triggered by execute wall with asyncio.Event slots providing bounded wait times (DEFAULT_ESCALATION_WAIT = 300 seconds). It covers both the new desk workflow (POST /api/desk/seed → GET /api/desk/{desk_id}/stream → GET /api/desk/{desk_id}/close) and the complete Atlas Flight Booking flow (search.do → verify.do → order.do → pay.do → queryOrderDetails.do), including alternative endpoints like getOffers.do and getOfferPrice.do. The system implements strict budget controls, authority limits, real-time progress tracking, transparent decision processes while maintaining backward compatibility with existing booking processes.
+This document specifies the complete desk-based API architecture implemented for Waypoint, which replaces the previous trip/disruption recovery system with a sophisticated travel position management system featuring human-in-the-loop decision making. The desk-based approach provides mandate management, portfolio tracking, automated decision-making through Server-Sent Events (SSE) streaming, comprehensive audit trails, **escalation decision endpoints** allowing human operators to respond to escalations triggered by execute wall with asyncio.Event slots providing bounded wait times (DEFAULT_ESCALATION_WAIT = 300 seconds). It covers both the new desk workflow (POST /api/desk/seed → GET /api/desk/{desk_id}/stream → GET /api/desk/{desk_id}/close) and the complete Atlas Flight Booking flow (search.do → verify.do → order.do → pay.do → queryOrderDetails.do), including alternative endpoints like getOffers.do and getOfferPrice.do. The system implements strict budget controls, authority limits, real-time progress tracking, transparent decision processes while maintaining backward compatibility with existing booking processes. **Updated** to include new gated desk functionality with manager code verification, pre-trip approval workflows, and Waybot integration for share link generation.
 
 ## Project Structure
-Waypoint integrates with Atlas via a CLI wrapper for flight bookings and provides a modern REST API with SSE streaming for desk-based operations featuring human intervention capabilities. The system supports two distinct workflows: traditional Atlas flight booking through CLI and modern desk-based operations through FastAPI with database persistence and escalation handling.
+Waypoint integrates with Atlas via a CLI wrapper for flight bookings and provides a modern REST API with SSE streaming for desk-based operations featuring human intervention capabilities. The system supports two distinct workflows: traditional Atlas flight booking through CLI and modern desk-based operations through FastAPI with database persistence and escalation handling. **Updated** to reflect new gated desk workflows and Waybot integration.
 
 ```mermaid
 graph TB
@@ -60,27 +61,34 @@ D --> K["Budgets Table"]
 B --> L["Escalation Handler"]
 L --> M["asyncio.Event Slots"]
 M --> N["Human Operator Response"]
+B --> O["Gated Desk Manager"]
+O --> P["Manager Code Verification"]
+O --> Q["Pre-trip Approval"]
+B --> R["Waybot Integration"]
+R --> S["Live Bot Username"]
 end
 subgraph "Atlas Flight Booking"
-O["Waypoint Agent"] --> P["Atlas CLI (atlas-flight)"]
-P --> Q["search.do"]
-P --> R["verify.do"]
-P --> S["order.do"]
-P --> T["pay.do"]
-P --> U["queryOrderDetails.do"]
-P --> V["getOffers.do (alt)"]
-P --> W["getOfferPrice.do (alt)"]
+T["Waypoint Agent"] --> U["Atlas CLI (atlas-flight)"]
+U --> V["search.do"]
+U --> W["verify.do"]
+U --> X["order.do"]
+U --> Y["pay.do"]
+U --> Z["queryOrderDetails.do"]
+U --> AA["getOffers.do (alt)"]
+U --> BB["getOfferPrice.do (alt)"]
 end
 ```
 
 **Diagram sources**
-- [routes.py:1-228](file://backend/app/api/routes.py#L1-L228)
+- [routes.py:1-819](file://backend/app/api/routes.py#L1-L819)
+- [main.py:192-201](file://backend/app/main.py#L192-L201)
 - [loop.py:1-745](file://backend/app/agent/loop.py#L1-L745)
 - [schema.py:33-103](file://backend/app/db/schema.py#L33-L103)
 - [client.py:1-526](file://backend/app/atlas/client.py#L1-L526)
 
 **Section sources**
-- [routes.py:1-228](file://backend/app/api/routes.py#L1-L228)
+- [routes.py:1-819](file://backend/app/api/routes.py#L1-L819)
+- [main.py:192-201](file://backend/app/main.py#L192-L201)
 - [loop.py:1-745](file://backend/app/agent/loop.py#L1-L745)
 
 ## Core Components
@@ -93,6 +101,8 @@ end
 - **Escalation Decision System**: Human operator response capability with asyncio.Event slots and bounded wait times
 - **Write Path Integration**: Complete Atlas booking flow with verification and payment processing
 - **Comparison Mode**: Read-only mode when ticketing is not available for demo purposes
+- **Gated Desk Management**: Manager code verification and pre-trip approval workflows
+- **Waybot Integration**: Live bot username retrieval for share link generation
 
 ### Atlas Flight Booking Components
 - **Authorization Management**: Environment switching and authentication status polling
@@ -108,7 +118,7 @@ end
 - [models.py:83-147](file://backend/app/models.py#L83-L147)
 
 ## Architecture Overview
-The Waypoint system implements a sophisticated desk-based architecture that manages travel positions through mandate controls, automated decision-making, comprehensive audit trails, and **human-in-the-loop escalation handling**. The system operates in two modes: live ticketing mode when Atlas is fully configured, and comparison mode for demonstration purposes. The escalation system allows human operators to intervene when decisions exceed authority limits or budget constraints.
+The Waypoint system implements a sophisticated desk-based architecture that manages travel positions through mandate controls, automated decision-making, comprehensive audit trails, and **human-in-the-loop escalation handling**. The system operates in two modes: live ticketing mode when Atlas is fully configured, and comparison mode for demonstration purposes. The escalation system allows human operators to intervene when decisions exceed authority limits or budget constraints. **Updated** to include gated desk workflows where desks can be held in awaiting_travelers state until manager code verification, and pre-trip approval workflows for itinerary sign-off.
 
 ```mermaid
 sequenceDiagram
@@ -162,54 +172,129 @@ CLI-->>FE : final result
 ```
 
 **Diagram sources**
-- [routes.py:123-228](file://backend/app/api/routes.py#L123-L228)
+- [routes.py:123-819](file://backend/app/api/routes.py#L123-L819)
 - [loop.py:106-471](file://backend/app/agent/loop.py#L106-L471)
 - [client.py:238-484](file://backend/app/atlas/client.py#L238-L484)
 
 ## Detailed Component Analysis
 
-### New Desk-Based API Endpoints
+### New Gated Desk Endpoints
 
-#### Endpoint: POST /api/desk/seed
-- **Purpose**: Create a new desk with mandate and seeded portfolio of positions
+#### Endpoint: POST /api/desk/{desk_id}/confirm
+- **Purpose**: Release a gated desk by verifying the manager's confirmation code
 - **HTTP method**: POST
-- **Request body**: None (creates demo desk with predefined parameters)
+- **Path parameters**:
+  - desk_id: desk identifier from seed endpoint
+- **Request body**:
+  - code: plaintext confirmation code (verified against stored hash)
 - **Response highlights**:
-  - desk_id: unique identifier for the desk session (= mandate.id)
-  - Mandate configuration with budget_total, authority_cap, and contingency settings
-  - Initial portfolio of 6 travel positions representing different scenarios
+  - desk_id: unique identifier for the desk session
+  - lifecycle: "released" indicating successful release
 - **Behavior**:
-  - Creates a new mandate in the database with budget controls
-  - Seeds 6 initial positions with curated cost bases and volatility priors
-  - Initializes budgets and ledger entries for audit trail
-  - Starts background agent task for desk cycle execution
-  - Returns immediately with desk_id for client to track progress
+  - Validates request volume with sliding-window rate limiting (default: 10 requests per 60 seconds)
+  - Checks desk lifecycle is "awaiting_travelers" (one-shot semantics)
+  - Verifies confirmation code TTL (default: 24 hours from seed time)
+  - Performs constant-time hash verification using PBKDF2 with 260k iterations
+  - Enforces attempt cap (default: 5 wrong attempts before 429)
+  - Atomic release via compare-and-set to prevent double-start races
+  - Starts desk cycle via shared resume primitive after successful release
+- **Status codes**:
+  - 200: Successful desk release and cycle start
+  - 403: Wrong confirmation code
+  - 404: Unknown desk_id
+  - 410: Desk already released or code expired
+  - 429: Rate limited or too many wrong attempts
 
 Example request
-- POST /api/desk/seed
+- POST /api/desk/desk-abc123def/confirm
+- Body: {"code": "A1B2C3D4"}
 
 Example response (summary)
 - {
   "desk_id": "desk-abc123def",
-  "mandate": {
-    "budget_total": 12000.00,
-    "authority_cap": 1500.00,
-    "contingency_pct": 0.05,
-    "currency": "USD",
-    "holder": "Waypoint Demo Desk"
-  },
-  "positions": [
-    {"id": "desk-abc123def-pos-1", "trip_label": "Regional sales run", "origin": "SIN", "dest": "NRT", "depart_date": "2026-09-18", "pax": 2, "status": "held"}
-  ]
+  "lifecycle": "released"
 }
 
 **Section sources**
-- [routes.py:135-151](file://backend/app/api/routes.py#L135-L151)
-- [fixture.py:60-146](file://backend/app/fixture.py#L60-L146)
-- [store.py:106-171](file://backend/app/db/store.py#L106-L171)
+- [routes.py:521-607](file://backend/app/api/routes.py#L521-L607)
+- [store.py:414-430](file://backend/app/db/store.py#L414-L430)
+
+#### Endpoint: POST /api/desk/{desk_id}/approve
+- **Purpose**: Manager approval or hold of pinned itineraries during pre-trip approval workflow
+- **HTTP method**: POST
+- **Path parameters**:
+  - desk_id: desk identifier from seed endpoint
+- **Request body**:
+  - choice: "approve" or "hold"
+  - code: manager credential (either desk's release code or per-round approval token)
+- **Response highlights**:
+  - desk_id: unique identifier for the desk session
+  - choice: the approved action ("approve" or "hold")
+  - lifecycle: "released" indicating successful approval processing
+  - resumed: boolean indicating if desk cycle was resumed (true for approve, false for hold)
+- **Behavior**:
+  - Validates desk lifecycle is "pending_approval" (one-shot semantics)
+  - Verifies manager credential against either desk's release code hash or per-round approval token hash
+  - For approval token path: performs cross-round TOCTOU check to ensure token still valid
+  - Applies decision via apply_decision function with atomic compare-and-set
+  - For approve: writes ledger note, sets lifecycle to "released", resumes desk cycle with pinned offer
+  - For hold: writes ledger note, clears pin and approval state, does NOT resume cycle
+  - No attempt cap or rate limiter (narrow window security model)
+- **Status codes**:
+  - 200: Successful approval or hold
+  - 403: Not authorized (wrong credential)
+  - 404: Unknown desk_id
+  - 410: No approval pending or approval already decided
+
+Example request
+- POST /api/desk/desk-abc123def/approve
+- Body: {"choice": "approve", "code": "manager-secret-code"}
+
+Example response (summary)
+- {
+  "desk_id": "desk-abc123def",
+  "choice": "approve",
+  "lifecycle": "released",
+  "resumed": true
+}
+
+**Section sources**
+- [routes.py:609-696](file://backend/app/api/routes.py#L609-L696)
+- [store.py:782-839](file://backend/app/db/store.py#L782-L839)
+
+#### Endpoint: GET /api/waybot
+- **Purpose**: Retrieve the live Waybot's Telegram username for share link generation
+- **HTTP method**: GET
+- **Response highlights**:
+  - username: string containing the bot's Telegram username, or null if bot-less
+- **Behavior**:
+  - Returns the bot username captured during supervised startup via getMe
+  - Returns null when no WAYPOINT_BOT_TOKEN is configured
+  - Returns null when bot build fails during startup
+  - Frontend uses this to construct proper t.me share links rather than hardcoding bot identity
+- **Status codes**:
+  - 200: Always returns successfully with username field (string or null)
+
+Example request
+- GET /api/waybot
+
+Example response (summary)
+- {
+  "username": "waypointdemobot"
+}
+
+Or when bot-less:
+- {
+  "username": null
+}
+
+**Section sources**
+- [main.py:192-201](file://backend/app/main.py#L192-L201)
+
+### Updated Desk State Endpoint
 
 #### Endpoint: GET /api/desk/{desk_id}
-- **Purpose**: Retrieve current desk state including positions, ledger, and search meter
+- **Purpose**: Retrieve current desk state including positions, ledger, budgets, and lifecycle information
 - **HTTP method**: GET
 - **Path parameters**:
   - desk_id: desk identifier from seed endpoint
@@ -219,10 +304,14 @@ Example response (summary)
   - budgets: period budget lines with allocated and spent amounts
   - ledger: audit trail of all desk actions (last 50 entries)
   - meter: remaining search budget for the cycle (used/max)
+  - **lifecycle**: current desk lifecycle state (awaiting_travelers, pending_approval, released)
+  - **verified_count**: number of verified travelers for gated desks
+  - **approval**: approval snapshot when desk is in pending_approval state
 - **Behavior**:
   - Reads current state from database via DeskStore.reload_desk
-  - Calculates search meter based on available budget
+  - Includes lifecycle information from ApprovalState for frontend gating UI
   - Provides comprehensive desk overview for frontend display
+  - Falls back to persisted-only snapshot for gated desks without live DeskState
 
 Example request
 - GET /api/desk/desk-abc123def
@@ -235,12 +324,49 @@ Example response (summary)
   "budgets": [...],
   "ledger": [...],
   "meter": {"used": 0, "max": 20},
-  "done": false
+  "done": false,
+  "lifecycle": "awaiting_travelers",
+  "verified_count": 2,
+  "approval": null
 }
 
 **Section sources**
-- [routes.py:183-190](file://backend/app/api/routes.py#L183-L190)
-- [store.py:264-285](file://backend/app/db/store.py#L264-L285)
+- [routes.py:727-748](file://backend/app/api/routes.py#L727-L748)
+- [store.py:886-914](file://backend/app/db/store.py#L886-L914)
+
+### Existing Desk-Based API Endpoints
+
+#### Endpoint: POST /api/desk/seed
+- **Purpose**: Create a new desk with mandate and seeded portfolio of positions
+- **HTTP method**: POST
+- **Request body**: None (creates demo desk with predefined parameters)
+- **Response highlights**:
+  - desk_id: unique identifier for the desk session (= mandate.id)
+  - Mandate configuration with budget_total, authority_cap, and contingency settings
+  - Initial portfolio of 6 travel positions representing different scenarios
+  - **For gated desks**: invite_token and confirmation_code for team member sharing
+- **Behavior**:
+  - Creates a new mandate in the database with budget controls
+  - Seeds 6 initial positions with curated cost bases and volatility priors
+  - Initializes budgets and ledger entries for audit trail
+  - **Gated path**: holds desk in 'awaiting_travelers' lifecycle with invite token + hashed release code
+  - **Ungated path**: starts background agent task immediately for desk cycle execution
+  - Returns immediately with desk_id for client to track progress
+
+Example request
+- POST /api/desk/seed
+
+Example response (gated desk)
+- {
+  "desk_id": "desk-abc123def",
+  "invite_token": "abc123xyz",
+  "confirmation_code": "A1B2C3D4"
+}
+
+**Section sources**
+- [routes.py:371-431](file://backend/app/api/routes.py#L371-L431)
+- [fixture.py:60-146](file://backend/app/fixture.py#L60-L146)
+- [store.py:154-200](file://backend/app/db/store.py#L154-L200)
 
 #### Endpoint: GET /api/desk/{desk_id}/stream
 - **Purpose**: Server-Sent Events stream providing real-time desk cycle progress
@@ -276,7 +402,7 @@ Example SSE events
 - data: {"type": "result", "result": {"desk_id": "desk-abc123def", "status": "closed", "pnl": "1234.56", "losses_admitted": 2, "step_count": 15}}
 
 **Section sources**
-- [routes.py:154-180](file://backend/app/api/routes.py#L154-L180)
+- [routes.py:698-725](file://backend/app/api/routes.py#L698-L725)
 - [loop.py:106-301](file://backend/app/agent/loop.py#L106-L301)
 
 #### Endpoint: GET /api/desk/{desk_id}/close
@@ -309,7 +435,7 @@ Example response (summary)
 }
 
 **Section sources**
-- [routes.py:193-206](file://backend/app/api/routes.py#L193-L206)
+- [routes.py:750-798](file://backend/app/api/routes.py#L750-L798)
 
 #### Endpoint: POST /api/desk/{desk_id}/escalations/{esc_id}/decision
 - **Purpose**: Human intervention for escalated decisions requiring manual approval
@@ -346,7 +472,7 @@ Example response (summary)
 - 404 Not Found: Unknown desk_id
 
 **Section sources**
-- [routes.py:209-227](file://backend/app/api/routes.py#L209-L227)
+- [routes.py:800-819](file://backend/app/api/routes.py#L800-L819)
 - [loop.py:413-471](file://backend/app/agent/loop.py#L413-L471)
 
 ### Existing Atlas Flight Booking Endpoints
@@ -576,16 +702,19 @@ These alternatives support browsing and price checks while preserving the main f
 - **Desk-specific errors**:
   - 404: Unknown desk_id
   - 410: Escalation gone (slot expired or already consumed)
+  - 429: Rate limited (confirm endpoint) or too many wrong attempts
   - 504: Desk cycle timeout (60 seconds)
   - 500: Desk cycle failure without result
 
 **Section sources**
 - [client.py:73-105](file://backend/app/atlas/client.py#L73-L105)
 - [routes.py:112-116](file://backend/app/api/routes.py#L112-L116)
-- [routes.py:193-227](file://backend/app/api/routes.py#L193-L227)
+- [routes.py:543-607](file://backend/app/api/routes.py#L543-L607)
+- [routes.py:640-696](file://backend/app/api/routes.py#L640-L696)
+- [routes.py:750-819](file://backend/app/api/routes.py#L750-L819)
 
 ## Dependency Analysis
-The Waypoint system has two distinct dependency chains: the legacy Atlas CLI integration for flight bookings and the modern FastAPI-based desk system with database persistence and escalation handling.
+The Waypoint system has two distinct dependency chains: the legacy Atlas CLI integration for flight bookings and the modern FastAPI-based desk system with database persistence and escalation handling. **Updated** to include new gated desk dependencies and Waybot integration.
 
 ```mermaid
 graph LR
@@ -605,10 +734,15 @@ API --> DA["DeskAgent"]
 API --> DB["Database Store"]
 API --> SSE["SSE Stream"]
 API --> EH["Escalation Handler"]
+API --> GM["Gated Desk Manager"]
+API --> WM["Waybot Manager"]
 DA --> AC["AtlasClient"]
 DA --> FL["Fixture Data"]
 EH --> AE["asyncio.Event Slots"]
 AE --> HO["Human Operator"]
+GM --> CV["Code Verification"]
+GM --> PA["Pre-trip Approval"]
+WM --> BU["Bot Username"]
 DB --> MT["Mandate Table"]
 DB --> PT["Positions Table"]
 DB --> LD["Ledger Table"]
@@ -617,13 +751,15 @@ end
 ```
 
 **Diagram sources**
-- [routes.py:1-228](file://backend/app/api/routes.py#L1-L228)
+- [routes.py:1-819](file://backend/app/api/routes.py#L1-L819)
+- [main.py:192-201](file://backend/app/main.py#L192-L201)
 - [loop.py:1-745](file://backend/app/agent/loop.py#L1-L745)
 - [schema.py:33-103](file://backend/app/db/schema.py#L33-L103)
 - [client.py:1-526](file://backend/app/atlas/client.py#L1-L526)
 
 **Section sources**
-- [routes.py:1-228](file://backend/app/api/routes.py#L1-L228)
+- [routes.py:1-819](file://backend/app/api/routes.py#L1-L819)
+- [main.py:192-201](file://backend/app/main.py#L192-L201)
 - [loop.py:1-745](file://backend/app/agent/loop.py#L1-L745)
 
 ## Performance Considerations
@@ -639,6 +775,8 @@ end
 - Task management: background tasks retain strong references to prevent garbage collection mid-flight; bounded step budget prevents infinite loops in desk agent
 - Memory management: in-memory trip store replaced with persistent database storage; proper cleanup strategies for completed desks
 - **Escalation performance**: asyncio.Event slots provide efficient blocking with bounded wait times (DEFAULT_ESCALATION_WAIT = 300 seconds); automatic slot cleanup prevents memory leaks
+- **Gated desk performance**: Sliding-window rate limiting for confirm endpoint prevents brute force attacks; bounded KDF executor prevents CPU starvation during code verification
+- **Waybot performance**: Lightweight username retrieval with null fallback for bot-less deployments
 
 ### Escalation System Performance
 - **Bounded waiting**: DEFAULT_ESCALATION_WAIT = 300 seconds prevents indefinite blocking of desk cycles
@@ -662,6 +800,12 @@ end
 - Database connectivity: monitor SQLite database health and file permissions; implement backup strategies for mandate and position data
 - Budget and mandate enforcement: validate authority caps and budget limits before executing trades; monitor search meter usage to prevent excessive API calls
 
+### Gated Desk Issues
+- **Confirm endpoint failures**: Check if desk lifecycle is "awaiting_travelers"; verify confirmation code hasn't expired (default 24h TTL); ensure correct code format
+- **Rate limiting**: If receiving 429 status codes, wait for the sliding window to clear (default 60 seconds); implement exponential backoff in client
+- **Approval workflow issues**: Verify desk lifecycle is "pending_approval" before attempting approval; ensure manager credentials are correct
+- **Double-start prevention**: If getting 410 Gone on confirm, desk may have already been released; check lifecycle state
+
 ### Escalation System Issues
 - **Escalation timeout**: If human operator doesn't respond within 300 seconds, desk cycle gives up gracefully with status "escalated"
 - **Late escalation responses**: Responses to expired escalations receive 410 Gone status; ensure timely operator response
@@ -670,12 +814,13 @@ end
 
 **Section sources**
 - [booking-workflow.md:17-63](file://.agents/skills/atlas-flight-booking/references/booking-workflow.md#L17-L63)
-- [routes.py:112-116](file://backend/app/api/routes.py#L112-L116)
-- [routes.py:193-227](file://backend/app/api/routes.py#L193-L227)
+- [routes.py:543-607](file://backend/app/api/routes.py#L543-L607)
+- [routes.py:640-696](file://backend/app/api/routes.py#L640-L696)
+- [routes.py:750-819](file://backend/app/api/routes.py#L750-L819)
 - [loop.py:413-471](file://backend/app/agent/loop.py#L413-L471)
 
 ## Conclusion
-Waypoint now provides a comprehensive desk-based API architecture that replaces the previous trip/disruption recovery system with a sophisticated travel position management platform featuring **human-in-the-loop escalation capabilities**. The desk system implements mandate management, portfolio tracking, automated decision-making through SSE streaming, comprehensive audit trails with database persistence, and **escalation decision endpoints** allowing human operators to respond to escalations triggered by execute wall with asyncio.Event slots providing bounded wait times (DEFAULT_ESCALATION_WAIT = 300 seconds). Key improvements include strict budget controls, authority limits, real-time progress tracking, transparent decision processes, full compliance capabilities, and robust human intervention mechanisms. The system maintains backward compatibility with existing Atlas booking processes while enabling scalable management of multiple travel positions with complete audit and compliance features.
+Waypoint now provides a comprehensive desk-based API architecture that replaces the previous trip/disruption recovery system with a sophisticated travel position management platform featuring **human-in-the-loop escalation capabilities**. The desk system implements mandate management, portfolio tracking, automated decision-making through SSE streaming, comprehensive audit trails with database persistence, and **escalation decision endpoints** allowing human operators to respond to escalations triggered by execute wall with asyncio.Event slots providing bounded wait times (DEFAULT_ESCALATION_WAIT = 300 seconds). **Updated** to include new gated desk functionality with manager code verification, pre-trip approval workflows, and Waybot integration for share link generation. Key improvements include strict budget controls, authority limits, real-time progress tracking, transparent decision processes, full compliance capabilities, robust human intervention mechanisms, and enhanced security through code verification and rate limiting. The system maintains backward compatibility with existing Atlas booking processes while enabling scalable management of multiple travel positions with complete audit and compliance features.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -751,7 +896,7 @@ API-->>FE : DeskResult
 ```
 
 **Diagram sources**
-- [routes.py:123-228](file://backend/app/api/routes.py#L123-L228)
+- [routes.py:123-819](file://backend/app/api/routes.py#L123-L819)
 - [loop.py:106-471](file://backend/app/agent/loop.py#L106-L471)
 - [schema.py:33-103](file://backend/app/db/schema.py#L33-L103)
 
@@ -781,7 +926,7 @@ The desk system uses four core tables for persistent storage:
 
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
-| `mandate` | Desk configuration and budget controls | id (desk_id), budget_total, authority_cap, contingency_pct, currency, holder, created_at |
+| `mandate` | Desk configuration and budget controls | id (desk_id), budget_total, authority_cap, contingency_pct, currency, holder, created_at, lifecycle, invite_token, confirmation_code_hash |
 | `positions` | Travel positions being managed | id, desk_id, trip_label, origin, dest, depart_date, pax, status, cost_basis, mark_price, mark_at, mark_stale, atlas_offer_id, atlas_order_no, ticket_asserted |
 | `ledger` | Audit trail of all desk actions | id, desk_id, ts, kind (trade|alloc|reconcile|loss|adjust), amount, position_id, ref, note |
 | `budgets` | Period budget tracking | id, desk_id, period, allocated, spent, contingency, created_at |
@@ -850,5 +995,59 @@ The escalation decision system provides a secure interface for human operators t
 - Thread-safe: asyncio.Event provides efficient synchronization
 
 **Section sources**
-- [routes.py:209-227](file://backend/app/api/routes.py#L209-L227)
+- [routes.py:800-819](file://backend/app/api/routes.py#L800-L819)
 - [loop.py:413-471](file://backend/app/agent/loop.py#L413-L471)
+
+### Appendix G: Gated Desk Workflow
+The gated desk workflow provides enhanced security through manager code verification and pre-trip approval:
+
+**Lifecycle States**:
+- `awaiting_travelers`: Desk is seeded but waiting for manager code verification
+- `pending_approval`: Desk has run and stopped for manager approval of priced itinerary
+- `released`: Desk is actively running or has completed its cycle
+
+**Workflow Steps**:
+1. Seed desk with `gated: true` to create awaiting_travelers state
+2. Share invite token and confirmation code with team members
+3. Manager verifies code via POST /api/desk/{id}/confirm to release desk
+4. Desk runs and may stop for pre-trip approval (pending_approval)
+5. Manager approves or holds via POST /api/desk/{id}/approve
+6. Approved desks resume with pinned offer; held desks drop pin and judge normally
+
+**Security Features**:
+- Constant-time hash verification using PBKDF2 with 260k iterations
+- Sliding-window rate limiting (default: 10 requests per 60 seconds)
+- Attempt cap protection (default: 5 wrong attempts before lockout)
+- Code expiration (default: 24 hours from seed time)
+- Atomic compare-and-set operations prevent double-start races
+
+**Section sources**
+- [routes.py:371-696](file://backend/app/api/routes.py#L371-L696)
+- [store.py:414-839](file://backend/app/db/store.py#L414-L839)
+
+### Appendix H: Waybot Integration
+The Waybot integration enables share link generation with live bot username retrieval:
+
+**Endpoint**: GET /api/waybot
+
+**Response Schema**:
+```json
+{
+  "username": "string|null"
+}
+```
+
+**Integration Points**:
+- Frontend fetches username on mount to construct proper t.me share links
+- Returns null when no WAYPOINT_BOT_TOKEN is configured
+- Returns null when bot build fails during startup
+- Enables dynamic share link construction: `https://t.me/${username}?start=${invite_token}`
+
+**Security Considerations**:
+- Username is derived from actual bot configuration, not hardcoded
+- Null responses prevent broken share links in bot-less deployments
+- Frontend hides invite link field when username is null
+
+**Section sources**
+- [main.py:192-201](file://backend/app/main.py#L192-L201)
+- [api.ts:113-128](file://frontend/lib/api.ts#L113-L128)

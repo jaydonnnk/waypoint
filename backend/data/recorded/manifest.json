@@ -1,34 +1,39 @@
 {
   "recording": "booking_envelopes.json",
   "mode_label": "recorded",
-  "composite": true,
-  "ticketed_captured": false,
-  "order_no": "TESTA20260830210123734",
+  "composite": false,
+  "ticketed_captured": true,
+  "order_no": "TESTA20260830223723623",
   "reconstructed_steps": [],
   "script": [
     {
       "verb": "auth status",
-      "seq": 1,
+      "seq": 18,
       "provenance": "captured"
     },
     {
       "verb": "search",
-      "seq": 2,
+      "seq": 19,
       "provenance": "captured"
     },
     {
       "verb": "offer verify",
-      "seq": 3,
+      "seq": 20,
       "provenance": "captured"
     },
     {
       "verb": "order create",
-      "seq": 4,
+      "seq": 21,
       "provenance": "captured"
     },
     {
       "verb": "order pay",
-      "seq": 5,
+      "seq": 22,
+      "provenance": "captured"
+    },
+    {
+      "verb": "order status",
+      "seq": 23,
       "provenance": "captured"
     }
   ],
@@ -88,8 +93,113 @@
       "verb": "order status",
       "code": "TICKETING_PENDING",
       "captured_at": "2026-08-30T13:09:37.097344+00:00"
+    },
+    {
+      "seq": 9,
+      "step": "order_status_s9_poll",
+      "verb": "order status",
+      "code": "TICKETING_PENDING",
+      "captured_at": "2026-08-30T13:20:54.292942+00:00"
+    },
+    {
+      "seq": 10,
+      "step": "order_status_s9_poll",
+      "verb": "order status",
+      "code": "TICKETING_PENDING",
+      "captured_at": "2026-08-30T13:23:40.378190+00:00"
+    },
+    {
+      "seq": 11,
+      "step": "order_status_s9_poll",
+      "verb": "order status",
+      "code": "TICKETING_PENDING",
+      "captured_at": "2026-08-30T13:26:26.300839+00:00"
+    },
+    {
+      "seq": 12,
+      "step": "order_status_s9_poll",
+      "verb": "order status",
+      "code": "TICKETING_PENDING",
+      "captured_at": "2026-08-30T13:29:12.215005+00:00"
+    },
+    {
+      "seq": 13,
+      "step": "order_status_s9_poll",
+      "verb": "order status",
+      "code": "TICKETING_PENDING",
+      "captured_at": "2026-08-30T13:33:22.464195+00:00"
+    },
+    {
+      "seq": 14,
+      "step": "auth_status",
+      "verb": "auth status",
+      "code": "AUTHORIZED",
+      "captured_at": "2026-08-30T14:36:46.191745+00:00"
+    },
+    {
+      "seq": 15,
+      "step": "search",
+      "verb": "search",
+      "code": "FLIGHT_SEARCHED",
+      "captured_at": "2026-08-30T14:36:48.090637+00:00"
+    },
+    {
+      "seq": 16,
+      "step": "verify",
+      "verb": "offer verify",
+      "code": "OFFER_VERIFIED",
+      "captured_at": "2026-08-30T14:36:50.197953+00:00"
+    },
+    {
+      "seq": 17,
+      "step": "create_order",
+      "verb": "order create",
+      "code": "DUPLICATE_BOOKING_SUSPECTED",
+      "captured_at": "2026-08-30T14:36:52.715892+00:00"
+    },
+    {
+      "seq": 18,
+      "step": "auth_status",
+      "verb": "auth status",
+      "code": "AUTHORIZED",
+      "captured_at": "2026-08-30T14:37:17.856400+00:00"
+    },
+    {
+      "seq": 19,
+      "step": "search",
+      "verb": "search",
+      "code": "FLIGHT_SEARCHED",
+      "captured_at": "2026-08-30T14:37:20.244077+00:00"
+    },
+    {
+      "seq": 20,
+      "step": "verify",
+      "verb": "offer verify",
+      "code": "OFFER_VERIFIED",
+      "captured_at": "2026-08-30T14:37:22.053503+00:00"
+    },
+    {
+      "seq": 21,
+      "step": "create_order",
+      "verb": "order create",
+      "code": "PAYMENT_CONFIRMATION_REQUIRED",
+      "captured_at": "2026-08-30T14:37:31.207148+00:00"
+    },
+    {
+      "seq": 22,
+      "step": "pay",
+      "verb": "order pay",
+      "code": "TICKETED",
+      "captured_at": "2026-08-30T14:38:07.830005+00:00"
+    },
+    {
+      "seq": 23,
+      "step": "order_status",
+      "verb": "order status",
+      "code": "TICKETED",
+      "captured_at": "2026-08-30T14:38:10.715994+00:00"
     }
   ],
-  "wire_disclosure": "recorded Atlas replay — composite capture with NO TICKETED envelope (sandbox flapped); the cycle replays the capture exactly as recorded, never live",
+  "wire_disclosure": "recorded Atlas replay — envelopes served from the sandbox capture (never live); ticketing genuinely captured",
   "honesty_rule": "never fabricate a TICKETED envelope; reconstructed steps are flagged here and disclosed on the wire; recorded is never labeled live"
 }
