@@ -130,6 +130,16 @@ export default function MandatePage() {
     contingencyPct >= 0 &&
     contingencyPct <= 25;
 
+  // Pass 10: per-field validity, for the inline affordance. A field is
+  // only marked INVALID once it holds a value that is actually out of
+  // bounds — a cleared field (NaN, mid-typing) is "not yet filled in",
+  // never "wrong", so the form never scolds someone who has not finished.
+  const budgetInvalid = Number.isFinite(budgetTotal) && budgetTotal < 1000;
+  const capInvalid = Number.isFinite(authorityCap) && authorityCap < 100;
+  const contingencyInvalid =
+    Number.isFinite(contingencyPct) &&
+    (contingencyPct < 0 || contingencyPct > 25);
+
   async function openDesk() {
     // Belt-and-braces guard — the start button is disabled while invalid.
     if (!constraintsValid) return;
@@ -230,7 +240,7 @@ export default function MandatePage() {
             </p>
 
             {waybotUsername && share.invite_token ? (
-              <label className="constraint-field">
+              <label className="constraint-field share-link">
                 <span className="constraint-k">Invite link</span>
                 <div className="copy-row">
                   <input
@@ -260,7 +270,7 @@ export default function MandatePage() {
               </div>
             )}
 
-            <label className="constraint-field">
+            <label className="constraint-field share-code">
               <span className="constraint-k">Your release code (keep private)</span>
               <div className="copy-row">
                 <input
@@ -308,45 +318,92 @@ export default function MandatePage() {
           Your budget and booking caps — Waypoint holds to these on every fare.
         </p>
 
-        {/* budget constraints — the ops manager's numbers, set up front */}
+        {/* budget constraints — the ops manager's numbers, set up front.
+            Pass 10: each numeric field states its own bound up front as a
+            hint, and only turns amber once the value is ACTUALLY outside
+            it — a field is never marked wrong before it has been filled
+            in. The bounds shown are the same ones enforced by
+            constraintsValid and by the backend's SeedRequest, so the hint
+            cannot drift from the rule. */}
         <div className="constraints">
-          <label className="constraint-field">
-            <span className="constraint-k">Total budget ($)</span>
+          <label
+            className={`constraint-field${budgetInvalid ? " invalid" : ""}`}
+          >
+            <span className="constraint-k">
+              Total budget
+              <span className="constraint-hint">min $1,000</span>
+            </span>
             <input
               type="number"
+              inputMode="decimal"
               value={Number.isNaN(budgetTotal) ? "" : budgetTotal}
               min={1000}
               step={100}
+              aria-invalid={budgetInvalid || undefined}
               onChange={(e) => setBudgetTotal(e.target.valueAsNumber)}
             />
+            {budgetInvalid && (
+              <span className="constraint-err">
+                <i className="pip pip-open" aria-hidden="true" />
+                Needs to be $1,000 or more
+              </span>
+            )}
           </label>
-          <label className="constraint-field">
-            <span className="constraint-k">Per-booking cap ($)</span>
+          <label className={`constraint-field${capInvalid ? " invalid" : ""}`}>
+            <span className="constraint-k">
+              Per-booking cap
+              <span className="constraint-hint">min $100</span>
+            </span>
             <input
               type="number"
+              inputMode="decimal"
               value={Number.isNaN(authorityCap) ? "" : authorityCap}
               min={100}
               step={50}
+              aria-invalid={capInvalid || undefined}
               onChange={(e) => setAuthorityCap(e.target.valueAsNumber)}
             />
+            {capInvalid && (
+              <span className="constraint-err">
+                <i className="pip pip-open" aria-hidden="true" />
+                Needs to be $100 or more
+              </span>
+            )}
           </label>
-          <label className="constraint-field">
-            <span className="constraint-k">Contingency (%)</span>
+          <label
+            className={`constraint-field${contingencyInvalid ? " invalid" : ""}`}
+          >
+            <span className="constraint-k">
+              Contingency
+              <span className="constraint-hint">0–25%</span>
+            </span>
             <input
               type="number"
+              inputMode="decimal"
               value={Number.isNaN(contingencyPct) ? "" : contingencyPct}
               min={0}
               max={25}
               step={1}
+              aria-invalid={contingencyInvalid || undefined}
               onChange={(e) => setContingencyPct(e.target.valueAsNumber)}
             />
+            {contingencyInvalid && (
+              <span className="constraint-err">
+                <i className="pip pip-open" aria-hidden="true" />
+                Needs to be between 0 and 25
+              </span>
+            )}
           </label>
           {/* optional trip context — same styling, deliberately NOT part
               of constraintsValid; leaving these blank changes nothing */}
           <label className="constraint-field">
-            <span className="constraint-k">Team size</span>
+            <span className="constraint-k">
+              Team size
+              <span className="constraint-hint">optional</span>
+            </span>
             <input
               type="number"
+              inputMode="numeric"
               value={Number.isNaN(teamSize) ? "" : teamSize}
               min={1}
               max={50}
@@ -355,20 +412,28 @@ export default function MandatePage() {
             />
           </label>
           <label className="constraint-field">
-            <span className="constraint-k">Destination</span>
+            <span className="constraint-k">
+              Destination
+              <span className="constraint-hint">optional</span>
+            </span>
             <input
               type="text"
               value={destination}
               placeholder="e.g. London, UK"
+              autoComplete="off"
               onChange={(e) => setDestination(e.target.value)}
             />
           </label>
           <label className="constraint-field">
-            <span className="constraint-k">Trip purpose</span>
+            <span className="constraint-k">
+              Trip purpose
+              <span className="constraint-hint">optional</span>
+            </span>
             <input
               type="text"
               value={tripPurpose}
               placeholder="e.g. Q4 client visits"
+              autoComplete="off"
               onChange={(e) => setTripPurpose(e.target.value)}
             />
           </label>
@@ -380,9 +445,15 @@ export default function MandatePage() {
           disabled={busy || !constraintsValid}
           title={constraintsValid ? undefined : "Fill in all three budget constraints"}
         >
-          {busy ? "Starting…" : "Start booking →"}
+          {busy ? "Starting…" : "Start booking"}
+          {!busy && <span className="cta-arrow" aria-hidden="true">→</span>}
         </button>
-        {error && <div className="status err">{error}</div>}
+        {error && (
+          <div className="status err">
+            <i className="pip pip-cross" aria-hidden="true" />
+            {error}
+          </div>
+        )}
 
         {/* demoted footnote — how starting works, visibly secondary */}
         <div className="note-soft">

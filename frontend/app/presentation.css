@@ -1,33 +1,2495 @@
 /* Waypoint — Person A presentation layer. ADDITIVE ONLY.
    Loads after globals.css. Rules: class/pseudo-class selectors only;
    no :root, body, or broad element selectors; no !important ever.
-   Existing honesty and reduced-motion semantics remain authoritative. */
+   Existing honesty and reduced-motion semantics remain authoritative.
 
-/* §1 — Screen 1 extracted styles */
-.constraints { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+   PASS 10 (the craft pass) rebuilt this file onto the token layer defined
+   in globals.css :root. Components reference SEMANTIC tokens, never raw
+   hues. Anything with a number in a comment below was measured, not
+   guessed — see docs/design-research-pass10.md.
+
+   §0  primitives: type, figures, pips, lozenges, focus, buttons
+   §1  app bar + phase banner
+   §2  KPI band (one anatomy, four tiles)
+   §3  desk layout
+   §4  agent panel
+   §5  decision card
+   §6  trips board + boarding-pass cards
+   §7  the record (collapsed bar / open dark panel)
+   §8  result banner, footer, toast, skeletons
+   §9  Screen 1 — landing + share card
+   §10 Screen 3 — the wrap-up
+   §11 the record's interior (Pass 9 diagrams, re-tokenised)
+   §12 responsive + reduced motion
+*/
+
+/* ==================================================================== */
+/* §0 — PRIMITIVES                                                      */
+/* ==================================================================== */
+
+/* Figures in the UI voice. Monospace now survives in exactly three
+   places — the desk id, raw position ids in the record, and IATA codes —
+   because those are genuine operational identifiers. Everything else
+   that used mono was a label, a date, a button or a heading, which made
+   a travel product read like a terminal.
+   Figtree ships tabular figures (verified by measuring rendered widths of
+   1111 vs 0000 in the running build), so a figure can leave mono without
+   losing column alignment or jittering during the count-up tween. */
+.fig {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ---- status pips: SHAPE carries the state ----------------------------
+   Measured (research §4.2): forced to AA contrast on their own tints, our
+   three status hues all land at L* ~45 — mutual contrast 1.00–1.03:1, so
+   they are the SAME TONE in greyscale, and warn/bad collapse together
+   under deuteranopia. Colour therefore cannot carry status here at all.
+   Shape does, following Polaris's Badge `progress` vocabulary (8px box,
+   3px radius, 1.25px border — not a circle, so it never reads as a
+   decorative dot).
+     hollow   nothing has settled
+     half     decided, but not executed
+     solid    confirmed by the snapshot
+     triangle it moved the wrong way
+   The word is always present too. Three encodings; two survive greyscale. */
+.pip {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  border: 1.25px solid currentColor;
+  background: transparent;
+  flex: none;
+  box-sizing: border-box;
+  display: inline-block;
+}
+.pip-full { background: currentColor; }
+.pip-half {
+  background: linear-gradient(
+    90deg,
+    currentColor 0 50%,
+    transparent 50% 100%
+  );
+}
+.pip-open { background: transparent; }
+.pip-cross {
+  width: 0;
+  height: 0;
+  border: 0;
+  border-radius: 0;
+  border-left: 4.5px solid transparent;
+  border-right: 4.5px solid transparent;
+  border-top: 7px solid currentColor;
+  background: transparent;
+}
+/* tone helpers for a pip used outside a coloured parent */
+.pip.ok { color: var(--status-ok-text); }
+.pip.wait { color: var(--status-wait-text); }
+.pip.no { color: var(--status-no-text); }
+
+/* ---- lozenge: a status word + its pip -------------------------------
+   Radius 8px, not a pill. Atlassian is the only system publishing a
+   decision rule for this and reserves fully-rounded for "Avatars, pills,
+   emoji reactions"; M3's chip is 32px tall at 8px radius with
+   corner-full available and deliberately unused; Polaris Badge is 8px.
+   Padding is asymmetric because the pip is a leading icon: M3 tightens
+   the icon side by 8px (bare 16/16 -> leading-icon 8/16). */
+.lozenge,
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  border-radius: var(--radius-sm);
+  padding: 3px 10px 3px 7px;
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+  letter-spacing: var(--font-fine-track);
+  font-weight: 600;
+  white-space: nowrap;
+  margin-top: 0;
+  border: 1px solid transparent;
+}
+/* Text colour is the DERIVED dark step, not the raw hue: the raw hues
+   measure 2.85 / 2.88 / 3.82 on their own tints and fail AA body text.
+   These measure 4.85 / 4.86 / 4.84 on the same tints. */
+.badge.ok,
+.lozenge.ok {
+  background: var(--status-ok-bg);
+  color: var(--status-ok-text);
+  border-color: rgba(0, 123, 73, 0.18);
+}
+.badge.wait,
+.lozenge.wait {
+  background: var(--status-wait-bg);
+  color: var(--status-wait-text);
+  border-color: rgba(153, 93, 0, 0.18);
+}
+.badge.no,
+.lozenge.no {
+  background: var(--status-no-bg);
+  color: var(--status-no-text);
+  border-color: rgba(194, 49, 64, 0.18);
+}
+.badge.plain,
+.lozenge.plain,
+.lozenge.flat {
+  background: var(--surface-page);
+  color: var(--text-secondary);
+  border-color: var(--border-subtle);
+}
+
+/* ---- focus: ONE token, everywhere ----------------------------------
+   Two-tone, so it reads on a white card AND on the near-black record —
+   --brand is 5.47:1 on white but only 2.86:1 on the raised dark surface,
+   so a single-colour ring cannot serve both. Never removed, only
+   restyled, and always :focus-visible so a mouse press does not paint it. */
+.btn:focus-visible,
+.cta:focus-visible,
+.esc-btn:focus-visible,
+.copy-btn:focus-visible,
+.record-toggle:focus-visible,
+.tc-more:focus-visible,
+.constraint-field input:focus-visible,
+.start-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-md);
+}
+.record.is-open .record-toggle:focus-visible,
+.record .esc-btn:focus-visible {
+  box-shadow: var(--focus-ring-inverse);
+}
+
+/* ---- buttons -------------------------------------------------------
+   A filled button never also underlines its label: that is two emphasis
+   mechanisms doing one job, and `.cta` is an <a>, so the UA underline
+   arrived by default rather than by choice.
+   Trailing-arrow padding is asymmetric by 8px, which is M3's published
+   rule for a trailing icon (24 leading / 16 trailing) and the reason a
+   button with an arrow otherwise looks off-centre. */
+.cta,
+.btn {
+  text-decoration: none;
+  user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  border-radius: var(--radius-md);
+  font-family: var(--sans);
+  transition:
+    background-color var(--motion-fade) var(--ease-standard),
+    box-shadow var(--motion-fade) var(--ease-standard),
+    transform var(--motion-micro) var(--ease-standard);
+}
+.cta:hover,
+.cta:focus-visible { text-decoration: none; }
+.cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: 0 var(--space-6) 0 var(--space-7);
+  font-size: var(--font-body-size);
+  font-weight: 700;
+  width: auto;
+  margin-top: 0;
+  /* MEASURED: #fff on --pop is 2.81:1 and fails AA; --ink on --pop is
+     5.57:1. The hue is unchanged — only the text colour moves. */
+  color: var(--ink);
+  box-shadow: var(--elevation-1);
+}
+.cta-arrow { font-size: 1.05em; line-height: 1; }
+/* MEASURED: white on --pop is 2.81:1 and fails AA; --ink on --pop is
+   5.57:1. Applies to EVERY filled coral button — the landing CTA, the
+   release-code button on the gate, and the approval button — not just
+   the ones on the desk. The hue never changes; only the text on it. */
+.btn.primary,
+.hero-form .start-btn.primary,
+.cta {
+  color: var(--ink);
+}
+.btns .btn { min-height: 48px; font-size: var(--font-body-size); }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  font-size: var(--font-body-size);
+  font-weight: 700;
+  /* M3's published asymmetry for a trailing icon: tighten the icon side
+     by 8px (no icon 24/24, trailing icon 24/16) — without it a button
+     with an arrow reads as optically off-centre */
+  padding: var(--space-4) var(--space-6);
+}
+.btn:has(.cta-arrow) { padding-right: var(--space-5); }
+@media (hover: hover) {
+  .cta:hover:not(:disabled) { filter: brightness(1.05); transform: none; }
+  .btn.primary:hover:not(:disabled) { filter: brightness(1.05); }
+}
+.cta:active:not(:disabled),
+.btn:active:not(:disabled) { transform: scale(0.98); }
+
+/* ---- fields (used on Screen 1's form, the release-code gate and the
+   approval panel, so the base lives here rather than in §9) --------- */
+.constraints {
+  display: flex;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-6);
+}
 .constraint-field {
-  flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 6px;
-  background: var(--paper); border: 1px solid var(--line);
-  border-radius: var(--r-bar); padding: 10px 12px;
+  flex: 1;
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--surface-page);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  min-width: 0;
 }
 .constraint-k {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.8px;
-  text-transform: uppercase; color: var(--mut);
+  font-family: var(--sans);
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+  letter-spacing: var(--font-fine-track);
+  font-weight: 600;
+  text-transform: none;
+  color: var(--text-secondary);
 }
 .constraint-field input {
-  width: 100%; border: 1px solid var(--line2); border-radius: 8px;
-  background: var(--card); color: var(--ink);
-  font: 600 15px var(--mono); padding: 8px 10px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font-family: var(--sans);
+  /* 16px is the floor: below it, iOS zooms the page on focus */
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: var(--space-4);
+  min-height: 48px;
+  transition:
+    border-color var(--motion-fade) var(--ease-standard),
+    box-shadow var(--motion-fade) var(--ease-standard);
 }
-.constraint-field input:focus {
-  outline: none; border-color: var(--brand);
-  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+.constraint-field input:focus { outline: none; border-color: var(--brand); }
+.constraint-field input:focus-visible { box-shadow: var(--focus-ring); }
+
+/* ==================================================================== */
+/* §1 — app bar + phase banner                                          */
+/* ==================================================================== */
+.appbar {
+  position: relative;
+  z-index: 2;
+  background: rgba(8, 51, 47, 0.62);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.appbar .top {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--space-7);
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.appbar .brand { color: #ffffff; }
+.appbar-id {
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-sm);
+  padding: 3px 10px;
+  font-size: var(--font-fine-size);
+  /* a desk id IS a short operational identifier — mono earns its keep */
+  font-family: var(--mono);
+  color: rgba(255, 255, 255, 0.82);
+}
+.appbar-state {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
 }
 
-/* §2 — Screen 2 extracted styles */
-.run .run-ctx {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.8px;
-  text-transform: uppercase; color: var(--mut);
-  margin: -10px 0 18px;
+/* connection: a NAMED state with its own dot, never a perpetual spinner
+   — a stalled stream has to look stalled. */
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-small-size);
+  color: #ffffff;               /* 7.24:1 on the painted app-bar ground */
+  font-weight: 500;
+}
+.conn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: currentColor;
+}
+.conn-live .conn-dot { background: #7fe3c9; }
+.conn-pending .conn-dot { background: rgba(255, 255, 255, 0.55); }
+.conn-wait .conn-dot { background: #ffd9a3; }
+.conn-dead { color: #ffc9c3; }
+.conn-dead .conn-dot { background: #ffc9c3; }
+
+/* THE PHASE BANNER — the persistent, service-level dry-run disclosure.
+   Modelled on GOV.UK's phase banner ("shown across all pages of a
+   service, so users should understand it as a service-level message")
+   and on Stripe's test-mode rule: one account-level signal, never a
+   per-row warning. This is strictly MORE prominent than the 12.5px line
+   it replaces, and it says exactly what the backend reported. */
+.phase {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+  border: 1px solid transparent;
+}
+.phase-k {
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-size: 10.5px;
+}
+.phase-v { font-weight: 500; }
+.phase-dry {
+  background: rgba(255, 217, 163, 0.16);
+  border-color: rgba(255, 217, 163, 0.45);
+  color: #ffe2ba;
+}
+.phase-live {
+  background: rgba(127, 227, 201, 0.16);
+  border-color: rgba(127, 227, 201, 0.45);
+  color: #a9f0dc;
+}
+/* Recorded replay — a real captured sandbox ticket chain being replayed. It
+   is neither live nor a dry run, so it gets the THIRD tone the mode banner
+   on main introduced, in this banner's own anatomy. The hue is that change's
+   own informational blue (#a9d4f0); the text is one step lighter for the same
+   reason dry and live are (their tint is the base, their text a lighter step),
+   because inside a 0.16 pill the ground lifts and the base hue would land at
+   4.98:1 where the other two sit near 6.
+   MEASURED on the painted app bar (the teal gradient at the bar's own centre,
+   under .appbar's rgba(8,51,47,0.62)): pill #245A5A, text #b9e4ff = 5.81:1,
+   L* 88.5 — the same register as dry (6.22, L* 91.3) and live (5.96, L* 89.8).
+   Colour is never load-bearing here: the banner always prints the word. */
+.phase-recorded {
+  background: rgba(169, 212, 240, 0.16);
+  border-color: rgba(169, 212, 240, 0.45);
+  color: #b9e4ff;
+}
+.phase-pending {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+/* ==================================================================== */
+/* §2 — the KPI band: ONE anatomy, four tiles                           */
+/* ==================================================================== */
+.kpis {
+  display: grid;
+  /* Pass 11: the hero column widens 1.55fr -> 1.9fr. MEASURED at 1440:
+     the restored 47px figure needs 358px for "Over by $487.00" and 360px
+     for "Saved $1,234.00", and the old column left only 339px of inner
+     width — so the single most important number on the screen wrapped on
+     any four-digit value. 1.9fr gives it 388px and all of those fit on
+     one line; the three companion tiles go 243px -> 225px, which was
+     re-checked at 1280 and 1440 for label wrapping. */
+  grid-template-columns: 1.9fr 1fr 1fr 1fr;
+  gap: var(--space-5);
+  align-items: stretch;
+  margin: 0 0 var(--space-8);
+}
+/* the band without the meter tile still has to balance */
+.kpis:not(:has(.kpi-meter-tile)) { grid-template-columns: 1.85fr 1fr 1fr; }
+
+.kpi {
+  min-width: 0;
+  background: var(--surface-card);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elevation-2);
+  /* ONE card-padding token, so this is never a per-tile decision */
+  padding: var(--space-card-padding);
+  /* the four slots — every tile has all four, so the rows line up */
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  gap: var(--space-3);
+}
+.kpi-k {
+  font-size: var(--font-small-size);
+  line-height: var(--font-small-lh);
+  letter-spacing: var(--font-small-track);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.kpi-v {
+  /* a grid item defaults to min-width:auto and will not shrink below its
+     content — which lets a long figure spill past the tile's own edge in a
+     narrow column. Explicit 0 lets it wrap instead. */
+  min-width: 0;
+  font-size: var(--metric-lg-size);
+  line-height: var(--metric-lg-lh);
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  align-self: end;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.kpi-v-of {
+  font-size: var(--font-small-size);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-secondary);
+}
+.kpi-meter { min-height: 12px; display: flex; align-items: center; }
+.kpi-ctx {
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+  letter-spacing: var(--font-fine-track);
+  font-weight: 500;
+  color: var(--text-secondary);
+  min-height: var(--font-fine-lh);
+}
+
+/* the hero uses a LARGER STEP OF THE SAME RAMP — a system, not a fifth
+   anatomy. Its figure is the gsap count-up target (`.big`, bigFigRef).
+   Pass 11: the tracking is now an em, so it scales WITH the size instead of
+   staying -1px whether the figure renders at 30px or 47px; the min-height
+   stays bound to the token and to the ramp's own line-height, so restoring
+   the size cannot introduce a count-up layout shift. */
+.kpi-hero .big,
+.kpi-hero .kpi-v {
+  font-size: var(--metric-hero-size);
+  line-height: var(--metric-hero-lh);
+  letter-spacing: var(--metric-hero-track);
+  min-height: calc(var(--metric-hero-size) * var(--metric-hero-lh));
+}
+/* Tone follows the REAL sign and status. It used to be green
+   unconditionally, so an "Over by" result still read as a success. A bad
+   outcome is calmer, not louder — visible effort is judged worse than
+   instant delivery when the outcome is poor. */
+.kpi-hero .kpi-v.ok { color: var(--status-ok-text); }
+.kpi-hero .kpi-v.wait { color: var(--status-wait-text); }
+.kpi-hero .kpi-v.no { color: var(--text-primary); }
+.kpi-hero .kpi-v.pending { color: var(--text-secondary); font-weight: 600; }
+
+/* the budget track. An EMPTY track is the truth in a dry run — nothing
+   was committed — and faking a fill was never an option. What made it
+   read as BROKEN was that it was empty, solid, and identical in weight
+   to the two tracks beside it that do have fills.
+   So the zero state is drawn differently on purpose: a dashed outline
+   rather than a filled trough. An empty dashed track reads as "nothing
+   here yet"; an empty solid track reads as "a bar that failed to fill".
+   Same truth, and it now looks deliberate. */
+.kpi-budget .bar {
+  position: relative;
+  height: 10px;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  margin: 0;
+  background: var(--line);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.bar.is-zero {
+  background: transparent;
+  border: 1px dashed var(--border-default);
+}
+.bar-zero {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 1px;
+  background: var(--border-strong);
+}
+.bar.is-zero .bar-zero { background: var(--text-secondary); }
+.kpi-budget .bar .fill {
+  /* MEASURED: --good on the --line track is 2.54:1 and fails SC 1.4.11's
+     3:1 for a meaningful graphical object. The derived dark step is
+     4.32:1 on the same track. */
+  background: linear-gradient(90deg, var(--status-ok-text), var(--good));
+}
+
+/* trips: a stacked track is a LENGTH judgment for every segment above the
+   first, so it is gist only — the real counts always sit beside it as
+   text in the context row below. */
+/* MEASURED (Pass 11): where two SETTLED statuses meet, the segment colours
+   themselves are 1.00–1.03:1 against each other — the L*~45 convergence that
+   drives the whole pip-shape system. They must therefore never touch. The
+   gap is the separator, and it paints the tile's own surface: white on the
+   segments measures 5.34 (ok) / 5.36 (wait) / 5.52 (no) / 3.20 (flat), so
+   every boundary clears SC 1.4.11's 3:1 for a meaningful graphic. Widened
+   from 2px to 3px so the separation survives a projector and a downscale. */
+.segbar {
+  display: flex;
+  width: 100%;
+  height: 10px;
+  gap: 3px;
+  background: var(--surface-card);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.seg { display: block; height: 100%; border-radius: 2px; }
+.seg-ok { background: var(--status-ok-text); }
+.seg-wait { background: var(--status-wait-text); }
+/* "still working through it" — a real, readable neutral rather than a
+   near-invisible tint, so the segment that is usually the LARGEST is
+   not the one you cannot see */
+/* MEASURED: --faint is 2.55:1 on --card and fails SC 1.4.11's 3:1 for a
+   graphic that carries meaning. One OKLCH step darker, hue held, clears
+   it (3.20 on --card, 3.06 on --paper). */
+.seg-flat { background: #88919B; }
+.seg-empty { background: var(--line); }
+
+.kpi-status .kpi-ctx.statusline {
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  font-size: var(--font-fine-size);
+}
+.kpi-status .statusline .s {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-fine-size);
+}
+.kpi-status .statusline .s b { color: var(--text-primary); font-weight: 700; }
+.kpi-status .statusline .s-quiet { color: var(--text-secondary); }
+
+.kpi-meter-tile .cm-track {
+  height: 10px;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  background: var(--line);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.kpi-meter-tile .cm-fill {
+  height: 100%;
+  border-radius: var(--radius-sm);
+  background: var(--brand);   /* 4.43:1 on the --line track */
+  transition: width var(--motion-expand) var(--ease-enter);
+}
+
+/* while the gate is closed the band has little to say — quieter, flatter */
+.kpis-quiet .kpi { box-shadow: var(--elevation-1); }
+
+/* ==================================================================== */
+/* §3 — the desk layout                                                 */
+/* ==================================================================== */
+.teal-app > .wrap { max-width: 1200px; padding-top: var(--space-8); }
+
+.desk-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: var(--space-8);      /* section rhythm — see §12 note */
+  align-items: start;
+}
+.desk-main { min-width: 0; display: block; }
+.desk-decisions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+@media (min-width: 1080px) {
+  /* The right column exists for ONE row: the attention row, where the
+     decision card (what needs you) sits beside the agent panel (what it
+     is doing). Everything below spans the full width — which is what
+     removed the 1154px of empty background that used to run down the
+     right-hand side, and what lets the trips grid run three-up. */
+  .desk-grid.has-decision {
+    grid-template-columns: minmax(0, 1fr) 316px;
+    column-gap: var(--space-7);
+  }
+  .desk-grid.has-decision > .desk-decisions { grid-column: 1; grid-row: 1; }
+  .desk-grid.has-decision > .desk-console { grid-column: 2; grid-row: 1; }
+  .desk-grid.has-decision > .desk-main,
+  .desk-grid.has-decision > .record,
+  .desk-grid.has-decision > .result-banner,
+  .desk-grid.has-decision > .desk-foot { grid-column: 1 / -1; }
+}
+
+/* the awaiting gate and the stream-dead card sit directly in the wrap */
+.wrap > .decide { margin: 0 0 var(--space-8); }
+.wrap > .status { margin: 0 0 var(--space-8); }
+.deskerr {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--status-no-text);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elevation-2);
+  padding: var(--space-6) var(--space-7);
+}
+.deskerr .pip { color: var(--status-no-text); margin-top: 4px; }
+.deskerr-main { display: flex; flex-direction: column; gap: var(--space-1); }
+.deskerr-main b {
+  font-size: var(--font-title-size);
+  line-height: var(--font-title-lh);
+  letter-spacing: var(--font-title-track);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.deskerr-main span {
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-lh);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* ==================================================================== */
+/* §4 — the agent panel                                                 */
+/* ==================================================================== */
+/* Pass 11 considered making this STICKY so the narration survives the
+   scroll down to the trips it is narrating, and did not do it. The reason
+   is mechanical, not aesthetic: a sticky grid item's containing block is
+   its GRID AREA, so a one-row item has zero travel no matter what `top`
+   says. Giving it travel means spanning it down the rows the trips occupy
+   — which is the full-height 316px right rail Pass 10 deleted, and which
+   takes the trips grid from three-up to two-up at 1440 (1152px of content
+   minus a 316px rail minus a 24px gutter leaves 812px, i.e. ~260px cards
+   against today's ~368px). Restoring a live-narration rail by shrinking
+   the trips is the wrong trade, so the console stays where it is. */
+.desk-console {
+  background: var(--surface-card);
+  border: none;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elevation-2);
+  padding: var(--space-card-padding);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-card-gap);
+}
+/* Nothing to report yet (the awaiting-team gate, or before the first
+   step lands): the panel sheds its card entirely rather than sitting
+   there as an empty white bar with a header and no content. It is NOT
+   display:none — the .pa-working wrapper inside is the aria-live region
+   and has to stay in the accessibility tree, mounted, at all times. */
+.desk-console:not(:has(.pa-sources)):not(:has(.pa-working-text)):not(:has(.pa-working-idle)) {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  gap: 0;
+}
+.desk-console:not(:has(.pa-sources)):not(:has(.pa-working-text)):not(:has(.pa-working-idle)) .pa-head {
+  display: none;
+}
+/* the live region COLLAPSES rather than being display:none'd — a
+   display:none aria-live region does not reliably announce the content
+   that un-hides it */
+.desk-console:not(:has(.pa-sources)):not(:has(.pa-working-text)):not(:has(.pa-working-idle)) .pa-working {
+  min-height: 0;
+}
+/* A real header. This is what removes the ORPHANED RULE: .pa-sources used
+   to carry a border-top that, whenever the working line was empty, sat
+   above the first rail with nothing at all over it. */
+.pa-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.pa-head-k {
+  font-size: var(--font-small-size);
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: var(--font-small-track);
+}
+.pa-beacon {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand);
+  flex: none;
+  animation: beacon-pulse 1.8s ease-in-out infinite;
+}
+@keyframes beacon-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.pa-working {
+  margin: 0;
+  padding: 0;
+  border-top: none;
+  min-height: var(--font-body-lh);
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-lh);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.pa-working-k {
+  display: block;
+  font-family: var(--sans);
+  font-size: var(--font-fine-size);
+  letter-spacing: var(--font-fine-track);
+  text-transform: none;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
+}
+.pa-working-text {
+  display: block;
+  animation: rise var(--motion-expand) var(--ease-enter) both;
+}
+.pa-working-idle {
+  font-size: var(--font-small-size);
+  color: var(--text-secondary);
+}
+
+.pa-sources {
+  margin: 0;
+  padding: 0;
+  border-top: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+}
+.pa-sources-k {
+  font-size: var(--font-fine-size);
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: var(--font-fine-track);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+.pa-source {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  width: 100%;
+}
+.pa-source-name {
+  font-weight: 600;
+  font-size: var(--font-fine-size);
+  color: var(--text-primary);
+}
+.pa-source-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-weight: 600;
+  font-size: var(--font-fine-size);
+  text-align: right;
+  color: var(--text-secondary);
+}
+/* A fallback is amber and hollow. NEVER green, never a solid pip. */
+.pa-source-label.live,
+.pa-source-label.real { color: var(--status-ok-text); }
+.pa-source-label.recorded,
+.pa-source-label.fallback,
+.pa-source-label.comparison,
+.pa-source-label.unknown { color: var(--status-wait-text); }
+.pa-source-label.curated { color: var(--text-secondary); }
+
+/* no decision on screen: the rail has no partner, so it becomes a
+   full-width strip instead of a lone 316px column beside a void */
+@media (min-width: 1080px) {
+  .desk-grid:not(.has-decision) > .desk-console {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-8);
+  }
+  .desk-grid:not(.has-decision) .pa-head {
+    border-bottom: none;
+    border-right: 1px solid var(--border-subtle);
+    padding: 0 var(--space-6) 0 0;
+    flex: none;
+  }
+  .desk-grid:not(.has-decision) .pa-working { flex: 1 1 auto; min-width: 0; }
+  .desk-grid:not(.has-decision) .pa-sources {
+    flex: 0 1 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-6);
+    align-items: center;
+  }
+  .desk-grid:not(.has-decision) .pa-sources-k {
+    border-top: none;
+    padding-top: 0;
+  }
+  .desk-grid:not(.has-decision) .pa-source { width: auto; gap: var(--space-3); }
+}
+
+/* ==================================================================== */
+/* §5 — the decision card                                               */
+/* ==================================================================== */
+.decide {
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--warn);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elevation-2);
+  margin: 0;
+  padding: var(--space-card-padding) var(--space-7);
+  animation: rise var(--motion-expand) var(--ease-enter) both;
+}
+/* sentence case, not ALL CAPS — the same rule applied to every other
+   eyebrow in this pass, applied here too */
+.decide .cap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-small-size);
+  font-weight: 700;
+  letter-spacing: var(--font-small-track);
+  text-transform: none;
+  color: var(--status-wait-text);   /* 5.36:1 on --card */
+  margin-bottom: var(--space-4);
+}
+.decide .decide-name {
+  font-size: var(--font-title-size);
+  line-height: var(--font-title-lh);
+  letter-spacing: var(--font-title-track);
+  font-weight: 700;
+  margin: 0 0 var(--space-2);
+}
+/* The reason leads with the CHECKABLE COMPARISON — the fare, the cap, and
+   the fact that one exceeds the other — because explanations measurably
+   increase acceptance of a recommendation regardless of whether it is
+   correct (Bansal et al., CHI 2021). Prose persuades; arithmetic can be
+   verified against the manager's own mandate. */
+.decide .reason {
+  font-size: var(--font-lead-size);
+  line-height: var(--font-lead-lh);
+  color: var(--text-primary);
+  margin: 0 0 var(--space-5);
+}
+.decide-opts { display: flex; flex-direction: column; gap: var(--space-3); margin: 0 0 var(--space-5); }
+.decide-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  border: 1px solid var(--border-default);
+  /* concentric: the card is 20px with 24px of padding, so an inner tray
+     sits at the next step down rather than at an unrelated value */
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
+  font-size: var(--font-body-size);
+  background: var(--surface-card);
+}
+.decide-opt::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid var(--border-default);
+  flex: none;
+}
+.decide-opt.rec {
+  border: 2px solid var(--status-ok-text);
+  background: var(--status-ok-bg);
+  padding: 11px 15px;
+}
+.decide-opt.rec::before {
+  border-color: var(--status-ok-text);
+  background: var(--status-ok-text);
+  box-shadow: inset 0 0 0 3px var(--status-ok-bg);
+}
+.decide-opt > span:first-of-type { min-width: 0; flex: 1 1 auto; }
+.decide-opt .rec-flag {
+  flex: none;
+  font-size: var(--font-fine-size);
+  font-weight: 700;
+  color: var(--status-ok-text);
+  letter-spacing: var(--font-fine-track);
+  text-transform: none;
+  background: var(--surface-card);
+  border: 1px solid rgba(0, 123, 73, 0.3);
+  border-radius: var(--radius-xs);
+  padding: 1px 6px;
+}
+.decide-opt .price {
+  margin-left: auto;
+  flex: none;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 620px) {
+  /* the price gets its own line rather than being squeezed between a
+     wrapping label and the "my pick" tag */
+  .decide-opt { flex-wrap: wrap; row-gap: var(--space-3); }
+  .decide-opt .price { margin-left: 0; }
+  .decide-opt::before { align-self: flex-start; margin-top: 2px; }
+}
+.decide .fine {
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+  color: var(--text-secondary);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+.decide-note {
+  margin-top: var(--space-4);
+  font-size: var(--font-small-size);
+  color: var(--status-wait-text);
+  font-weight: 600;
+}
+.decide .btns { gap: var(--space-4); }
+
+/* Waybot gate: the release-code entry reads like the share card's box */
+.decide .constraint-field { flex: 0 0 auto; }
+.decide .constraint-field input {
+  min-height: 52px;
+  font-size: 20px;
+  letter-spacing: 1.5px;
+  text-align: center;
+  font-family: var(--mono);   /* a release code IS a token */
+}
+
+/* ==================================================================== */
+/* §6 — the trips board                                                 */
+/* ==================================================================== */
+.board {
+  background: var(--surface-card);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elevation-2);
+  /* NO overflow:hidden — it clipped the focus ring of the card footers */
+  padding: 0;
+}
+.board-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  padding: var(--space-6) var(--space-6) var(--space-5);
+}
+/* A real header, in sans. It was a 10.5px all-caps monospace eyebrow
+   sitting a long way above the cards it named. Atlassian's written rule:
+   no ALL CAPS "anywhere—including eyebrows, lozenges, tags, badges, and
+   table column headers. There are no exemptions." */
+.board > .board-head > .sec {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  font-family: var(--sans);
+  font-size: var(--font-title-size);
+  line-height: var(--font-title-lh);
+  letter-spacing: var(--font-title-track);
+  font-weight: 700;
+  text-transform: none;
+  color: var(--text-primary);
+}
+.sec-n {
+  font-size: var(--font-fine-size);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface-page);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 1px 7px;
+  font-variant-numeric: tabular-nums;
+}
+/* the manager's standing authority, stated where nothing is being asked */
+.board-rule {
+  margin: 0;
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+  color: var(--text-secondary);
+  text-align: right;
+}
+.board-rule b {
+  color: var(--text-primary);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* the grid is inset 6px, which is exactly what makes the nesting
+   concentric: inner = outer - gap = 20 - 6 = 14px */
+.tgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4);
+  padding: 0 6px 6px;
+}
+.tcard {
+  background: var(--surface-page);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);       /* = --radius-xl - 6px */
+  --pad: var(--space-5);
+  padding: var(--space-5) var(--space-5) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  transition:
+    border-color var(--motion-fade) var(--ease-standard),
+    box-shadow var(--motion-fade) var(--ease-standard);
+}
+@media (hover: hover) {
+  .tcard:hover {
+    border-color: var(--border-default);
+    box-shadow: var(--elevation-2);
+  }
+}
+.tcard.blocked {
+  border-color: #F0D7D9;
+  box-shadow: inset 3px 0 0 var(--status-no-text);
+}
+
+.tc-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.tc-name {
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-lh);
+  font-weight: 700;
+  letter-spacing: var(--font-body-track);
+  color: var(--text-primary);
+}
+.tc-top .badge { flex: none; }
+
+.tc-route {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-1) 0;
+}
+/* IATA codes stay monospace — a genuine short operational identifier,
+   and the one place on this card where mono earns its keep. */
+.tc-code {
+  font-family: var(--mono);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--text-primary);
+  flex: none;
+}
+.tc-route-none .tc-code {
+  font-family: var(--sans);
+  font-size: var(--font-body-size);
+  letter-spacing: 0;
+  color: var(--text-secondary);
+}
+.tc-path { flex: 1; display: flex; align-items: center; min-width: 36px; }
+.tc-path .tc-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--brand);
+  flex: none;
+}
+.tc-path .tc-line { flex: 1; height: 0; border-top: 1.5px dashed var(--border-default); }
+.tc-plane { display: flex; flex: none; color: var(--brand); margin: 0 var(--space-2); }
+.tc-plane svg { width: 14px; height: 14px; transform: rotate(90deg); }
+
+.tc-facts { display: flex; align-items: center; gap: var(--space-5); }
+.tc-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-fine-size);
+  color: var(--text-secondary);
+}
+/* dates leave monospace: a date is not an identifier */
+.tc-fact .num { font-family: var(--sans); font-variant-numeric: tabular-nums; }
+.tc-fact svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  fill: none;
+  /* --faint is 2.55:1 and fails the 3:1 for a meaningful graphic */
+  stroke: var(--text-secondary);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tc-money {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+.tc-fare {
+  font-size: var(--metric-sm-size);
+  line-height: var(--metric-sm-lh);
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.tc-was {
+  font-size: var(--font-fine-size);
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-left: var(--space-3);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+.tc-delta {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--font-fine-size);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+.tc-delta.up { color: var(--status-ok-text); background: var(--status-ok-bg); }
+.tc-delta.down { color: var(--status-no-text); background: var(--status-no-bg); }
+.tc-note {
+  font-size: var(--font-fine-size);
+  color: var(--status-wait-text);
+  font-weight: 600;
+}
+
+/* the footer: the group's steps, and the only affordance for the detail */
+.tc-more {
+  margin: var(--space-2) calc(-1 * var(--space-5)) 0;
+  padding: 0 var(--space-5);
+  min-height: 44px;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+  /* concentric with the card it bleeds into */
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: var(--text-secondary);
+  transition: background-color var(--motion-fade) var(--ease-standard);
+}
+@media (hover: hover) {
+  .tc-more:hover { background: var(--surface-card); }
+}
+.tc-track { display: inline-flex; align-items: center; flex: none; }
+.tcard .trip.tick {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+}
+.tc-track .trip.tick + .trip.tick::before {
+  content: "";
+  width: 10px;
+  height: 0;
+  border-top: 1.5px solid var(--border-default);
+}
+.tick-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border-default);
+  flex: none;
+}
+.trip.tick.good .tick-dot { background: var(--status-ok-text); }
+.trip.tick.wait .tick-dot { background: var(--status-wait-text); }
+.trip.tick.stop .tick-dot { background: var(--status-no-text); }
+.tc-track .trip.tick:last-child .tick-dot { width: 10px; height: 10px; }
+.tick-word {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.tc-more-text {
+  font-size: var(--font-fine-size);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.tc-chev {
+  margin-left: auto;
+  display: flex;
+  color: var(--text-secondary);
+  transition: transform var(--motion-move) var(--ease-standard);
+}
+.tc-chev svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tc-more[aria-expanded="true"] .tc-chev { transform: rotate(180deg); }
+
+.tc-detail[hidden] { display: none; }
+.tc-detail {
+  margin: 0 calc(-1 * var(--space-5));
+  padding: var(--space-2) var(--space-5) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+}
+.tc-step {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: var(--space-4);
+  row-gap: 2px;
+  /* pad the item, never margin between items — no dead zones */
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+/* a REASON is prose, so it sits under its word and reads left-to-right;
+   only FIGURES take the right-hand column, where they line up */
+.tc-step-why {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+  color: var(--text-secondary);
+}
+.tc-step:last-child { border-bottom: none; }
+.tc-step-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border-default); align-self: center; }
+.tc-step-dot.good { background: var(--status-ok-text); }
+.tc-step-dot.wait { background: var(--status-wait-text); }
+.tc-step-dot.stop { background: var(--status-no-text); }
+.tc-step-word { font-size: var(--font-fine-size); font-weight: 600; color: var(--text-primary); }
+.tc-step-val {
+  font-size: var(--font-fine-size);
+  color: var(--text-secondary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tc-step-val s { color: var(--text-secondary); margin-right: var(--space-1); }
+
+/* Pass 11: the empty state now carries a real sentence per state (see the
+   desk page). The dashed frame keeps the full width of the board — it has
+   to line up with the skeleton rows that sit under it — and the MEASURE is
+   put on the copy inside, so the sentence never runs 110 characters wide. */
+.board .trip.empty {
+  display: flex;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-8);
+  margin: 0 6px 6px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  line-height: var(--font-body-lh);
+  font-size: var(--font-body-size);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-page);
+}
+.board .trip.empty .empty-copy { max-width: 58ch; }
+
+/* ==================================================================== */
+/* §7 — the record                                                      */
+/* ==================================================================== */
+/* COLLAPSED it is a quiet bar that says what is inside, using real
+   counts. It used to be a large near-black slab containing one small
+   ghost button — the visually heaviest element on the page, saying the
+   least. OPEN it becomes the dark panel, which is measured rather than
+   stylistic: on --paper the status palette reaches only non-text
+   contrast (good 3.01, warn 3.04, faint 2.45); on the dark surface the
+   same tokens read 5.52 / 5.46 / 6.79. */
+.record {
+  margin: 0;
+  padding: 0;
+  border-top: none;
+  border-radius: var(--radius-xl);
+  background: var(--surface-card);
+  box-shadow: var(--elevation-2);
+  overflow: hidden;
+  transition: background-color var(--motion-expand) var(--ease-standard);
+}
+.record-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  width: 100%;
+  min-height: 64px;
+  margin: 0;
+  padding: var(--space-5) var(--space-6);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xl);
+  font: inherit;
+  font-family: var(--sans);
+  text-align: left;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background-color var(--motion-fade) var(--ease-standard);
+}
+@media (hover: hover) {
+  .record-toggle:hover { background: var(--surface-page); text-decoration: none; }
+}
+.rt-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.rt-k {
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-lh);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.rt-sub {
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+  color: var(--text-secondary);
+}
+.rt-counts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.rt-count {
+  font-size: var(--font-fine-size);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.rt-count b {
+  color: var(--text-primary);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.rt-chev { display: flex; flex: none; color: var(--text-secondary); transition: transform var(--motion-move) var(--ease-standard); }
+.rt-chev svg { width: 20px; height: 20px; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.record-toggle[aria-expanded="true"] .rt-chev { transform: rotate(180deg); }
+
+/* open: the dark evidence panel */
+.record.is-open { background: var(--surface-inverse); }
+.record.is-open .record-toggle { color: var(--text-on-inverse); }
+.record.is-open .rt-k { color: var(--text-on-inverse); }
+.record.is-open .rt-sub,
+.record.is-open .rt-count,
+.record.is-open .rt-chev { color: var(--text-on-inverse-secondary); }
+.record.is-open .rt-count b { color: var(--text-on-inverse); }
+@media (hover: hover) {
+  .record.is-open .record-toggle:hover { background: var(--surface-inverse-raised); }
+}
+.record .fineprint {
+  margin: 0;
+  opacity: 1;
+  padding: 0 var(--space-6) var(--space-7);
+  border-top: 1px solid var(--border-inverse);
+}
+.fineprint[hidden] { display: none; }
+/* the panel's own title is redundant with the toggle above it */
+.record .fineprint > .sec.fineprint-k { display: none; }
+
+/* the close page's stat tray is a .record too — it stays light */
+.record.close-record {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+
+/* ==================================================================== */
+/* §8 — result banner, footer, toast, skeletons                         */
+/* ==================================================================== */
+.result-banner {
+  margin: 0;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elevation-2);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+  padding: var(--space-6) var(--space-7);
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+.rb-main { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.result-banner .rb-k {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--sans);
+  font-size: var(--font-title-size);
+  line-height: var(--font-title-lh);
+  letter-spacing: var(--font-title-track);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.result-banner .rb-sub {
+  font-size: var(--font-fine-size);
+  color: var(--text-secondary);
+  margin: 0;
+}
+.result-banner .cta { margin-left: auto; }
+.result-banner.done { border-color: rgba(0, 123, 73, 0.3); background: var(--status-ok-bg); }
+.result-banner.done .rb-k { color: var(--status-ok-text); }
+.result-banner.wait { border-color: rgba(153, 93, 0, 0.3); background: var(--status-wait-bg); }
+.result-banner.wait .rb-k { color: var(--status-wait-text); }
+/* A poor outcome is CALMER, not louder: no wash, no shout. */
+.result-banner.no { border-color: var(--border-default); background: var(--surface-card); }
+.result-banner.no .rb-k { color: var(--text-primary); }
+.result-banner.no .pip { color: var(--status-no-text); }
+
+/* a real page footer, on the full content width, with a rule to anchor
+   it. It used to be centred inside the 892px left column of a 1280px
+   wrap, so it read as centred on nothing. */
+.desk-foot {
+  margin-top: var(--space-4);
+  padding-top: var(--space-6);
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  display: flex;
+  justify-content: center;
+}
+.desk-foot .note-soft {
+  margin: 0;
+  color: #ffffff;            /* translucent white fails AA on the lighter teal */
+  font-size: var(--font-fine-size);
+  font-weight: 500;
+}
+
+/* skeletons — obviously placeholders: no text, no numbers, no digits */
+.trip.skeleton { pointer-events: none; }
+.board .trip.skeleton {
+  display: flex;
+  gap: var(--space-5);
+  align-items: center;
+  margin: 0 6px 6px;
+  padding: var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-page);
+}
+.sk-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--line); flex: none; }
+.sk-lines { flex: 1; display: flex; flex-direction: column; gap: var(--space-3); }
+.sk-line { height: 9px; width: 72%; border-radius: 5px; background: var(--line); }
+.sk-line.short { width: 44%; background: var(--surface-page); }
+.trip.skeleton .sk-avatar,
+.trip.skeleton .sk-line { animation: shimmer 1.6s linear infinite; }
+@keyframes shimmer {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.toast {
+  box-shadow: var(--elevation-4);
+  border-radius: var(--radius-lg);
+  border-left: 3px solid var(--brand);
+  padding-bottom: max(var(--space-5), env(safe-area-inset-bottom));
+}
+.toast .toast-k {
+  font-family: var(--sans);
+  font-size: var(--font-fine-size);
+  letter-spacing: 0.3px;
+  text-transform: none;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: var(--space-1);
+}
+@media (min-width: 720px) {
+  .toast {
+    left: auto;
+    right: var(--space-7);
+    transform: none;
+    width: min(380px, calc(100vw - 44px));
+    animation: toast-in-r var(--motion-expand) var(--ease-enter) both;
+  }
+}
+@keyframes toast-in-r {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ==================================================================== */
+/* §9 — Screen 1: landing + the share card                              */
+/* ==================================================================== */
+/* MEASURED: pure white is 4.50:1 on the gradient's old light stop
+   #12857B and 3.47:1 on the landing's #1A9A8C — and the aurora layers
+   composite with mix-blend-mode:screen, lightening it further. Pulling
+   the light stops back gives white real headroom at every painted
+   point. Same hues, lower lightness — no new colour. */
+.teal-app {
+  background:
+    radial-gradient(120% 120% at 82% 10%, rgba(94, 234, 212, 0.13) 0%,
+      transparent 55%),
+    linear-gradient(160deg, #0a4d47 0%, #0f766e 48%, #107a71 100%);
+}
+.mandate-screen {
+  background:
+    radial-gradient(120% 120% at 82% 30%, rgba(94, 234, 212, 0.13) 0%,
+      transparent 55%),
+    linear-gradient(105deg, #0a4d47 0%, #0f766e 50%, #107a71 78%, #12857b 100%);
+}
+@media (max-width: 900px) {
+  .mandate-screen {
+    background:
+      radial-gradient(120% 70% at 82% 6%, rgba(94, 234, 212, 0.14) 0%,
+        transparent 55%),
+      linear-gradient(165deg, #0a4d47 0%, #0f766e 55%, #107a71 100%);
+  }
+}
+
+.hero-title {
+  font-size: clamp(34px, 4.2vw, 54px);
+  letter-spacing: -1.2px;
+  line-height: 1.06;
+}
+.hero-lead {
+  font-size: clamp(15px, 1.25vw, 18px);
+  max-width: 44ch;
+  color: #ffffff;
+  opacity: 0.92;
+}
+.hero .assure-chip {
+  min-height: 34px;
+  border-radius: var(--radius-sm);
+  border-width: 1px;
+  gap: var(--space-3);
+  font-size: var(--font-fine-size);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.26);
+}
+
+.hero-form { align-items: center; }
+.hero-form .start {
+  background: var(--surface-page);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 24px 60px -18px rgba(4, 32, 29, 0.55);
+  padding: var(--space-8) var(--space-8) var(--space-7);
+  max-width: 620px;
+  width: 100%;
+  margin-left: auto;
+  justify-content: flex-start;
+  gap: var(--space-6);
+  flex: none;
+}
+.hero-form .start-title {
+  color: var(--text-primary);
+  font-size: var(--font-h1-size);
+  line-height: var(--font-h1-lh);
+  letter-spacing: var(--font-h1-track);
+  font-weight: 800;
+}
+.hero-form .start-sub {
+  color: var(--text-secondary);
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-lh);
+  font-weight: 500;
+}
+.hero-form .note-soft {
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+  text-align: left;
+  margin: 0;
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* the form itself */
+.hero-form .constraints {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  align-content: start;
+  flex: none;
+}
+.hero-form .constraint-field {
+  background: transparent;
+  border: none;
+  padding: 0;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  min-width: 0;
+  gap: var(--space-3);
+  justify-content: flex-start;
+}
+/* labels leave monospace-uppercase: they are labels, not identifiers */
+.hero-form .constraint-k {
+  color: var(--text-secondary);
+  font-family: var(--sans);
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+  letter-spacing: var(--font-fine-track);
+  font-weight: 600;
+  text-transform: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.hero-form .constraint-k::before { content: none; }
+/* 11.5px was the one hard-coded size left below the fine step; a hint the
+   user is meant to read while typing has no business being the smallest
+   text on the screen. */
+.constraint-hint {
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+}
+.hero-form .constraint-field input {
+  border: 1px solid var(--border-default);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  /* 16px minimum: below it, iOS zooms the page on focus */
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border-radius: var(--radius-md);
+  min-height: 48px;
+  padding: var(--space-4) var(--space-4);
+  transition:
+    border-color var(--motion-fade) var(--ease-standard),
+    box-shadow var(--motion-fade) var(--ease-standard);
+}
+.hero-form .constraint-field input::placeholder {
+  font-family: var(--sans);
+  font-weight: 400;
+  color: var(--faint);
+}
+.hero-form .constraint-field input:focus-visible,
+.constraint-field input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: var(--focus-ring);
+}
+/* a validation affordance that is honest: the field says its own bound
+   and only turns amber once the value is actually outside it */
+.hero-form .constraint-field.invalid input {
+  border-color: var(--status-wait-text);
+  background: var(--status-wait-bg);
+}
+.constraint-err {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--status-wait-text);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.hero-form .start-btn {
+  min-height: 52px;
+  width: 100%;
+  padding: 0 var(--space-6);
+  font-size: var(--font-lead-size);
+  border-radius: var(--radius-md);
+}
+/* the glow is deliberately shallow: a heavier coral shadow tinted the
+   paper beneath it enough to drag the footnote under 4.5:1 (measured
+   3.85 at the old 26px/0.6) */
+.hero-form .start-btn.primary {
+  background: var(--pop);
+  color: var(--ink);                 /* 5.57:1, vs 2.81:1 for white */
+  box-shadow: 0 6px 14px -10px rgba(242, 118, 75, 0.45);
+}
+.hero-form .start-btn:disabled { opacity: 0.55; }
+
+/* share card */
+.hero-form .share-card { justify-content: flex-start; gap: var(--space-6); }
+.share-card .constraint-field { flex: 0 0 auto; }
+.hero-form .share-link input {
+  font-size: var(--font-small-size);
+  font-family: var(--mono);          /* a URL is a path — mono is right */
+  color: var(--brand);
+  font-weight: 600;
+}
+.hero-form .share-code input {
+  font-size: 26px;
+  letter-spacing: 2px;
+  text-align: center;
+  padding: var(--space-4);
+  font-family: var(--mono);          /* a release code is a token */
+  border: 1.5px dashed var(--border-default);
+  min-height: 60px;
+}
+.hero-form .copy-row { display: flex; gap: var(--space-3); align-items: stretch; }
+.hero-form .copy-row input { flex: 1; min-width: 0; }
+.hero-form .copy-btn {
+  flex: none;
+  min-height: 48px;
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: var(--font-small-size);
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--ink);
+  background: var(--pop);
+  border: 1px solid rgba(27, 36, 48, 0.12);
+  user-select: none;
+  touch-action: manipulation;
+  transition: filter var(--motion-fade) var(--ease-standard);
+}
+@media (hover: hover) {
+  .hero-form .copy-btn:hover { filter: brightness(1.05); }
+}
+.hero-form .copy-btn:active { transform: scale(0.98); }
+
+/* ==================================================================== */
+/* §10 — Screen 3: the wrap-up                                          */
+/* ==================================================================== */
+.close-status-card { margin-top: var(--space-8); }
+.run {
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elevation-2);
+  border: none;
+  padding: var(--space-8);
+}
+.close-call {
+  font-size: var(--font-h1-size);
+  line-height: var(--font-h1-lh);
+  letter-spacing: var(--font-h1-track);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.close-call.good { color: var(--status-ok-text); }
+.close-call.bad { color: var(--text-primary); }
+.close-call.warn { color: var(--status-wait-text); }
+.close-sub {
+  font-size: var(--font-lead-size);
+  line-height: var(--font-lead-lh);
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin: var(--space-3) 0 0;
+  max-width: 62ch;
+}
+
+/* the peak-end figure. It used to sit in a flex row with a label pushed
+   to the far left and the figure to the far right — a huge horizontal
+   gap and no relationship between the two. It is now a proper hero
+   block: label, figure, note, stacked and left-aligned. */
+.close-hero {
+  margin-top: var(--space-7);
+  padding-top: var(--space-7);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.close-status-card .budget {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+}
+.close-status-card .budget .left {
+  font-size: var(--font-small-size);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+/* the peak-end step, not the desk's hero step: this figure has a whole
+   card to itself and is the last number of the run anyone reads. */
+.close-status-card .budget .big {
+  font-family: var(--sans);
+  font-size: var(--metric-peak-size);
+  line-height: var(--metric-peak-lh);
+  min-height: calc(var(--metric-peak-size) * var(--metric-peak-lh));
+  font-weight: 800;
+  letter-spacing: var(--metric-peak-track);
+  font-variant-numeric: tabular-nums;
+  color: var(--status-ok-text);
+}
+.close-status-card .budget .big.neg { color: var(--text-primary); }
+.close-status-card .budget .hero-note {
+  width: 100%;
+  font-size: var(--font-fine-size);
+  line-height: var(--font-fine-lh);
+  color: var(--text-secondary);
+  margin-top: var(--space-1);
+}
+.close-status-card .bar {
+  position: relative;
+  height: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--line);
+  border: 1px solid var(--line);
+  margin-top: var(--space-4);
+  overflow: hidden;
+}
+/* the dashed zero state has to win here too — same rule, same reason as
+   the desk's budget tile */
+.close-status-card .bar.is-zero {
+  background: transparent;
+  border: 1px dashed var(--border-default);
+}
+.close-status-card .bar .fill {
+  background: linear-gradient(90deg, var(--status-ok-text), var(--good));
+}
+.close-status-card .bar-note {
+  margin-top: var(--space-3);
+  font-size: var(--font-fine-size);
+  color: var(--text-secondary);
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums;
+}
+
+/* the counts are secondary — compact tiles at their natural width, not
+   two half-page boxes holding one digit each */
+.record .close-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+}
+.record .close-stats > .close-stat { flex: 0 1 180px; min-width: 140px; }
+.record .close-stat {
+  background: var(--surface-page);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  min-width: 0;
+  flex: none;
+}
+.record .close-stat .cs-k {
+  font-size: var(--font-fine-size);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.record .close-stat .cs-v {
+  font-size: var(--metric-md-size);
+  line-height: var(--metric-md-lh);
+  font-weight: 800;
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  margin-top: var(--space-1);
+}
+
+.close-note {
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
+  font-size: var(--font-small-size);
+  font-weight: 600;
+  margin: var(--space-6) 0 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--status-wait-bg);
+  border: 1px solid rgba(153, 93, 0, 0.28);
+  color: var(--status-wait-text);
+}
+.close-note.live {
+  background: var(--status-ok-bg);
+  border-color: rgba(0, 123, 73, 0.28);
+  color: var(--status-ok-text);
+}
+
+.close-room { color: var(--text-secondary); font-size: var(--font-fine-size); margin-top: var(--space-7); }
+.close-room.filled { border-top: 1px solid var(--border-subtle); padding-top: var(--space-6); }
+.close-room.filled .auditor-k {
+  font-family: var(--sans);
+  font-size: var(--font-fine-size);
+  letter-spacing: var(--font-fine-track);
+  text-transform: none;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.close-room.filled .auditor-line {
+  font-family: var(--sans);
+  font-size: var(--font-lead-size);
+  line-height: var(--font-lead-lh);
+  font-style: normal;
+  color: var(--text-primary);
+  margin: var(--space-3) 0 0;
+  max-width: 68ch;
+}
+.close-room.filled .auditor-src {
+  font-size: var(--font-fine-size);
+  color: var(--status-wait-text);
+  font-style: normal;
+  font-weight: 600;
+  margin-top: var(--space-3);
+}
+
+.close-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-7);
+}
+.close-actions .btn {
+  min-height: 48px;
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  text-decoration: none;
+  /* M3's trailing-icon rule: tighten the icon side by 8px, or a button
+     with an arrow reads as optically off-centre */
+  padding: 0 var(--space-5) 0 var(--space-7);
+}
+.close-actions-foot {
+  margin-top: var(--space-6);
+  padding-top: var(--space-6);
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  justify-content: center;
+}
+/* A SOLID surface, not a translucent one. White text over a translucent
+   white panel on this teal tops out at 4.21:1 — it cannot reach AA at
+   any alpha, because the ground itself is too light. A white button with
+   ink text is 15:1 and matches every other surface on this ground. */
+.close-actions-foot .btn.ghost {
+  background: var(--surface-card);
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  box-shadow: var(--elevation-2);
+}
+@media (hover: hover) {
+  .close-actions-foot .btn.ghost:hover { background: var(--surface-page); }
+}
+.close-actions-foot .btn.ghost:focus-visible { box-shadow: var(--focus-ring-inverse); }
+
+/* the close page's record bar is light and sits INSIDE the white card,
+   so it needs its own edge to separate from the card it lives on.
+   .close-record is the stat tray, NOT a disclosure — it stays bare. */
+.close-status-card .record:not(.close-record) {
+  margin-top: var(--space-7);
+  border: 1px solid var(--border-subtle);
+  box-shadow: none;
+}
+.record.close-record { border: none; }
+.close-status-card .record.is-open { border-color: transparent; }
+.close-status-card .record .fineprint { padding: var(--space-5) var(--space-6) var(--space-6); }
+.close-status-card .record.is-open .close-room.filled {
+  border-top: none;
+  padding-top: 0;
+  color: var(--text-on-inverse-secondary);
+  margin-top: 0;
+}
+.close-status-card .record.is-open .auditor-k { color: var(--text-on-inverse-tertiary); }
+.close-status-card .record.is-open .auditor-line { color: var(--text-on-inverse); }
+.close-status-card .record.is-open .auditor-src { color: var(--status-wait-on-dark); }
+.close-chart {
+  background: var(--surface-inverse);
+  border-radius: var(--radius-xl);
+  padding: var(--space-6) var(--space-7) var(--space-7);
+  margin-top: var(--space-7);
+  box-shadow: none;
+}
+.close-chart .sec {
+  color: var(--text-on-inverse);
+  font-family: var(--sans);
+  font-size: var(--font-body-size);
+  font-weight: 700;
+  letter-spacing: var(--font-body-track);
+  text-transform: none;
+  margin: 0 0 var(--space-2);
+}
+.close-chart .rec-cap { margin-bottom: var(--space-5); }
+
+/* ==================================================================== */
+/* §11 — the record's interior (Pass 9's diagrams, re-tokenised)         */
+/* ==================================================================== */
+.rec-count {
+  margin: var(--space-4) 0 0;
+  font-size: var(--font-fine-size);
+  color: var(--text-on-inverse-tertiary);
+  line-height: var(--font-fine-lh);
+}
+.rec-count b { color: var(--text-on-inverse); font-weight: 700; }
+.rec-count .num { font-family: var(--sans); font-variant-numeric: tabular-nums; }
+
+.rec-sec {
+  margin-top: var(--space-8);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border-inverse);
+}
+.rec-h {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-body-size);
+  line-height: var(--font-body-lh);
+  font-weight: 700;
+  letter-spacing: var(--font-body-track);
+  color: var(--text-on-inverse);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+.rec-h-n {
+  font-size: var(--font-fine-size);
+  font-weight: 500;
+  color: var(--text-on-inverse-tertiary);
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums;
+}
+.rec-cap {
+  margin: 0 0 var(--space-5);
+  font-size: var(--font-fine-size);
+  line-height: 1.55;
+  color: var(--text-on-inverse-secondary);
+  max-width: 76ch;
+}
+.rec-src { color: var(--text-on-inverse-tertiary); }
+.rec-none { margin: 0; font-size: var(--font-small-size); color: var(--text-on-inverse-tertiary); }
+.rec-fig { margin: 0; }
+
+/* §11a — the fare chart */
+.fm-rows { display: flex; flex-direction: column; }
+.fm-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 3fr) minmax(0, 1.35fr);
+  align-items: center;
+  column-gap: var(--space-5);
+}
+.fm-id { min-width: 0; }
+.fm-trip {
+  display: block;
+  font-size: var(--font-fine-size);
+  font-weight: 600;
+  color: var(--text-on-inverse);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fm-route {
+  display: block;
+  font-size: 11px;
+  color: var(--text-on-inverse-tertiary);
+  letter-spacing: 0.4px;
+}
+.fm-track { position: relative; height: 40px; min-width: 0; }
+.fm-cap { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(255, 255, 255, 0.45); }
+.fm-bar {
+  position: absolute;
+  top: 50%;
+  height: 3px;
+  min-width: 2px;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.26);
+  border-radius: 2px;
+}
+.fm-dot {
+  position: absolute;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  margin-left: -5.5px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.fm-basis {
+  width: 2px;
+  height: 15px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--faint);
+  border: 0;
+  z-index: 1;
+}
+.fm-mark {
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  background: var(--paper);
+  border: 2px solid var(--paper);
+  z-index: 2;
+}
+.fm-mark.over { background: var(--status-wait-on-dark); border-color: var(--status-wait-on-dark); }
+.fm-mark.stale { background: transparent; border-color: var(--status-wait-on-dark); }
+.fm-dot.static { position: static; margin: 0; transform: none; flex: none; }
+.fm-basis.static { height: 11px; }
+
+.fm-read { min-width: 0; text-align: right; }
+.fm-figs {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  font-size: var(--font-fine-size);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.fm-was { color: var(--text-on-inverse-tertiary); }
+/* was rgba(255,255,255,.4) = 3.79:1 on the dark base — a real AA fail on
+   a glyph that carries the "moved to" relationship */
+.fm-to { color: rgba(255, 255, 255, 0.55); }
+.fm-now { color: var(--text-on-inverse); font-weight: 700; }
+.fm-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-1);
+}
+.fm-word { font-size: 10.5px; letter-spacing: 0.2px; white-space: nowrap; }
+.fm-word.wait { color: var(--text-on-inverse-tertiary); }
+/* The tint this sits on composites to #352E23, where --status-wait-on-dark
+   measures 4.27:1 — a fail. One lighter step of the same hue clears it
+   (5.11:1 on the tint, 6.61:1 on the bare panel). */
+.fm-word.over {
+  color: #D8912E;
+  font-weight: 700;
+  background: rgba(201, 130, 31, 0.18);
+  border-radius: var(--radius-xs);
+  padding: 1px 8px;
+}
+/* --bad is 3.98:1 on the dark base — under the body threshold. So the red
+   is a 3px RULE (a graphical object, which needs only 3:1) and the figure
+   itself is near-white. */
+.fm-word.no {
+  color: var(--paper);
+  border-left: 3px solid var(--status-no-on-dark);
+  padding-left: var(--space-3);
+}
+
+.fm-axis {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 3fr) minmax(0, 1.35fr);
+  column-gap: var(--space-5);
+  align-items: center;
+  margin-top: var(--space-1);
+  border-top: 1px solid var(--border-inverse);
+  padding-top: var(--space-3);
+}
+.fm-axis-zero { grid-column: 1; justify-self: end; font-size: 10.5px; color: var(--text-on-inverse-tertiary); }
+.fm-axis-track { grid-column: 2; position: relative; height: 14px; }
+.fm-axis-cap {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 10.5px;
+  color: var(--status-wait-on-dark);
+  white-space: nowrap;
+}
+
+.fm-legend,
+.rm-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  margin-top: var(--space-5);
+  font-size: 11px;
+  color: var(--text-on-inverse-tertiary);
+}
+.fm-leg { display: inline-flex; align-items: center; gap: var(--space-3); }
+.fm-leg-rule { width: 14px; height: 0; border-top: 1px dashed rgba(255, 255, 255, 0.6); display: block; }
+
+/* §11b — the run map */
+.rm-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+.rm-grid { display: grid; align-items: center; row-gap: 3px; min-width: min-content; }
+.rm-lane-k {
+  font-size: 11px;
+  color: var(--text-on-inverse-tertiary);
+  padding-right: var(--space-4);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.rm-rule { height: 1px; background: rgba(255, 255, 255, 0.1); align-self: center; z-index: 0; }
+.rm-cell { display: grid; place-items: center; height: 24px; z-index: 1; }
+.rm-glyph { display: block; width: 9px; height: 9px; box-sizing: border-box; }
+.rm-glyph.static { flex: none; }
+.g-disc { border-radius: 50%; background: currentColor; }
+.g-ring { border-radius: 50%; border: 2px solid currentColor; background: transparent; }
+.g-diamond { background: currentColor; transform: rotate(45deg); }
+.g-square { background: currentColor; }
+.g-flag { background: currentColor; transform: rotate(45deg); box-shadow: 0 0 0 2.5px rgba(201, 130, 31, 0.32); }
+.g-drop {
+  width: 0; height: 0; background: transparent;
+  border-left: 5px solid transparent; border-right: 5px solid transparent;
+  border-top: 8px solid currentColor;
+}
+.g-rise {
+  width: 0; height: 0; background: transparent;
+  border-left: 5px solid transparent; border-right: 5px solid transparent;
+  border-bottom: 8px solid currentColor;
+}
+.g-cross { position: relative; background: transparent; }
+.g-cross::before,
+.g-cross::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: currentColor;
+}
+.g-cross::before { transform: translateY(-50%) rotate(45deg); }
+.g-cross::after { transform: translateY(-50%) rotate(-45deg); }
+.rm-glyph.flat { color: rgba(255, 255, 255, 0.78); }
+.rm-glyph.good { color: var(--status-ok-on-dark); }
+.rm-glyph.wait { color: var(--status-wait-on-dark); }
+.rm-glyph.stop { color: var(--status-no-on-dark); }
+
+/* §11c — the raw record on the dark ground. Nothing is removed: the
+   notes, the narration and every row survive verbatim. They sit on
+   RAISED dark surfaces, because on a near-black ground elevation is
+   lightness — a shadow is invisible there. */
+.record .register,
+.record .rails {
+  background: var(--surface-inverse-raised);
+  border: 1px solid var(--border-inverse);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
+}
+.record .register + .stream { margin-top: var(--space-4); }
+.record .register-k,
+.record .rails-note {
+  color: var(--text-on-inverse-tertiary);
+  font-family: var(--sans);
+  font-size: var(--font-fine-size);
+  letter-spacing: var(--font-fine-track);
+  text-transform: none;
+  font-weight: 600;
+}
+.record .register li { color: rgba(255, 255, 255, 0.86); border-top-color: rgba(255, 255, 255, 0.09); }
+.record .register li::before { color: rgba(255, 255, 255, 0.28); }
+
+.record .rails { display: flex; flex-direction: column; gap: var(--space-4); }
+.record .rail {
+  display: grid;
+  grid-template-columns: 78px minmax(0, auto);
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+  align-items: baseline;
+}
+.record .rail-name { color: var(--text-on-inverse); font-weight: 700; font-size: var(--font-fine-size); }
+.record .rail-state { font-size: var(--font-fine-size); font-weight: 700; }
+.record .rail-state.live,
+.record .rail-state.real { color: var(--status-ok-on-dark); }
+.record .rail-state.comparison,
+.record .rail-state.fallback,
+.record .rail-state.unknown { color: var(--status-wait-on-dark); }
+.record .rail-state.recorded,
+.record .rail-state.curated { color: rgba(255, 255, 255, 0.82); }
+.record .rail-detail {
+  grid-column: 2;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-on-inverse-tertiary);
+}
+
+.record .stream {
+  background: var(--surface-inverse-raised);
+  border: 1px solid var(--border-inverse);
+  color: var(--term-ink);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  font-size: var(--font-fine-size);
+}
+.record .stream .dim { color: var(--term-dim); }
+
+/* The rows do NOT animate in — the record is a settled artefact, not
+   live work, and toggling would otherwise re-animate every row at once. */
+.record .blotter { gap: var(--space-3); margin-top: var(--space-4); }
+.record .brow {
+  animation: none;
+  background: var(--surface-inverse-raised);
+  border: 1px solid var(--border-inverse);
+  border-radius: var(--radius-md);
+  color: rgba(255, 255, 255, 0.88);
+  padding: var(--space-4) var(--space-5);
+}
+/* was 0.36 alpha = 3.27:1 on the raised dark surface — a fail on the one
+   column a reader uses to cross-check the record against the stream */
+.record .brow .b-ix { color: rgba(255, 255, 255, 0.55); font-family: var(--mono); }
+.record .brow .b-pos { color: var(--text-on-inverse-tertiary); font-family: var(--mono); }
+.record .brow .b-body { color: rgba(255, 255, 255, 0.86); font-size: var(--font-fine-size); }
+.record .brow .b-disc { color: var(--text-on-inverse-tertiary); font-style: normal; }
+.record .brow .b-body .num { color: var(--text-on-inverse); }
+.record .brow.bad { border-left: 3px solid var(--status-no-on-dark); }
+.record .brow.good { border-left: 3px solid var(--status-ok-on-dark); }
+.record .brow.warn { border-left: 3px solid var(--status-wait-on-dark); }
+.record .brow.accent { border-left: 3px solid var(--brand-on-dark); }
+.fineprint .brow .b-body { max-width: 72ch; }
+
+/* chips: near-white text (always clears AA) + a coloured dot, so the kind
+   is legible, the hue is present, and neither is load-bearing alone */
+.record .chip {
+  background: rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.94);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  text-transform: none;
+  font-weight: 600;
+  border-radius: var(--radius-xs);
+  padding: 2px 8px;
+}
+.record .chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.record .chip.mark::before,
+.record .chip.alloc::before { background: var(--status-ok-on-dark); }
+.record .chip.mark-stale::before,
+.record .chip.escalate::before { background: var(--status-wait-on-dark); }
+.record .chip.loss::before,
+.record .chip.error::before { background: var(--status-no-on-dark); }
+.record .chip.trade::before { background: var(--brand-on-dark); }
+.record .chip.reconcile::before { background: rgba(255, 255, 255, 0.65); }
+
+.record .esc { background: rgba(201, 130, 31, 0.10); border-color: rgba(201, 130, 31, 0.42); border-radius: var(--radius-md); }
+.record .esc .esc-reason { color: rgba(255, 255, 255, 0.9); }
+.record .esc-opt {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.9);
+  border-radius: var(--radius-sm);
+}
+/* Both of these sit on TINTED dark panels, not the bare surface, and the
+   tint costs contrast: --status-ok-on-dark measured 3.64:1 on the green
+   option tint and --status-wait-on-dark 4.40:1 on the amber esc panel.
+   One lighter step of each hue clears 4.8 there. */
+.record .esc-opt.rec { background: rgba(23, 167, 107, 0.14); border-color: rgba(23, 167, 107, 0.5); }
+.record .esc-opt .rec-flag { color: #3DBF81; }     /* 4.82:1 on the tint */
+.record .esc-note { color: #D1892A; }              /* 4.81:1 on the tint */
+.record .esc-discs { color: var(--text-on-inverse-tertiary); }
+.record .esc-btn {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.26);
+  color: #fff;
+  font-family: var(--sans);
+  border-radius: var(--radius-sm);
+  min-height: 44px;
+}
+
+/* ==================================================================== */
+/* §12 — responsive + reduced motion                                    */
+/* ==================================================================== */
+@media (max-width: 1079px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpis:not(:has(.kpi-meter-tile)) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpi-hero { grid-column: 1 / -1; }
+}
+
+@media (max-width: 860px) {
+  .fm-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+    row-gap: 0;
+    padding: var(--space-3) 0 var(--space-2);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  .fm-id { grid-column: 1; grid-row: 1; }
+  .fm-read { grid-column: 2; grid-row: 1; }
+  .fm-track { grid-column: 1 / -1; grid-row: 2; height: 26px; }
+  .fm-axis { grid-template-columns: auto minmax(0, 1fr); column-gap: var(--space-4); }
+  .fm-axis-zero { grid-column: 1; justify-self: start; }
+  .fm-axis-track { grid-column: 2; }
+}
+
+@media (max-width: 700px) {
+  /* both selectors, because the meter-less variant below is MORE SPECIFIC
+     ((0,2,0) vs (0,1,0)) and its two-up rule from the 1079px block would
+     otherwise still be in force here — which is exactly what left a
+     three-tile band two-up at 390 with the hero figure overflowing its
+     166px tile. */
+  .kpis,
+  .kpis:not(:has(.kpi-meter-tile)) { grid-template-columns: minmax(0, 1fr); }
+  .kpis { gap: var(--space-4); }
+  .kpi { padding: var(--space-5); }
+  .kpi-hero { grid-column: auto; }
+  .desk-grid { row-gap: var(--space-7); }
+  .board-head { padding: var(--space-5) var(--space-5) var(--space-4); }
+  .board-rule { text-align: left; }
+  .record-toggle { flex-wrap: wrap; gap: var(--space-3) var(--space-4); padding: var(--space-5); }
+  .rt-counts { margin-left: 0; width: 100%; justify-content: flex-start; gap: var(--space-4); }
+  .rt-chev { position: absolute; right: var(--space-5); top: var(--space-6); }
+  .record { position: relative; }
+  .result-banner { padding: var(--space-5); }
+  .result-banner .cta { margin-left: 0; width: 100%; }
+  .close-actions { flex-direction: column; }
+  .close-actions .btn { width: 100%; text-align: center; }
+}
+
+@media (max-width: 620px) {
+  .appbar .top { padding: var(--space-3) var(--space-5); gap: var(--space-3); min-height: 52px; flex-wrap: wrap; }
+  .appbar-id { display: none; }
+  .appbar-state { gap: var(--space-3); }
+  .conn { font-size: var(--font-fine-size); }
+  .phase { padding: 3px 9px; }
+  .phase-v { display: none; }        /* the state word alone still discloses */
+  .decide { padding: var(--space-5); }
+  .btns .btn { flex: 1; }
+  .decide-opt { font-size: var(--font-small-size); }
+  .record .fineprint { padding: 0 var(--space-5) var(--space-6); }
+  .rec-sec { margin-top: var(--space-6); padding-top: var(--space-5); }
+  .fm-trip { font-size: 12px; }
+  .fm-figs { font-size: 11.5px; }
+  .record .rail { grid-template-columns: minmax(0, 1fr); }
+  .record .rail-detail { grid-column: 1; }
+  .run { padding: var(--space-6); }
+  .hero-form .start { padding: var(--space-7) var(--space-6) var(--space-6); }
+}
+
+@media (max-width: 560px) {
+  .tgrid { grid-template-columns: minmax(0, 1fr); }
+  .hero-form .constraints { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Reduced motion: SUBSTITUTION, not deletion. The global reset in
+   globals.css now collapses durations to 1ms rather than removing
+   animation outright (so transitionend still fires). Here we additionally
+   stop the things that are genuine vestibular triggers — a looping
+   pulse, a shimmer, a rotation — while leaving opacity alone, since
+   "animation involving only opacity, colour and blur is unlikely to be
+   problematic". Everything still reaches its final state. */
+@media (prefers-reduced-motion: reduce) {
+  .trip.skeleton .sk-avatar,
+  .trip.skeleton .sk-line { animation: none; opacity: 0.75; }
+  .pa-beacon { animation: none; opacity: 1; }
+  .rec-fig,
+  .rm-glyph,
+  .fm-dot { animation: none; transition: none; }
+  .cta:active:not(:disabled),
+  .btn:active:not(:disabled) { transform: none; }
+  .hero-form .copy-btn:active { transform: none; }
+  /* the chevrons still turn — a 1ms rotation is a state, not motion */
+  .tc-chev,
+  .rt-chev { transition: none; }
 }

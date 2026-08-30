@@ -20,10 +20,11 @@ import type { ReactNode } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 
+import FareChart from "../../FareChart";
 import WaypointField from "../../WaypointField";
 import { getDeskClose, getDeskSnapshot, type CloseOutcome } from "@/lib/api";
 import { money } from "@/lib/format";
-import type { DeskResult, DeskStatus } from "@/lib/types";
+import type { DeskResult, DeskStatus, Position } from "@/lib/types";
 
 gsap.registerPlugin(useGSAP);
 
@@ -80,6 +81,12 @@ export default function ClosePage() {
     budget: number;
     phase: Phase["kind"];
   } | null>(null);
+  // Pass 9 (additive): the wrap-up draws the SAME fare chart as Screen 2's
+  // record, from the same snapshot call already made below. Empty/undefined
+  // until that snapshot lands, so the chart simply doesn't render rather
+  // than showing a figure it doesn't have.
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [cap, setCap] = useState<string | undefined>(undefined);
 
   const load = useCallback(() => {
     setPhase({ kind: "waiting" });
@@ -99,6 +106,8 @@ export default function ClosePage() {
       .then((snap) => {
         if (cancelled) return;
         setCurrency(snap.mandate.currency);
+        setPositions(snap.positions);
+        setCap(snap.mandate.authority_cap);
         // Strict summation (mirrors the desk page's extractBudgetFigures):
         // any unparseable figure makes the WHOLE sum non-finite and the
         // figures stay null — never coerce garbage to 0, which could wrongly
@@ -411,42 +420,118 @@ export default function ClosePage() {
       {header}
 
       <div className="run close-status-card">
-        <p className={`close-call ${copy.cls}`}>{copy.call}</p>
-        <p className="close-sub">{copy.sub}</p>
+        {/* status is a word, a shape and a colour — the pip shape is what
+            survives greyscale and colour-vision deficiency (measured:
+            our three status hues sit at the same lightness once dark
+            enough to clear AA) */}
+        <p className={`close-call ${copy.cls}`}>
+          <i
+            className={`pip ${
+              copy.cls === "good"
+                ? "pip-full"
+                : copy.cls === "warn"
+                  ? "pip-half"
+                  : "pip-cross"
+            }`}
+            aria-hidden="true"
+          />
+          {copy.call}
+        </p>
+        {/* Pass 9 (honesty): the per-status sub-line says "Every booking is
+            done." — true of a live run, but flatly contradicted two lines
+            later by "Nothing was bought in this run" whenever real spend is
+            zero. Same REAL condition as the hero wording (post-outcome
+            snapshot, zero spend across every budget); no new figure, no new
+            branch, just a sentence that stops disagreeing with the one
+            under it. Every other status keeps its own copy verbatim. */}
+        <p className="close-sub">
+          {nothingSpent && result.status === "closed"
+            ? "Every trip was judged and logged — and nothing was booked."
+            : copy.sub}
+        </p>
 
-        {/* the one number that matters — bound to result.pnl, never invented */}
-        <div className="budget">
-          <div className="left">On your team's bookings</div>
-          <div ref={heroRef} className={`big num ${pnlCls}`}>
-            {hero}
-          </div>
-          {/* bug 5b: when real spend across every budget is zero (per the
-              post-outcome snapshot), say what the figure really is —
-              nothing was bought. Pnl-aware copy: saved vs. cost extra.
-              The figure above is unchanged. */}
-          {nothingSpent && (
-            <div className="hero-note">
-              Nothing was bought in this run — this is what the decisions
-              would have {pnl >= 0 ? "saved" : "cost extra"}.
+        {/* the one number that matters — bound to result.pnl, never
+            invented. Pass 10: the label used to sit at the far left of a
+            flex row with the figure pushed to the far right, so the two
+            had a screen's width between them and no visible relationship.
+            They are now one stacked hero block, set off by a rule. */}
+        <div className="close-hero">
+          <div className="budget">
+            <div className="left">On your team's bookings</div>
+            <div ref={heroRef} className={`big fig ${pnlCls}`}>
+              {hero}
             </div>
+            {/* bug 5b: when real spend across every budget is zero (per the
+                post-outcome snapshot), say what the figure really is —
+                nothing was bought. Pnl-aware copy: saved vs. cost extra.
+                The figure above is unchanged. */}
+            {nothingSpent && (
+              <div className="hero-note">
+                Nothing was bought in this run — this is what the decisions
+                would have {pnl >= 0 ? "saved" : "cost extra"}.
+              </div>
+            )}
+          </div>
+
+          {/* step 6: spent-vs-budget, scaleX fill — rendered ONLY when both
+              real figures exist (snapshot); no ratio, no bar, never a guess.
+              Pass 10: when nothing was spent the note no longer prints the
+              budget total twice and then a computed remainder — in a dry
+              run "left" and "budget" are the same number, so all three
+              printings said one thing. The zero state names itself, and
+              the track is drawn dashed so an empty bar reads as "nothing
+              committed" rather than as a bar that failed to fill. */}
+          {figures && (
+            <>
+              <div className={nothingSpent ? "bar is-zero" : "bar"}>
+                <i className="bar-zero" aria-hidden="true" />
+                <div ref={fillRef} className="fill" />
+              </div>
+              <div className="bar-note fig">
+                {nothingSpent
+                  ? `Nothing committed against your ${money(
+                      String(figures.budget),
+                      currency
+                    )} budget`
+                  : `${money(String(figures.spent), currency)} of ${money(
+                      String(figures.budget),
+                      currency
+                    )} committed`}
+              </div>
+            </>
           )}
         </div>
 
-        {/* step 6: spent-vs-budget, scaleX fill — rendered ONLY when both
-            real figures exist (snapshot); no ratio, no bar, never a guess.
-            The note states spent / budget / left — deterministic arithmetic
-            on the two real endpoint values, nothing invented. */}
-        {figures && (
-          <>
-            <div className="bar">
-              <div ref={fillRef} className="fill" />
-            </div>
-            <div className="bar-note num">
-              spent {money(String(figures.spent), currency)} of{" "}
-              {money(String(figures.budget), currency)} ·{" "}
-              {money(String(figures.budget - figures.spent), currency)} left
-            </div>
-          </>
+        {/* Pass 9 — the peak-end picture. Screen 3 was three stat tiles; the
+            last thing anyone sees is now WHERE EVERY TRIP ENDED UP, in the
+            same visual language as the run's record. No loss amounts are
+            passed: the close page has no stream, and a loss figure it
+            didn't receive would be invented. */}
+        {positions.length > 0 && (
+          <div className="close-chart">
+            <div className="sec">Where every trip stands</div>
+            <FareChart
+              positions={positions}
+              currency={currency}
+              authorityCap={cap}
+              caption={
+                <>
+                  What each trip cost when it was booked, and what it prices
+                  at now.
+                  {cap ? (
+                    <>
+                      {" "}
+                      The dashed rule is your {money(cap, currency)}{" "}
+                      auto-approve limit.
+                    </>
+                  ) : null}{" "}
+                  <span className="rec-src">
+                    Figures from the desk snapshot.
+                  </span>
+                </>
+              }
+            />
+          </div>
         )}
 
         {/* demoted record zone — the counts live here, small and secondary */}
@@ -510,7 +595,7 @@ export default function ClosePage() {
             rewritten — with its fallback disclosure beside it. The panel is
             omitted entirely when there is no auditor line to hold. */}
         {typeof report?.auditor_line === "string" && report.auditor_line ? (
-          <div className="record">
+          <div className={recordOpen ? "record is-open" : "record"}>
             <button
               type="button"
               className="record-toggle"
@@ -518,7 +603,17 @@ export default function ClosePage() {
               aria-controls="close-full-record"
               onClick={() => setRecordOpen((o) => !o)}
             >
-              {recordOpen ? "Hide the full record ↑" : "See the full record →"}
+              <span className="rt-main">
+                <span className="rt-k">The full record</span>
+                <span className="rt-sub">
+                  The reviewer's note on this run, verbatim
+                </span>
+              </span>
+              <span className="rt-chev" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M7 10l5 5 5-5" />
+                </svg>
+              </span>
             </button>
             <div id="close-full-record" className="fineprint" hidden={!recordOpen}>
               <div className="sec fineprint-k">The full record</div>
@@ -536,9 +631,14 @@ export default function ClosePage() {
         ) : null}
       </div>
 
-      <div className="close-actions">
+      {/* One action, at its natural width. It used to be a full-bleed
+          white bar with an underlined label inside it — a button that
+          looked like an empty card, carrying two emphasis mechanisms for
+          one job. */}
+      <div className="close-actions close-actions-foot">
         <Link className="btn ghost" href="/">
-          Start another booking →
+          Start another booking
+          <span className="cta-arrow" aria-hidden="true">→</span>
         </Link>
       </div>
     </>

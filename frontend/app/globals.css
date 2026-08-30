@@ -25,9 +25,14 @@
   --bad: #D64550;              /* over budget / couldn't book */
   --badbg: #FBEDED;
 
-  /* ---- Slice 8 type — Figtree for everything, IBM Plex Mono for figures ---- */
-  --sans: "Figtree", system-ui, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* ---- Slice 8 type — Figtree for everything, IBM Plex Mono for figures.
+       Pass 11: both are SELF-HOSTED (next/font/google in layout.tsx, which
+       downloads them at build time). --font-figtree / --font-plex-mono are
+       the variables that layout emits; the literal family names and the
+       system fallbacks stay behind them so the page still renders if a
+       font file 404s. ---------------------------------------------- */
+  --sans: var(--font-figtree), "Figtree", system-ui, sans-serif;
+  --mono: var(--font-plex-mono), "IBM Plex Mono", ui-monospace, monospace;
 
   /* ---- Slice 8 radii & spacing (extracted from desk-v3.html) ---- */
   --r-card: 18px;              /* run summary / decision cards */
@@ -49,6 +54,249 @@
   --term-bg: #111;             /* terminal stream — retired when narration goes plain */
   --term-ink: #d7f0d7;
   --term-dim: #7fae7f;
+
+  /* ---- Pass 3 type scale (1.25 modular, USWDS-style tokens) ---- */
+  --fs-fine: 12px;         /* fine print, record rows */
+  --fs-body: 14px;         /* secondary text, legs, notes */
+  --fs-ui: 15.5px;         /* primary UI text, buttons */
+  --fs-h3: 17.5px;         /* card sub-heads, trip names */
+  --fs-h2: 22px;           /* section/card titles */
+  --fs-h1: 27px;           /* page titles */
+  /* --fs-hero DELETED (Pass 11). It was the old hero token and nothing
+     referenced it; the live hero is --metric-hero-size on the metric ramp
+     below. Keeping both is how the hero silently shrank 46px -> 36px in
+     Pass 10: ONE role, ONE token. */
+
+  /* ---- Pass 3 elevation (soft, y-offset, never harsh) ---- */
+  --shadow-1: 0 1px 2px rgba(27, 36, 48, 0.05);
+  --shadow-2: 0 6px 16px -6px rgba(27, 36, 48, 0.12);
+  --shadow-3: 0 14px 34px -10px rgba(27, 36, 48, 0.22);
+
+  /* ---- Pass 3 focus + motion ---- */
+  --ring: 0 0 0 3px rgba(15, 118, 110, 0.28);
+  --t-fast: 150ms;
+  --t-med: 220ms;
+  --t-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* ==================================================================
+     PASS 10 TOKEN LAYER — definitions only.
+     Everything above stays for backward compatibility; the aliases at
+     the end of this block map the old names onto the new scale so no
+     existing rule changes meaning. Components should reference the
+     SEMANTIC names (--text-*, --surface-*, --border-*, --status-*),
+     never a raw hue: a component that references --good cannot be
+     re-themed, one that references --status-ok-text can.
+     Rationale + measurements: docs/design-research-pass10.md
+     ================================================================== */
+
+  /* ---- 1. Spacing. 4px base (Primer/Carbon/Atlassian all ship a 4px
+       grid with sub-4px steps for icon-adjacent gaps). ------------- */
+  --space-0: 0;
+  --space-1: 2px;    /* icon-adjacent hairline gaps */
+  --space-2: 4px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --space-8: 32px;
+  --space-9: 40px;
+  --space-10: 48px;
+  --space-11: 64px;
+
+  /* Semantic spacing — chosen by RELATIONSHIP, not by element, so card
+     padding is never an ad-hoc per-component decision (Polaris ships
+     space-card-padding for exactly this reason). */
+  --space-icon: var(--space-3);          /* icon <-> its own label */
+  --space-stack: var(--space-4);         /* items within one group */
+  --space-card-gap: var(--space-5);      /* between groups inside a card */
+  --space-card-padding: var(--space-6);  /* a card's own inset */
+  --space-group: var(--space-7);         /* between components */
+  --space-section: var(--space-9);       /* between page-level sections */
+
+  /* ---- 2. Type. Size / line-height / tracking are bound per step.
+       Tracking CROSSES ZERO (positive below 16px, zero at 16-22px,
+       negative above) and the line-height ratio tightens as size grows
+       above ~22px — both confirmed against Material 3 and Carbon. ---- */
+  /* Pass 11: every step that carries RUNNING TEXT moves up one notch.
+     14px body is small for a product read across a room (iOS body is 17pt,
+     Material body-large 16px). Line-height follows the ramp's own rule --
+     the ratio tightens as the size grows -- and tracking still crosses zero
+     (positive below 16px, zero from 16px up). The heading steps below are
+     already large and are deliberately untouched. */
+  --font-fine-size: 12.5px;  --font-fine-lh: 17px;  --font-fine-track: 0.14px;
+  --font-small-size: 13.5px; --font-small-lh: 19px; --font-small-track: 0.06px;
+  --font-body-size: 15px;    --font-body-lh: 22px;  --font-body-track: 0.02px;
+  --font-lead-size: 17px;    --font-lead-lh: 26px;  --font-lead-track: 0;
+  --font-title-size: 18px;  --font-title-lh: 24px; --font-title-track: -0.1px;
+  --font-h2-size: 22px;     --font-h2-lh: 28px;    --font-h2-track: -0.2px;
+  --font-h1-size: 28px;     --font-h1-lh: 36px;    --font-h1-track: -0.4px;
+  --font-display-size: 36px; --font-display-lh: 44px; --font-display-track: -0.6px;
+
+  /* KPI figures get their OWN ramp (Atlassian's font.metric.*), so a
+     metric is never a heading in disguise. Bold, tabular, tight. */
+  --metric-sm-size: 16px;  --metric-sm-lh: 20px;
+  --metric-md-size: 24px;  --metric-md-lh: 28px;
+  --metric-lg-size: 28px;  --metric-lg-lh: 32px;
+  /* Pass 11 restores the hero's presence: Pass 10 shipped it at
+     clamp(28px, 2.6vw, 36px), which was 36px at 1440 against the 46px it
+     had before -- a 22% cut to the single most important number in the
+     product, in the pass that was supposed to strengthen hierarchy. */
+  --metric-hero-size: clamp(30px, 3.3vw, 47px); --metric-hero-lh: 1.12;
+  --metric-hero-track: -0.022em;   /* tracking SCALES with the size */
+  /* the wrap-up's peak-end figure: the last thing anyone reads, on a
+     full-width card with no neighbours to balance against, so it takes a
+     larger step. Two tokens, two ROLES -- not two tokens for one role. */
+  --metric-peak-size: clamp(34px, 4.2vw, 58px); --metric-peak-lh: 1.08;
+  --metric-peak-track: -0.024em;
+
+  /* ---- 3. Elevation. Polaris-derived, NOT Primer's (see research §1.1):
+       never pure black — the shadow is --ink, the background's own hue
+       family; the light source is directly overhead, so the bottom edge
+       is darker than the sides; opacity RISES with elevation and that
+       direction is applied consistently. Level 4 is reserved for lifted
+       / dragged states only (M3 reserves its top two the same way). --- */
+  --elevation-0: none;
+  --elevation-1:
+    0 0 0 1px rgba(27, 36, 48, 0.05),
+    0 1px 2px -1px rgba(27, 36, 48, 0.09);
+  --elevation-2:
+    0 0 0 1px rgba(27, 36, 48, 0.05),
+    0 2px 4px -2px rgba(27, 36, 48, 0.10),
+    0 5px 12px -5px rgba(27, 36, 48, 0.11);
+  --elevation-3:
+    0 0 0 1px rgba(27, 36, 48, 0.06),
+    0 4px 8px -3px rgba(27, 36, 48, 0.13),
+    0 12px 24px -8px rgba(27, 36, 48, 0.15);
+  --elevation-4:
+    0 0 0 1px rgba(27, 36, 48, 0.07),
+    0 8px 16px -6px rgba(27, 36, 48, 0.17),
+    0 22px 44px -14px rgba(27, 36, 48, 0.22);
+  /* On the dark surfaces elevation is LIGHTNESS, not shadow (M3): a
+     shadow is invisible on near-black. See --surface-inverse-* below. */
+
+  /* ---- 4. Radius. Outer and gap are chosen TOGETHER so that
+       inner = outer - gap lands on a value that is itself a good
+       radius (concentric corners; Apple's ConcentricRectangle). ----- */
+  --radius-xs: 4px;
+  --radius-sm: 8px;    /* status lozenges (M3 chip 8px; Polaris badge 8px) */
+  --radius-md: 10px;   /* buttons, inputs, inner trays */
+  --radius-lg: 14px;   /* = --radius-xl minus the 6px board inset */
+  --radius-xl: 20px;   /* top-level surfaces */
+  --radius-pill: 999px; /* avatars and true pills ONLY */
+  /* Use for any child flush inside a padded parent:
+       --radius-inner: calc(var(--radius-outer) - var(--pad)); */
+
+  /* ---- 5. Semantic colour. Derived steps are OKLCH-stepped from the
+       existing hues (hue held, chroma reduced only where the colour
+       left sRGB) — no new hue families. Every ratio below is measured;
+       the full table is in docs/design-research-pass10.md §4. ------- */
+
+  /* surfaces */
+  --surface-page: var(--paper);
+  --surface-card: var(--card);
+  --surface-sunken: var(--paper);
+  --surface-inverse: #141B24;          /* white 17.33:1  --good 5.52:1 */
+  --surface-inverse-raised: #1B2430;   /* == --ink; white 15.65  --good 4.99 */
+  --surface-inverse-high: #232D3A;     /* white 13.93  --good 4.44 */
+
+  /* text.
+     MEASURED, and this one bit: --mut #6B7684 is 4.42:1 on --paper —
+     it FAILS AA body text by 0.08, and it is the secondary text colour
+     used on every card, label, hint, date and chip in the product. On
+     --card it scrapes through at 4.62. Since --paper is the ground of
+     every trip card and the landing form, the token has to clear it
+     there. --text-secondary is therefore one OKLCH step darker, hue
+     held exactly (254.5deg, unchanged): 4.82 on --paper, 5.03 on --card,
+     4.57 on --goodbg, 4.56 on --warnbg. Same hue family, no new colour.
+     --mut itself is left alone so nothing else shifts. */
+  --text-primary: var(--ink);          /* 15.00 on paper */
+  /* Pass 11: #65707E measured 4.82 on --paper -- over the 4.5 floor by
+     0.32 -- while primary sits at 15:1, and it carries nearly all of the
+     explanatory copy. It also measured 4.42 on --badbg, i.e. it was
+     ALREADY FAILING there. One more OKLCH step down the same hue (a and b
+     held exactly) clears every ground this app paints it on. */
+  --text-secondary: #4F5967;           /* 6.80 paper, 7.10 card, 6.45 goodbg,
+                                          6.44 warnbg, 6.23 badbg */
+  --text-tertiary: #65707E;            /* the OLD secondary, kept as a real
+                                          lighter step: 4.82 paper, 5.03 card.
+                                          Not for --badbg (4.42). --faint is
+                                          2.45 and MUST NOT hold text on light
+                                          at all. */
+  --text-on-inverse: #FFFFFF;
+  --text-on-inverse-secondary: rgba(255, 255, 255, 0.74);
+  --text-on-inverse-tertiary: var(--faint);   /* 6.79 on --surface-inverse */
+  --text-on-brand: #FFFFFF;            /* 5.47 on --brand */
+
+  /* borders */
+  --border-subtle: var(--line);
+  --border-default: var(--line2);
+  --border-strong: #C9C2B4;
+  --border-inverse: rgba(255, 255, 255, 0.12);
+  --border-inverse-strong: rgba(255, 255, 255, 0.26);
+
+  /* status — text/mark steps that actually clear AA on their own tint.
+     MEASURED: the raw hues fail (good 2.85, warn 2.88, bad 3.82 on
+     their tints). These clear 4.8+. NOTE (research §4.2): all three
+     land at L* ~45, so they are INDISTINGUISHABLE IN GREYSCALE and
+     under deuteranopia. Colour therefore carries NO status meaning on
+     its own anywhere in this app — the word and the pip SHAPE do. */
+  --status-ok-text: #007B49;     /* 4.85 on --goodbg, 5.34 on --card */
+  --status-wait-text: #995D00;   /* 4.86 on --warnbg, 5.36 on --card */
+  --status-no-text: #C23140;     /* 4.84 on --badbg,  5.52 on --card */
+  --status-flat-text: var(--mut);
+  --status-ok-bg: var(--goodbg);
+  --status-wait-bg: var(--warnbg);
+  --status-no-bg: var(--badbg);
+  --status-flat-bg: var(--paper);
+  /* lifted steps for the dark record surface (M3: accents get LIGHTER
+     in dark, never darker). --bad is 3.60 on the raised dark surface,
+     so red text on dark must use --status-no-on-dark, not --bad. */
+  --status-ok-on-dark: #17A76B;    /* 5.05 on --surface-inverse-raised */
+  --status-wait-on-dark: #C9821F;  /* 4.99 */
+  --status-no-on-dark: #F05D65;    /* 4.81 */
+  --brand-on-dark: #449D94;        /* 4.84 */
+
+  /* ---- 6. Focus. ONE token, two tones, so it reads on every surface
+       this app has: on light the brand ring carries it (5.47:1 on
+       white); on the near-black record the white inner ring does
+       (17.33:1). --brand alone is only 2.86:1 there and would fail.
+       box-shadow is used because it can be two colours — NOT because
+       outline ignores border-radius, which stopped being true in
+       Safari 16.4 (Baseline March 2023). See research §1.2. -------- */
+  --focus-ring:
+    0 0 0 2px var(--surface-card),
+    0 0 0 4px var(--brand);
+  --focus-ring-inverse:
+    0 0 0 2px var(--surface-inverse),
+    0 0 0 4px #FFFFFF;
+
+  /* ---- 7. Motion. Carbon's tokens, each with a stated job; entering
+       decelerates, exiting accelerates and is shorter. ------------- */
+  --motion-micro: 70ms;    /* press feedback */
+  --motion-fade: 110ms;    /* hover, colour */
+  --motion-move: 150ms;    /* small movement, state change */
+  --motion-expand: 240ms;  /* disclosure, toast */
+  --ease-standard: cubic-bezier(0.2, 0, 0.38, 0.9);
+  --ease-enter: cubic-bezier(0, 0, 0.38, 0.9);   /* decelerate */
+  --ease-exit: cubic-bezier(0.2, 0, 1, 0.9);     /* accelerate */
+
+  /* ---- 8. Back-compat aliases. The old names keep resolving, so no
+       existing declaration changes meaning when it is not rewritten. */
+  --sp-2: var(--space-3);
+  --sp-3: var(--space-4);
+  --sp-4: var(--space-5);
+  --sp-5: var(--space-6);
+  --sp-6: var(--space-7);
+  --sp-7: var(--space-8);
+  --r-card: var(--radius-xl);
+  --r-trip: var(--radius-lg);
+  --r-btn: var(--radius-md);
+  --r-bar: var(--radius-sm);
+  --shadow-1: var(--elevation-1);
+  --shadow-2: var(--elevation-2);
+  --shadow-3: var(--elevation-3);
 }
 
 * { box-sizing: border-box; }
@@ -384,12 +632,15 @@ body {
 .teal-app .beacon {
   background: #fff; box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18);
 }
+/* pure white: translucent white measured 3.76:1 on the lighter end of
+   the gradient, which fails AA for body text */
 .teal-app .sub,
 .teal-app .r-tag,
 .teal-app .sec,
-.teal-app .note-soft { color: rgba(255, 255, 255, 0.86); }
+.teal-app .note-soft { color: #ffffff; }
+/* 0.6 alpha measured 3.11:1 on the painted teal — a fail on a text run */
 .teal-app .sub .run-id,
-.teal-app .r-tag .run-id { color: rgba(255, 255, 255, 0.6); }
+.teal-app .r-tag .run-id { color: rgba(255, 255, 255, 0.9); }
 /* "See the full record" toggle: white ONLY where .record sits directly on
    the teal (desk page, after the trip cards) — inside a light card (the
    close page's .run) it must stay dark or it vanishes on the white bg. */
@@ -856,6 +1107,22 @@ td.num { font-family: var(--mono); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
+/* Reduced motion is a SAFETY NET, not a delete. Pass 10: this block used
+   to be `animation: none; transition: none`, which had two problems —
+   `transitionend` never fires, so any JS waiting on it stalls; and it
+   removes opacity fades, which are NOT vestibular triggers (the triggers
+   are scaling, spinning, parallax, plane-shifting and peripheral motion).
+   1ms keeps the events firing while removing the movement. Components
+   restore opacity-only alternatives beneath this in presentation.css. */
 @media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }

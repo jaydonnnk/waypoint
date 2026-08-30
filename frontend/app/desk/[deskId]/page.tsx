@@ -25,6 +25,7 @@ import type { ReactNode } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 
+import FareChart from "../../FareChart";
 import WaypointField from "../../WaypointField";
 import {
   approveDesk,
@@ -279,6 +280,110 @@ function friendlyTrip(id: string | null): string {
   return clean.length > 8 ? `Trip ${clean.slice(-6)}` : id;
 }
 
+/** "2026-09-18" -> "Sep 18" — string surgery only (no Date object is ever
+    constructed, so no timezone can shift the day). Anything unexpected
+    renders verbatim. Display-only re-format of the snapshot's own value. */
+const MONTHS_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+function shortDate(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return iso;
+  const mon = MONTHS_SHORT[Number(m[2]) - 1];
+  if (!mon) return iso;
+  return `${mon} ${Number(m[3])}`;
+}
+
+/** Pass 8: the word for one step inside a card's opened detail. Identical
+    to tripTitle EXCEPT for a book decision the snapshot has not confirmed:
+    that step must not read "Booked" (positions are the source of truth, and
+    a book judgment fires before the execute wall). */
+function stepWord(event: StreamEvent, snap: Position | undefined): string {
+  if (event.type === "trade" && event.kind === "book") {
+    return snap && snap.status === "booked" && snap.ticket_asserted
+      ? "Booked"
+      : "Book decision logged";
+  }
+  return tripTitle(event);
+}
+
+/** Pass 7: timeline-dot tone per event — colors only, never words. Book
+    dots go green ONLY when the snapshot confirms the booking (positions
+    are the source of truth); waiting states are amber; drops and errors
+    red; routine checks stay neutral. */
+function tickTone(event: StreamEvent, snap: Position | undefined): string {
+  switch (event.type) {
+    case "trade":
+      if (event.kind === "book") {
+        return snap && snap.status === "booked" ? "good" : "flat";
+      }
+      return "wait";
+    case "mark":
+      return event.stale ? "wait" : "flat";
+    case "alloc":
+      return "good";
+    case "loss":
+    case "error":
+      return "stop";
+    case "reconcile":
+      return "flat";
+    default:
+      return "flat";
+  }
+}
+
+/** Pass 9: the run map's glyph SHAPE per event kind. Shape carries the
+    kind independently of hue, which is load-bearing here: --warn and --bad
+    resolve to nearly the same colour under deuteranopia (measured in
+    docs/design-research-pass9.md §6c), so amber-vs-red can never be the
+    only difference between "needs your OK" and "price drop". Tone still
+    comes from tickTone(); the accessible word still comes from stepWord(). */
+function glyphShape(event: StreamEvent): string {
+  switch (event.type) {
+    case "mark":
+      return event.stale ? "g-ring" : "g-disc";
+    case "trade":
+      return event.kind === "escalate" ? "g-flag" : "g-diamond";
+    case "escalate":
+      return "g-flag";
+    case "loss":
+      return "g-drop";
+    case "alloc":
+      return "g-rise";
+    case "reconcile":
+      return "g-square";
+    case "error":
+      return "g-cross";
+    default:
+      return "g-disc";
+  }
+}
+
+/** Pass 10: the provenance rail's pip SHAPE per state. Shape is the
+    load-bearing encoding, not hue — measured in
+    docs/design-research-pass10.md §4.2, the three status colours all land
+    at L* ~45 once they are dark enough to clear AA, so they are identical
+    in greyscale and near-identical under deuteranopia. A degraded rail can
+    therefore never be told from a live one by colour alone.
+      solid  = this source really answered
+      half   = known-good but not live (curated priors, a recording)
+      hollow = degraded (fallback / comparison / unknown)
+    A fallback gets the hollow shape AND the amber tone — never a success
+    shape, never green. The word from rail.label is still printed verbatim. */
+function railPip(state: string): string {
+  switch (state) {
+    case "live":
+    case "real":
+      return "pip-full";
+    case "curated":
+    case "recorded":
+      return "pip-half";
+    default:
+      return "pip-open";
+  }
+}
+
 /** Formats the price inside an option label with the same money() used
     everywhere else ("book now at 1790.00 (manual approval)" ->
     "book now at $1,790.00 (manual approval)"). Only the known "at <price>"
@@ -350,6 +455,18 @@ export default function DeskPage() {
   // or writes it, and toggling only flips a boolean, so the stream render
   // (row keys, EventSource, reducer) is never disturbed.
   const [recordOpen, setRecordOpen] = useState(false);
+  // Pass 11 (demo hardening): the record is the whole "it shows its work"
+  // proposition and a reader may never click it. Once the run has SETTLED
+  // it opens ITSELF, exactly once — but never while the run is live, where
+  // an accreting log under a live board is noise, and never against a
+  // reader who has already made their own choice.
+  const recordTouchedRef = useRef(false); // the reader took control
+  const recordAutoRef = useRef(false);    // the one auto-open already fired
+  // Pass 8: which trip cards have their step-by-step detail open, keyed by
+  // the group key. Same shape of local-only UI state as recordOpen above —
+  // the stream, the reducer and the replay never read or write it, and a
+  // card whose key is absent is simply collapsed.
+  const [openTrips, setOpenTrips] = useState<Record<string, boolean>>({});
   const ixRef = useRef(0);
 
   // Waybot invite gate (S1). A gated desk in 'awaiting_travelers' has no
@@ -562,9 +679,9 @@ export default function DeskPage() {
             {
               autoAlpha: 1,
               y: 0,
-              duration: 0.5,
+              duration: 0.42,
               ease: "power2.out",
-              stagger: 0.09,
+              stagger: 0.07,
             }
           );
         }
@@ -778,109 +895,623 @@ export default function DeskPage() {
   ).length;
   const errCount = screen.blotter.filter((r) => r.event.type === "error").length;
   const settled = Boolean(screen.result) || screen.cycleFailed;
+  // The record opens itself on settle (see recordAutoRef above). It runs at
+  // most once per page load: a reconnect replay re-delivers the same result
+  // and must not re-open a panel the reader has since closed.
+  useEffect(() => {
+    if (!settled) return;
+    if (recordTouchedRef.current || recordAutoRef.current) return;
+    recordAutoRef.current = true;
+    setRecordOpen(true);
+  }, [settled]);
+  // Pass 2 (Person A): the newest narration step, surfaced verbatim in the
+  // main run card. Pure derivation — no state, no memo, no step mutation.
+  const latestStep =
+    screen.steps.length > 0
+      ? screen.steps[screen.steps.length - 1]
+      : null;
+
+  // ---------- Pass 10: KPI-band derivations --------------------------------
+  // COUNTS of real rows only. Nothing here computes a money figure: the one
+  // arithmetic below (restTrips) subtracts two counts of snapshot rows so a
+  // gist bar has a third segment width, and it is never printed as text.
+
+  // Trips the snapshot actually told us about. 0 before it lands, so the
+  // tile shows "—" rather than a confident zero.
+  const tripsTracked = Object.keys(positions).length;
+  // Distinct POSITIONS with an open escalation (the chip used to count
+  // escalation events, which double-counts a trip escalated twice).
+  const needsYouPositions = new Set(
+    openEscRows
+      .map((r) => (r.event.type === "escalate" ? r.event.position_id : null))
+      .filter((p): p is string => Boolean(p))
+  );
+  const needsYouCount = needsYouPositions.size;
+  const restTrips = Math.max(0, tripsTracked - bookedCount - needsYouCount);
+
+  // "Nothing committed yet" is the honest reading of a dry run: every
+  // period's spend really is zero. Only claimed when the snapshot's own
+  // figures say so — a missing snapshot says nothing at all.
+  const nothingCommitted = budgetFigures !== null && budgetFigures.spent === 0;
+
+  // Hero tone. The figure used to render green unconditionally, so an
+  // "Over by" result still read as a success. Tone now follows the real
+  // sign AND the real terminal status — and a bad outcome is styled
+  // CALMER, never louder (visible effort scores worse than instant
+  // delivery when the outcome is poor; a proud red shout is the wrong
+  // note to end on).
+  const heroPnl = screen.result ? Number(screen.result.pnl) : NaN;
+  const heroTone = !screen.result
+    ? ""
+    : screen.result.status === "closed" && heroPnl >= 0
+      ? "ok"
+      : screen.result.status === "escalated"
+        ? "wait"
+        : "no";
+  const heroPip =
+    heroTone === "ok"
+      ? "pip-full"
+      : heroTone === "wait"
+        ? "pip-half"
+        : heroTone === "no"
+          ? "pip-cross"
+          : "pip-open";
+
+  // Is the desk ACTUALLY running right now? Everything that claims work
+  // is happening — the "Booking…" figure, the working lozenge, the
+  // pulsing beacon, the skeleton rows — must key off this and not off
+  // "not settled". A dead stream is not a slow one: with the stream
+  // closed the screen used to keep saying "Booking…" over three
+  // shimmering placeholders for trips that were never going to arrive.
+  // That is inventing progress, and it is the one thing this product
+  // cannot do.
+  const running = !settled && !awaiting && !streamDead;
+
+  // Pass 7 (Person A): the feed GROUPED BY TRIP — a pure render-time
+  // derivation over the same blotter array (no state, no reducer change,
+  // no event dropped). Escalations still surface only as THE DECISION
+  // card; the rare event with no position id stands as its own group so
+  // nothing is ever filed under the wrong trip. Group order = first
+  // arrival order, so a replay rebuilds the exact same board.
+  const tripGroups: { key: string; pos: string | null; rows: BlotterRow[] }[] =
+    [];
+  {
+    const at = new Map<string, number>();
+    for (const row of screen.blotter) {
+      if (row.event.type === "escalate") continue;
+      const pid =
+        "position_id" in row.event && row.event.position_id
+          ? row.event.position_id
+          : null;
+      const key = pid ?? `lone-${row.ix}`;
+      const seen = at.get(key);
+      if (seen === undefined) {
+        at.set(key, tripGroups.length);
+        tripGroups.push({ key, pos: pid, rows: [row] });
+      } else {
+        tripGroups[seen].rows.push(row);
+      }
+    }
+  }
+
+  // ---------- Pass 9: the record's diagrams (pure render-time derivations) --
+  // Both read ONLY values the backend sent. The fare chart reads the desk
+  // SNAPSHOT (cost_basis / mark_price / mark_stale are real per-position
+  // fields); the run map reads the blotter's own ARRIVAL ORDER. Neither
+  // computes a figure: bar geometry is derived from real decimals (which the
+  // brief allows) and every printed number is money() over a real value.
+  // No state, no memo, no reducer contact — a replay rebuilds both identically.
+
+  // Real admitted losses, keyed by position — the loss EVENT's own amount,
+  // never a difference computed here. Newest wins (same rule the cards use).
+  const lossByPos = new Map<string, string>();
+  for (const r of screen.blotter) {
+    if (r.event.type === "loss") lossByPos.set(r.event.position_id, r.event.amount);
+  }
+
+  // Run map lanes: every blotter row, INCLUDING escalations (the trips board
+  // deliberately excludes those; the record may not). One lane per position
+  // in first-arrival order; the rare event with no position id gets its own.
+  const laneKeys: string[] = [];
+  const laneIndex = new Map<string, number>();
+  for (const row of screen.blotter) {
+    const pid =
+      "position_id" in row.event && row.event.position_id
+        ? row.event.position_id
+        : null;
+    const key = pid ?? "—";
+    if (!laneIndex.has(key)) {
+      laneIndex.set(key, laneKeys.length);
+      laneKeys.push(key);
+    }
+  }
 
   // ---------- render helpers ----------------------------------------------
 
-  /** One trip card per blotter event — desk-v3 row shape, real stream data. */
-  function renderTrip(row: BlotterRow) {
-    const { event, ix } = row;
-    if (event.type === "escalate") return null; // surfaces as THE DECISION card
-    const pos =
-      "position_id" in event && event.position_id ? event.position_id : null;
-    // Real trip identity from the snapshot — undefined before it arrives or
-    // when the id isn't in it, in which case both helpers degrade cleanly.
+  /** Pass 8: ONE BOARDING-PASS CARD PER TRIP. The card carries the picture
+      — route drawn end to end, date and headcount as icons, the fare and
+      its movement — and NOTHING ELSE. The step-by-step wording (what used
+      to read as a log) lives behind the card's own "N updates" toggle, so
+      the detail appears only when someone asks for it. Every dot in the
+      footer is still a `.trip[data-ix]` element, so the entrance tween and
+      the replay wipe behave exactly as before, and every figure is the
+      stream's own value (fares from mark events, saved/drop amounts from
+      alloc/loss events, booked state from the snapshot). */
+  function renderTripGroup(group: {
+    key: string;
+    pos: string | null;
+    rows: BlotterRow[];
+  }) {
+    const { pos, rows } = group;
     const snapPos = pos ? positions[pos] : undefined;
-    const blocked = event.type === "loss" || event.type === "error";
-    const avatarCls = `avatar a${(ix % 4) + 2}`;
+    const last = rows[rows.length - 1].event;
+    const blocked = last.type === "loss" || last.type === "error";
+    // Snapshot-confirmed booking outranks the latest event — positions are
+    // the source of truth (same test the KPI booked count uses).
+    const booked = Boolean(
+      snapPos && snapPos.status === "booked" && snapPos.ticket_asserted
+    );
 
-    let badge: ReactNode = null;
-    let amount: ReactNode = null;
-    let extra: ReactNode = null;
-
-    switch (event.type) {
-      case "trade":
-        badge =
-          event.kind === "book" ? (
-            snapPos && snapPos.status === "booked" ? (
-              <span className="badge ok">Booked</span>
-            ) : (
-              <span className="badge plain">Book decision logged</span>
-            )
-          ) : event.kind === "hold" ? (
-            <span className="badge plain">Holding</span>
-          ) : (
-            <span className="badge wait">Needs your OK</span>
-          );
-        break;
-      case "mark":
-        badge = event.stale ? (
-          <span className="badge wait">Holding for now</span>
-        ) : (
-          <span className="badge plain">Checked</span>
-        );
-        amount = (
-          <div className="fare num">
-            {money(event.old, currency)} → {money(event.new, currency)}
-          </div>
-        );
-        break;
-      case "alloc":
-        badge = <span className="badge ok">Saved</span>;
-        extra = <div className="saved">saved {money(event.amount, currency)}</div>;
-        break;
-      case "loss":
-        badge = <span className="badge no">Dropped in value</span>;
-        amount = (
-          <div className="fare num">
-            {money(event.amount, currency).replace("−", "")}
-          </div>
-        );
-        break;
-      case "reconcile":
-        badge = <span className="badge plain">Handled</span>;
-        amount = <div className="fare num">{money(event.delta, currency)}</div>;
-        break;
-      case "error":
-        badge = <span className="badge no">On it</span>;
-        amount = <div className="fare num">{event.code}</div>;
-        break;
-      default:
-        return null;
+    // Status = a WORD, a SHAPE and a colour — in that order of importance.
+    // Colour is the least reliable of the three here: measured, the three
+    // status hues all sit at L* ~45 once dark enough to clear AA, so they
+    // are indistinguishable in greyscale and near-identical under
+    // deuteranopia (research §4.2). The pip shape follows Polaris's Badge
+    // `progress` vocabulary — hollow = nothing settled, half = decided but
+    // not executed, solid = confirmed by the snapshot.
+    let stateWord = "";
+    let stateTone = "plain";
+    let statePip = "pip-open";
+    if (booked) {
+      stateWord = "Booked";
+      stateTone = "ok";
+      statePip = "pip-full";
+    } else {
+      switch (last.type) {
+        case "trade":
+          if (last.kind === "book") {
+            // A book DECISION is not a booking. Half-filled, never solid.
+            stateWord = "Book decision logged";
+            stateTone = "plain";
+            statePip = "pip-half";
+          } else if (last.kind === "hold") {
+            stateWord = "Holding";
+            stateTone = "plain";
+            statePip = "pip-open";
+          } else {
+            stateWord = "Needs your OK";
+            stateTone = "wait";
+            statePip = "pip-half";
+          }
+          break;
+        case "mark":
+          stateWord = last.stale ? "Holding for now" : "Checked";
+          stateTone = last.stale ? "wait" : "plain";
+          statePip = last.stale ? "pip-open" : "pip-half";
+          break;
+        case "alloc":
+          stateWord = "Saved";
+          stateTone = "ok";
+          statePip = "pip-full";
+          break;
+        case "loss":
+          stateWord = "Dropped in value";
+          stateTone = "no";
+          statePip = "pip-cross";
+          break;
+        case "reconcile":
+          stateWord = "Handled";
+          stateTone = "plain";
+          statePip = "pip-half";
+          break;
+        case "error":
+          stateWord = "On it";
+          stateTone = "no";
+          statePip = "pip-cross";
+          break;
+        default:
+          stateWord = "";
+      }
     }
 
+    // The fare is the newest mark's own figures: the current price large,
+    // the previous one struck through beside it ONLY when it actually moved.
+    let fareNow: string | null = null;
+    let fareWas: string | null = null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const e = rows[i].event;
+      if (e.type === "mark") {
+        fareNow = money(e.new, currency);
+        if (e.old !== e.new) fareWas = money(e.old, currency);
+        break;
+      }
+    }
+
+    // Money moment: the newest alloc ("saved …") or loss ("↓ …") — each
+    // amount is that event's own figure, never a client-side sum.
+    let delta: ReactNode = null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const e = rows[i].event;
+      if (e.type === "alloc") {
+        delta = (
+          <span className="tc-delta up num">
+            saved {money(e.amount, currency)}
+          </span>
+        );
+        break;
+      }
+      if (e.type === "loss") {
+        delta = (
+          <span className="tc-delta down num">
+            ↓ {money(e.amount, currency).replace("−", "")}
+          </span>
+        );
+        break;
+      }
+    }
+
+    // The one sentence a card is allowed — only when the latest event needs
+    // words that a status chip cannot carry.
+    const note =
+      last.type === "trade" && last.kind === "escalate"
+        ? "Asking you first"
+        : last.type === "mark" && last.stale
+          ? "Using last known price"
+          : last.type === "error"
+            ? "See full record"
+            : null;
+
+    const label = snapPos?.trip_label?.trim();
+    const hasRoute = Boolean(snapPos && snapPos.origin && snapPos.dest);
+    const open = Boolean(openTrips[group.key]);
+    const detailId = `trip-detail-${group.key}`;
+
     return (
-      <div key={ix} data-ix={ix} className={blocked ? "trip blocked" : "trip"}>
-        <div className={avatarCls}>{tripInitials(snapPos, pos)}</div>
-        <div className="info">
-          <div className="name">{tripTitle(event)}</div>
-          <div className="leg">
-            {tripIdentity(snapPos, pos)}
-            {" · "}
-            {event.type === "trade"
-              ? event.kind === "book"
-                ? "Price looked good"
-                : event.kind === "hold"
-                  ? "Waiting for a better fare"
-                  : "Asking you first"
-              : event.type === "mark"
-                ? event.stale
-                  ? "Using last known price"
-                  : "Checked today's fares"
-                : event.type === "alloc"
-                  ? "Came in under quote"
-                  : event.type === "loss"
-                    ? `Down ${money(event.amount, currency).replace("−", "")}`
-                    : event.type === "reconcile"
-                      ? "Adjusted before booking"
-                      : "See full record"}
+      <article
+        key={group.key}
+        className={blocked ? "tcard blocked" : "tcard"}
+      >
+        <div className="tc-top">
+          <span className="tc-name">{label || friendlyTrip(pos)}</span>
+          {stateWord && (
+            <span className={`badge ${stateTone}`}>
+              <i className={`pip ${statePip}`} aria-hidden="true" />
+              {stateWord}
+            </span>
+          )}
+        </div>
+
+        {hasRoute && snapPos ? (
+          <div
+            className="tc-route"
+            aria-label={`${snapPos.origin} to ${snapPos.dest}`}
+          >
+            <span className="tc-code num">{snapPos.origin}</span>
+            <span className="tc-path" aria-hidden="true">
+              <i className="tc-dot" />
+              <i className="tc-line" />
+              <span className="tc-plane">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" />
+                </svg>
+              </span>
+              <i className="tc-line" />
+              <i className="tc-dot" />
+            </span>
+            <span className="tc-code num">{snapPos.dest}</span>
           </div>
-          {extra}
+        ) : (
+          <div className="tc-route tc-route-none">
+            <span className="tc-code num">{friendlyTrip(pos)}</span>
+          </div>
+        )}
+
+        <div className="tc-facts">
+          {snapPos?.depart_date && (
+            <span className="tc-fact">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="16" rx="3" />
+                <path d="M3 10h18M8 3v4M16 3v4" />
+              </svg>
+              <span className="num">{shortDate(snapPos.depart_date)}</span>
+            </span>
+          )}
+          {snapPos && typeof snapPos.pax === "number" && snapPos.pax >= 1 && (
+            <span
+              className="tc-fact"
+              aria-label={snapPos.pax === 1 ? "1 person" : `${snapPos.pax} people`}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="8" r="3.4" />
+                <path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6" />
+              </svg>
+              <span className="num">{snapPos.pax}</span>
+            </span>
+          )}
         </div>
-        <div className="right">
-          {amount}
-          {badge}
+
+        {/* Price movement is encoded ONCE. It used to be encoded twice —
+            a struck-through old price AND a delta pill, two devices
+            competing for one fact. The pill wins whenever a real loss or
+            alloc event supplied an amount, because that figure is a value
+            the system actually sent; the strike-through only stands in when
+            no such figure exists, and it then carries a visually-hidden
+            "was" because <s> is not announced by most screen readers. */}
+        <div className="tc-money">
+          {fareNow && (
+            <span className="tc-fare fig">
+              {fareNow}
+              {fareWas && !delta && (
+                <s className="tc-was">
+                  <span className="visually-hidden">was </span>
+                  {fareWas}
+                </s>
+              )}
+            </span>
+          )}
+          {delta}
         </div>
-      </div>
+
+        {note && <div className="tc-note">{note}</div>}
+
+        <button
+          type="button"
+          className="tc-more"
+          aria-expanded={open}
+          aria-controls={detailId}
+          onClick={() =>
+            setOpenTrips((prev) => ({ ...prev, [group.key]: !prev[group.key] }))
+          }
+        >
+          <span className="tc-track">
+            {rows.map(({ event, ix }) => (
+              <span
+                key={ix}
+                data-ix={ix}
+                className={`trip tick ${tickTone(event, snapPos)}`}
+                title={stepWord(event, snapPos)}
+              >
+                <span className="tick-dot" aria-hidden="true" />
+                <span className="tick-word">{stepWord(event, snapPos)}</span>
+              </span>
+            ))}
+          </span>
+          {/* The label says what the control DOES, not just how many rows
+              exist behind it ("2 updates" named the contents but not the
+              action). The group's outcome is carried by the status badge
+              at the top of the card and by the dot track to the left, so
+              the collapsed group already states how it ended. */}
+          <span className="tc-more-text">
+            {open ? "Hide" : "Show"} {rows.length === 1 ? "1 step" : `${rows.length} steps`}
+          </span>
+          <span className="tc-chev" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M7 10l5 5 5-5" />
+            </svg>
+          </span>
+        </button>
+
+        {/* The step-by-step detail — the wording that used to sit on the
+            board, now opened per trip. Every line is the event's own type
+            word plus that event's own figures. */}
+        <div id={detailId} className="tc-detail" hidden={!open}>
+          {/* A step has a WORD and, depending on the event, either a FIGURE
+              or a REASON. They are not the same kind of thing and they no
+              longer share a slot: a figure right-aligns in its own column
+              so figures line up down the card, while a reason is prose and
+              sits on its own line under the word. Previously both were
+              right-aligned, which put "On hold" and "Waiting for a better
+              fare" at opposite ends of a narrow card. */}
+          {rows.map(({ event, ix }) => {
+            const reason =
+              event.type === "trade"
+                ? event.kind === "book"
+                  ? "Price looked good"
+                  : event.kind === "hold"
+                    ? "Waiting for a better fare"
+                    : "Asking you first"
+                : null;
+            return (
+              <div key={ix} className="tc-step">
+                <span className={`tc-step-dot ${tickTone(event, snapPos)}`} />
+                <span className="tc-step-word">{stepWord(event, snapPos)}</span>
+                {!reason && (
+                  <span className="tc-step-val fig">
+                    {event.type === "mark" ? (
+                      event.old !== event.new ? (
+                        <>
+                          <s>
+                            <span className="visually-hidden">was </span>
+                            {money(event.old, currency)}
+                          </s>{" "}
+                          → {money(event.new, currency)}
+                        </>
+                      ) : (
+                        money(event.new, currency)
+                      )
+                    ) : event.type === "alloc" ? (
+                      `saved ${money(event.amount, currency)}`
+                    ) : event.type === "loss" ? (
+                      `↓ ${money(event.amount, currency).replace("−", "")}`
+                    ) : event.type === "reconcile" ? (
+                      money(event.delta, currency)
+                    ) : event.type === "error" ? (
+                      <span className="num">{event.code}</span>
+                    ) : (
+                      ""
+                    )}
+                  </span>
+                )}
+                {reason && <span className="tc-step-why">{reason}</span>}
+              </div>
+            );
+          })}
+        </div>
+      </article>
+    );
+  }
+
+  /** Pass 9 — RECORD SECTION 1: "Where every trip stands".
+      The chart itself lives in app/FareChart.tsx so Screen 3's wrap-up can
+      draw the identical picture from the identical fields. This wrapper
+      only chooses the ORDER (first-arrival, so a replay rebuilds the same
+      chart) and hands over the real loss amounts from the stream. */
+  function renderFareChart() {
+    const seen = new Set<string>();
+    const ordered: Position[] = [];
+    for (const g of tripGroups) {
+      const snap = g.pos ? positions[g.pos] : undefined;
+      if (snap && !seen.has(snap.id)) {
+        seen.add(snap.id);
+        ordered.push(snap);
+      }
+    }
+    for (const p of Object.values(positions)) {
+      if (!seen.has(p.id)) {
+        seen.add(p.id);
+        ordered.push(p);
+      }
+    }
+    if (ordered.length === 0) return null;
+    return (
+      <FareChart
+        positions={ordered}
+        currency={currency}
+        authorityCap={screen.mandate?.authority_cap}
+        losses={Object.fromEntries(lossByPos)}
+        caption={
+          <>
+            What each trip cost when it was booked, and what it prices at
+            now — all on one scale.
+            {screen.mandate ? (
+              <>
+                {" "}
+                The dashed rule is your{" "}
+                {money(screen.mandate.authority_cap, currency)} auto-approve
+                limit: anything past it comes back to you.
+              </>
+            ) : null}{" "}
+            <span className="rec-src">Figures from the desk snapshot.</span>
+          </>
+        }
+      />
+    );
+  }
+
+  /** Pass 9 — RECORD SECTION 2: "How the run went".
+      Every blotter entry placed by its REAL arrival order (x) and its own
+      position id (y). Escalations appear here even though the trips board
+      excludes them — the record may not drop a row.
+
+      HONESTY: the x axis is ORDER, not time, and the caption says so — the
+      stream carries no timestamps, so an axis labelled "time" would be
+      invented. Shape encodes the event kind independently of hue (see
+      glyphShape) because --warn and --bad are near-identical under
+      deuteranopia (measured, research doc §6c). */
+  function renderRunMap() {
+    const cols = screen.blotter.length;
+    if (cols === 0) return null;
+    const laneName = (key: string) => {
+      if (key === "—") return "Run-level";
+      const snap = positions[key];
+      return snap?.trip_label?.trim() || friendlyTrip(key);
+    };
+    return (
+      <figure className="rec-fig runmap">
+        <figcaption className="rec-cap">
+          Every entry below, in the order it arrived, on its own trip's line.{" "}
+          <span className="rec-src">
+            Left to right is order of arrival, not elapsed time — the stream
+            carries no clock.
+          </span>
+        </figcaption>
+
+        <div className="rm-scroll">
+          <div
+            className="rm-grid"
+            style={{
+              gridTemplateColumns: `minmax(88px, 150px) repeat(${cols}, minmax(16px, 1fr))`,
+            }}
+          >
+            {laneKeys.map((key, lane) => (
+              <div
+                key={`lane-${key}`}
+                className="rm-lane-k"
+                style={{ gridColumn: 1, gridRow: lane + 1 }}
+              >
+                {laneName(key)}
+              </div>
+            ))}
+            {laneKeys.map((key, lane) => (
+              <i
+                key={`rule-${key}`}
+                className="rm-rule"
+                style={{ gridColumn: `2 / span ${cols}`, gridRow: lane + 1 }}
+                aria-hidden="true"
+              />
+            ))}
+            {screen.blotter.map((row, i) => {
+              const pid =
+                "position_id" in row.event && row.event.position_id
+                  ? row.event.position_id
+                  : null;
+              const lane = laneIndex.get(pid ?? "—") ?? 0;
+              const snap = pid ? positions[pid] : undefined;
+              const word = stepWord(row.event, snap);
+              return (
+                <span
+                  key={row.ix}
+                  className="rm-cell"
+                  style={{ gridColumn: i + 2, gridRow: lane + 1 }}
+                  title={`${i + 1}. ${word}`}
+                >
+                  <i
+                    className={`rm-glyph ${glyphShape(row.event)} ${tickTone(
+                      row.event,
+                      snap
+                    )}`}
+                  />
+                </span>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="rm-legend" aria-hidden="true">
+          <span className="fm-leg">
+            <i className="rm-glyph g-disc flat static" /> fare check
+          </span>
+          <span className="fm-leg">
+            <i className="rm-glyph g-ring wait static" /> price held
+          </span>
+          <span className="fm-leg">
+            <i className="rm-glyph g-diamond flat static" /> decision
+          </span>
+          <span className="fm-leg">
+            <i className="rm-glyph g-flag wait static" /> needs you
+          </span>
+          <span className="fm-leg">
+            <i className="rm-glyph g-drop stop static" /> price drop
+          </span>
+        </div>
+
+        {/* text equivalent — the same sequence, in words */}
+        <ol className="visually-hidden">
+          {screen.blotter.map((row, i) => {
+            const pid =
+              "position_id" in row.event && row.event.position_id
+                ? row.event.position_id
+                : null;
+            const snap = pid ? positions[pid] : undefined;
+            return (
+              <li key={row.ix}>
+                {i + 1}. {stepWord(row.event, snap)}
+                {pid ? ` — ${laneName(pid)}` : ""}
+              </li>
+            );
+          })}
+        </ol>
+      </figure>
     );
   }
 
@@ -1197,44 +1828,96 @@ export default function DeskPage() {
   return (
     <main className="teal-app" ref={scopeRef}>
       <WaypointField />
-      <div className="wrap">
-      {/* ---- header ------------------------------------------------------ */}
+      {/* ---- app bar: full-width spine -----------------------------------
+             Pass 10: the mode disclosure is promoted from a 12.5px line
+             floating in the corner into a PHASE BANNER — the documented
+             component for a persistent service-level state (GOV.UK: "shown
+             across all pages of a service, so users should understand it as
+             a service-level message"). Stripe's test-mode guidance points the
+             same way: one account-level signal, never a per-row warning. It
+             is strictly more prominent than before, and it still says exactly
+             what the backend reported and nothing more. --------------- */}
+      <div className="appbar">
       <div className="top">
         <div className="brand">
           <span className="beacon" />
           Waypoint
         </div>
-        <div className={streamDead ? "r-tag err" : "r-tag"}>
-          <div>
-            {connected
-              ? "Live updates on"
-              : streamDead
-                ? "Connection closed"
-                : "Connecting…"}
-          </div>
-          {/* comparison / recorded / live-ticketing disclosure, plain words */}
-          <div
+        <span className="run-id appbar-id">{deskId}</span>
+        <div className="appbar-state">
+          {/* connection state — a named state, its own dot, never a
+              perpetual spinner: a stalled stream must LOOK stalled. */}
+          <span
             className={
-              screen.mode == null
-                ? "mode-banner pending"
-                : live
-                  ? "mode-banner live"
-                  : recorded
-                    ? "mode-banner recorded"
-                    : "mode-banner comparison"
+              awaiting
+                ? "conn conn-wait"
+                : connected
+                  ? "conn conn-live"
+                  : streamDead
+                    ? "conn conn-dead"
+                    : "conn conn-pending"
             }
           >
-            {screen.mode == null
-              ? "Starting up…"
-              : live
-                ? "Live — booking for real"
-                : recorded
-                  ? "Recorded — replaying a real sandbox ticket"
-                  : "Dry run — no real bookings yet"}
-          </div>
+            <i className="conn-dot" aria-hidden="true" />
+            {awaiting
+              ? "Waiting for your team"
+              : connected
+                ? "Live updates on"
+                : streamDead
+                  ? "Connection closed"
+                  : "Connecting…"}
+          </span>
+          <span
+            className={
+              screen.mode == null
+                ? "phase phase-pending"
+                : live
+                  ? "phase phase-live"
+                  : recorded
+                    ? "phase phase-recorded"
+                    : "phase phase-dry"
+            }
+          >
+            {/* The mode arrives on the `meta` event. If the stream died
+                before that, we genuinely do not know which mode this desk
+                would have run in — and saying "connecting" next to
+                "Connection closed" would be a lie in two directions.
+
+                THREE modes, not two: a recorded replay is a real captured
+                sandbox ticket chain being replayed, so calling it a dry run
+                ("no real bookings") understates what it is, and calling it
+                live overstates it. It gets its own state and its own words.
+                `live` stays false in a replay — no interactive escalation
+                slot exists — which is why `recorded` is a separate flag and
+                not a third value of `live`. */}
+            <b className="phase-k">
+              {screen.mode == null
+                ? streamDead
+                  ? "Unknown"
+                  : "Starting"
+                : live
+                  ? "Live"
+                  : recorded
+                    ? "Recorded"
+                    : "Dry run"}
+            </b>
+            <span className="phase-v">
+              {screen.mode == null
+                ? streamDead
+                  ? "the desk never reported its mode"
+                  : "connecting to the desk"
+                : live
+                  ? "booking for real"
+                  : recorded
+                    ? "replaying a real sandbox ticket"
+                    : "no real bookings"}
+            </span>
+          </span>
         </div>
       </div>
+      </div>
 
+      <div className="wrap">
       {/* ---- Waybot pre-stream gate: awaiting travelers -> enter the code - */}
       {awaiting && (
         <div className="decide">
@@ -1341,244 +2024,655 @@ export default function DeskPage() {
         </div>
       )}
 
+      {/* The most important thing on a dead screen is that it IS dead, so
+          it gets a real surface rather than one small red line above the
+          band. Status is a word, a shape and a colour — never colour on
+          its own. */}
       {streamDead && !awaiting && (
-        <div className="status err">
-          We can't reach this booking — it may have ended or the link is
-          wrong.
+        <div className="status err deskerr" role="status">
+          <i className="pip pip-cross" aria-hidden="true" />
+          <span className="deskerr-main">
+            <b>We can't reach this booking</b>
+            <span>
+              It may have ended, or the link is wrong. Nothing on this page
+              is live.
+            </span>
+          </span>
         </div>
       )}
 
-      {/* ---- run summary -------------------------------------------------- */}
-      <div className="run">
-        <h1 className="run-title">Booking your team's trips</h1>
-        <div className="run-who">
-          <span className="run-id">{deskId}</span>
-        </div>
+      {/* ---- KPI band ------------------------------------------------------
+             Pass 10 rebuild. The four tiles previously had four different
+             internal anatomies and no shared baseline. They now share ONE:
 
-        {/* trip context (task #2) — the operator's own words, displayed
-            plainly as context, never as verified data; renders nothing
-            when both label and purpose are blank */}
-        {screen.mandate &&
-          (screen.mandate.destination_label || screen.mandate.trip_purpose) && (
-            <div className="run-ctx">
-              Booking{" "}
-              {(screen.mandate.team_size ?? 1) > 1
-                ? `${screen.mandate.team_size} travelers`
-                : "1 traveler"}
-              {screen.mandate.destination_label &&
-                ` to ${screen.mandate.destination_label}`}
-              {screen.mandate.trip_purpose &&
-                ` — ${screen.mandate.trip_purpose}`}
-            </div>
-          )}
+                 eyebrow  -> what this measures
+                 metric   -> the value, on the metric ramp, tabular
+                 meter    -> a track or a state row (the comparison)
+                 context  -> one line (the qualitative state)
 
-        <div className="budget">
-          <div className="left">
-            Budget{" "}
-            <b className="num">
-              {screen.mandate
-                ? money(screen.mandate.budget_total, currency)
-                : "—"}
-            </b>
-          </div>
+             A KPI needs a value, at least one comparison and a state to mean
+             anything; each tile below now carries all three. The hero uses a
+             larger step of the SAME metric ramp — a system, not a fifth
+             anatomy. Every binding and both gsap anchors (bigFigRef on the
+             `.big` figure, barFillRef on `.bar .fill`) are untouched. ---- */}
+      <div className={awaiting ? "kpis kpis-quiet" : "kpis"}>
+        <div className="kpi kpi-hero">
+          <div className="kpi-k">This run</div>
           {screen.result ? (
-            <div ref={bigFigRef} className="big num">
+            <div ref={bigFigRef} className={`big fig kpi-v ${heroTone}`}>
               {Number(screen.result.pnl) >= 0
                 ? `Saved ${money(screen.result.pnl, currency)}`
                 : `Over by ${money(screen.result.pnl, currency).replace("−", "")}`}
             </div>
           ) : (
-            <div className="big num">{settled ? "" : "Booking…"}</div>
+            <div className="big fig kpi-v pending">
+              {awaiting
+                ? "Not started"
+                : streamDead
+                  ? "No result"
+                  : settled
+                    ? ""
+                    : "Booking…"}
+            </div>
           )}
+          <div className="kpi-meter">
+            {screen.result ? (
+              <span className={`lozenge ${heroTone || "flat"}`}>
+                <i className={`pip ${heroPip}`} aria-hidden="true" />
+                {plainStatus(screen.result.status)}
+              </span>
+            ) : screen.cycleFailed ? (
+              <span className="lozenge no">
+                <i className="pip pip-cross" aria-hidden="true" />
+                Stopped early
+              </span>
+            ) : awaiting ? (
+              <span className="lozenge flat">
+                <i className="pip pip-open" aria-hidden="true" />
+                Waiting for your team
+              </span>
+            ) : streamDead ? (
+              <span className="lozenge no">
+                <i className="pip pip-cross" aria-hidden="true" />
+                Connection closed
+              </span>
+            ) : (
+              <span className="lozenge flat">
+                <i className="pip pip-half" aria-hidden="true" />
+                Working through the trips
+              </span>
+            )}
+          </div>
+          {/* trip context (task #2) — the operator's own words, displayed
+              plainly as context, never as verified data; renders nothing
+              when both label and purpose are blank */}
+          <div className="kpi-ctx">
+            {screen.mandate &&
+            (screen.mandate.destination_label || screen.mandate.trip_purpose)
+              ? [
+                  (screen.mandate.team_size ?? 1) > 1
+                    ? `${screen.mandate.team_size} travelers`
+                    : "1 traveler",
+                  screen.mandate.destination_label
+                    ? `to ${screen.mandate.destination_label}`
+                    : "",
+                  screen.mandate.trip_purpose
+                    ? `— ${screen.mandate.trip_purpose}`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")
+              : ""}
+          </div>
         </div>
-        {/* Spent-vs-budget, real figures only: both numbers are summed
-            from the snapshot's budgets[] (same pattern as the summary
-            page). The fill starts collapsed in base CSS and gsap settles
-            it at the real ratio (a 0 ratio stays honestly empty). With no
-            figures the bar renders empty and the note is dropped entirely
-            — never a guess. */}
-        <div className="bar">
-          <div ref={barFillRef} className="fill" />
+
+        <div className="kpi kpi-budget">
+          <div className="kpi-k">Budget</div>
+          {/* The METRIC is mandate.budget_total — one real value that
+              arrived on the wire. It used to be printed three times in
+              this tile (as "Budget", as "of", and again as "left"); two of
+              those came from client-side sums over budgets[]. */}
+          <div className="kpi-v fig">
+            {screen.mandate ? money(screen.mandate.budget_total, currency) : "—"}
+          </div>
+          {/* Spent-vs-budget. The fill starts COLLAPSED in base CSS so it
+              can never overstate spend before/without JS; gsap settles it
+              at the real ratio (a 0 ratio stays honestly empty). Bar
+              geometry derived from real decimals — permitted; no figure is
+              computed into text here. The zero tick makes an empty track
+              read as "nothing yet" rather than as a broken widget. */}
+          <div className="kpi-meter">
+            <div className={nothingCommitted ? "bar is-zero" : "bar"}>
+              <i className="bar-zero" aria-hidden="true" />
+              <div ref={barFillRef} className="fill" />
+            </div>
+          </div>
+          <div className="kpi-ctx">
+            {budgetFigures
+              ? nothingCommitted
+                ? "Nothing committed yet"
+                : `${money(String(budgetFigures.spent), currency)} of ${money(
+                    String(budgetFigures.budget),
+                    currency
+                  )} committed`
+              : ""}
+          </div>
         </div>
-        {budgetFigures && (
-          <div className="bar-note num">
-            spent {money(String(budgetFigures.spent), currency)} of{" "}
-            {money(String(budgetFigures.budget), currency)} ·{" "}
-            {money(String(budgetFigures.budget - budgetFigures.spent), currency)}{" "}
-            left
+
+        <div className="kpi kpi-status">
+          <div className="kpi-k">Trips</div>
+          <div className="kpi-v fig">
+            {tripsTracked > 0 ? bookedCount : "—"}
+            {tripsTracked > 0 && (
+              <span className="kpi-v-of">of {tripsTracked} booked</span>
+            )}
+          </div>
+          {/* Gist only — a stacked track is a length judgment for every
+              segment above the first, so the real counts always sit beside
+              it as text below. Widths are counts of real snapshot rows. */}
+          <div className="kpi-meter">
+            <div className="segbar" aria-hidden="true">
+              {tripsTracked > 0 ? (
+                <>
+                  {bookedCount > 0 && (
+                    <i
+                      className="seg seg-ok"
+                      style={{ flexGrow: bookedCount }}
+                    />
+                  )}
+                  {needsYouCount > 0 && (
+                    <i
+                      className="seg seg-wait"
+                      style={{ flexGrow: needsYouCount }}
+                    />
+                  )}
+                  {restTrips > 0 && (
+                    <i className="seg seg-flat" style={{ flexGrow: restTrips }} />
+                  )}
+                </>
+              ) : (
+                <i className="seg seg-empty" style={{ flexGrow: 1 }} />
+              )}
+            </div>
+          </div>
+          <div className="kpi-ctx statusline">
+            {needsYouCount > 0 && (
+              <span className="s">
+                <i className="pip pip-half wait" aria-hidden="true" />
+                <b>{needsYouCount}</b> need{needsYouCount === 1 ? "s" : ""} your OK
+              </span>
+            )}
+            {lossCount > 0 && (
+              <span className="s">
+                <i className="pip pip-cross no" aria-hidden="true" />
+                <b>{lossCount}</b> price drop{lossCount === 1 ? "" : "s"}
+              </span>
+            )}
+            {recCount > 0 && (
+              <span className="s">
+                <i className="pip pip-open" aria-hidden="true" />
+                <b>{recCount}</b> adjustment{recCount === 1 ? "" : "s"}
+              </span>
+            )}
+            {errCount > 0 && (
+              <span className="s">
+                <i className="pip pip-cross no" aria-hidden="true" />
+                <b>{errCount}</b> issue{errCount === 1 ? "" : "s"}
+              </span>
+            )}
+            {needsYouCount === 0 &&
+              lossCount === 0 &&
+              recCount === 0 &&
+              errCount === 0 && (
+                <span className="s s-quiet">Nothing needs you</span>
+              )}
+          </div>
+        </div>
+
+        {/* fare-check meter — bound ONLY to screen.meter, clamped at 100;
+            plain width style, no animation toward fake values. Rendered
+            here (not the console) so the band answers "how hard is it
+            working" at a glance; never duplicated. */}
+        {screen.meter && screen.meter.max > 0 && (
+          <div className="kpi kpi-meter-tile">
+            <div className="kpi-k">Fare checks</div>
+            <div className="kpi-v fig">{screen.meter.used}</div>
+            <div className="kpi-meter">
+              <div className="cm-track" aria-hidden="true">
+                <div
+                  className="cm-fill"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      (screen.meter.used / screen.meter.max) * 100
+                    )}%`,
+                  }}
+                />
+              </div>
+            </div>
+            <div className="kpi-ctx">of {screen.meter.max} allowed this run</div>
           </div>
         )}
-
-        <div className="statusline">
-          <span className="s">
-            <span className="pin g" />
-            <b>{bookedCount}</b> booked
-          </span>
-          {openEscRows.length > 0 && (
-            <span className="s">
-              <span className="pin w" />
-              <b>{openEscRows.length}</b> need{openEscRows.length === 1 ? "s" : ""}{" "}
-              your OK
-            </span>
-          )}
-          {lossCount > 0 && (
-            <span className="s">
-              <span className="pin r" />
-              <b>{lossCount}</b> price drop{lossCount === 1 ? "" : "s"}
-            </span>
-          )}
-          {recCount > 0 && (
-            <span className="s">
-              <span className="pin r" />
-              <b>{recCount}</b> price adjustment{recCount === 1 ? "" : "s"}
-            </span>
-          )}
-          {errCount > 0 && (
-            <span className="s">
-              <span className="pin r" />
-              <b>{errCount}</b> issue{errCount === 1 ? "" : "s"}
-            </span>
-          )}
-        </div>
       </div>
 
-      {/* ---- the decisions (only when something needs a human) ---------- */}
-      {escRows.map(renderDecision)}
+      {/* ---- the desk layout ------------------------------------------------
+             Pass 10. The old grid was `1fr 332px` with the console sticky in
+             the right column and EVERYTHING ELSE — decision, board, record,
+             banner — in the left. Measured at 1440px, the console was 166px
+             tall inside a 1320px-tall grid: 1154px of empty background down
+             the right-hand side, and the single most visible unfinished tell
+             on the page.
 
-      {/* ---- the trips — one card per real stream event ------------------ */}
-      <div className="sec">The trips</div>
-      {screen.blotter.length === 0 ? (
-        <div className="trip empty">
-          Just starting — updates will appear here.
-        </div>
-      ) : (
-        screen.blotter.map(renderTrip)
-      )}
+             Now the right column exists for exactly ONE row — the attention
+             row, where the decision card (what needs you) sits beside the
+             agent panel (what it is doing). Both are short, so they balance.
+             Everything below spans the full width, which is also why the
+             trips grid can now run three-up at 1440 instead of two.
 
-      {/* ---- the full record: every check, disclosure and code ------------
-             (step 3 — collapsed by default, behind a quiet toggle. The
-              JSX inside is the step-2 fineprint block near-verbatim:
-              nothing deleted, headings relabeled to plain English. The
-              panel is local UI state only; it never touches the stream,
-              and `hidden` keeps every row mounted so toggling cannot
-              disturb the render.) ---------------------------------------- */}
-      <div className="record">
-        <button
-          type="button"
-          className="record-toggle"
-          aria-expanded={recordOpen}
-          aria-controls="full-record"
-          onClick={() => setRecordOpen((o) => !o)}
-        >
-          {recordOpen ? "Hide the full record ↑" : "See the full record →"}
-        </button>
-        <div id="full-record" className="fineprint" hidden={!recordOpen}>
-        <div className="sec fineprint-k">
-          The full record{screen.blotter.length > 0 &&
-            ` · ${screen.blotter.length} entries`}
-        </div>
+             When there is no escalation the rail has no partner, so the grid
+             drops to a single column and the agent panel becomes a full-width
+             strip (see .desk-grid:not(.has-decision) in presentation.css).
+             Re-parenting only: no logic, binding or copy changes, and the
+             mobile DOM order is unchanged (decision -> agent -> trips ->
+             record -> result). */}
+      <div className={escRows.length > 0 ? "desk-grid has-decision" : "desk-grid"}>
+        {escRows.length > 0 && (
+          <div className="desk-decisions">{escRows.map(renderDecision)}</div>
+        )}
 
-        {/* search meter — hidden from the main view; stays in the DOM so
-            the step-3 record panel can surface it. */}
-        <div className="visually-hidden">
-          search meter:{" "}
-          {screen.meter ? `${screen.meter.used} of ${screen.meter.max}` : "— of —"}
-        </div>
+        {/* Agent panel — the Pass 2 evidence blocks (never duplicated).
+            Pass 10: it gets a real header, which is what removes the
+            orphaned rule that used to float above the first rail row with
+            nothing over it. */}
+        <aside className="desk-console" aria-label="Agent activity">
+          <div className="pa-head">
+            <span className="pa-head-k">Agent</span>
+            {/* the pulse means "work is happening"; it must not outlive the
+                stream that produces the work */}
+            {running && <span className="pa-beacon" aria-hidden="true" />}
+          </div>
 
-        {/* disclosure register: every meta.disclosures[] string */}
-        {screen.disclosures.length > 0 && (
-          <div className="register">
-            <div className="register-k">notes</div>
-            <ul>
-              {screen.disclosures.map((d) => (
-                <li key={d}>{d}</li>
+          {/* (a) working-on — same wrapper, same aria-live, wrapper ALWAYS
+              mounted (gsap anchor). The narration is deliberately not a
+              card: it is a status that is replaced in place, not an
+              artefact that accretes — the record is where things accrete.
+
+              Pass 11: the present-tense arm is keyed off `running`, not off
+              `!settled`. `settled` only becomes true on a result or an
+              explicit DESK_CYCLE_FAILED event, so a dropped connection left
+              this region announcing "Working on <stale step>" in the present
+              tense with the stream already dead — and this is an aria-live
+              region, so a screen-reader user got that claim without any of
+              the surrounding contradiction ("No result", "Connection
+              closed") a sighted user could see. The step itself is kept: it
+              genuinely arrived, so it is restated in the PAST tense rather
+              than dropped. */}
+          <div className="pa-working" aria-live="polite">
+            {running && latestStep ? (
+              <>
+                <span className="pa-working-k">Working on</span>
+                <span
+                  className="pa-working-text"
+                  key={screen.steps.length}
+                >
+                  {latestStep.text}
+                </span>
+              </>
+            ) : streamDead && latestStep ? (
+              <span className="pa-working-idle">
+                Last step before the connection dropped — {latestStep.text}
+              </span>
+            ) : settled ? (
+              <span className="pa-working-idle">
+                Finished — nothing running.
+              </span>
+            ) : null}
+          </div>
+
+          {/* (c) data sources — rail name + label verbatim, same state
+              classes; rail.detail stays in the full record only. */}
+          {screen.rails && screen.rails.length > 0 && (
+            <div className="pa-sources">
+              <span className="pa-sources-k">Where the numbers come from</span>
+              {screen.rails.map((rail) => (
+                <span key={rail.rail} className="pa-source">
+                  <span className="pa-source-name">
+                    {rail.rail}
+                  </span>
+                  <span className={`pa-source-label ${rail.state}`}>
+                    <i className={`pip ${railPip(rail.state)}`} aria-hidden="true" />
+                    {rail.label}
+                  </span>
+                </span>
               ))}
-            </ul>
-          </div>
-        )}
-
-        {/* per-rail provenance strip (S12, ADR 0006): demoted into
-            the full record — ops manager doesn't need this on main view */}
-        {screen.rails && (
-          <div className="rails">
-            <div className="rails-note">
-              Data sources for this run
-            </div>
-            {screen.rails.map((rail) => (
-              <div key={rail.rail} className="rail">
-                <span className="rail-name">{rail.rail}</span>
-                <span className={`rail-state ${rail.state}`}>{rail.label}</span>
-                <span className="rail-detail">{rail.detail}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* narration — the working log, demoted into the fine print */}
-        <div className="stream">
-          {screen.steps.length === 0 && (
-            <div>
-              <span className="dim">›</span> Working on it.
             </div>
           )}
-          {screen.steps.map((s, i) => (
-            <div
-              key={`${s.n}-${i}`}
-              className={
-                i === screen.steps.length - 1 &&
-                !screen.result &&
-                !screen.cycleFailed
-                  ? "cur"
-                  : undefined
-              }
-            >
-              <span className="dim">›</span> {s.text}
-            </div>
-          ))}
+        </aside>
+
+        <div className="desk-main">
+          {/* ---- the trips — a grid of boarding-pass cards (Pass 8) -----
+                 Pass 10: the section label was a 10.5px all-caps monospace
+                 eyebrow sitting a long way from the cards it named. It is
+                 now a real header, in sans, next to its own count.
+
+                 The right-hand line makes the MANAGER'S STANDING AUTHORITY
+                 visible on a screen where nothing is being asked of them —
+                 people accept an algorithm far more readily when their own
+                 control over it is apparent, and until now that rule was
+                 stated only inside an escalation card that may never
+                 appear. The figure is mandate.authority_cap, verbatim. */}
+          <section className="board">
+          <div className="board-head">
+            <h2 className="sec">
+              The trips
+              {tripGroups.length > 0 && (
+                <span className="sec-n">{tripGroups.length}</span>
+              )}
+            </h2>
+            {screen.mandate && (
+              <p className="board-rule">
+                Books under{" "}
+                <b className="fig">
+                  {money(screen.mandate.authority_cap, currency)}
+                </b>{" "}
+                on its own — anything above comes to you
+              </p>
+            )}
+          </div>
+          {tripGroups.length === 0 ? (
+            <>
+              {/* Pass 11. This used to read "we never reached this booking"
+                  for a dead stream and "Just starting" for everything else —
+                  so a run that SETTLED having booked nothing (every candidate
+                  dropped, the budget exhausted, every escalation declined)
+                  was told either that the agent never got there or that it
+                  was still warming up. Both are false, and on a product whose
+                  pitch is that it shows its work honestly, claiming the agent
+                  never arrived when it arrived and declined is exactly the
+                  wrong lie. Four states, four sentences, and none of them
+                  asserts a cause the screen cannot see. `settled` is checked
+                  FIRST because a result outranks a closed stream: the run
+                  finished, we just are not listening any more. */}
+              <div className="trip empty">
+                <span className="empty-copy">
+                  {awaiting
+                    ? "Nothing yet — the trips appear once you release the booking."
+                    : settled
+                      ? "No trips on the board. This run reached the end of its work — whatever it considered is in the full record below."
+                      : streamDead
+                        ? "No trips arrived before the connection closed. We can't say what happened after that."
+                        : "Just starting — updates will appear here."}
+                </span>
+              </div>
+              {/* Honest skeletons — obvious placeholders (no text, no
+                  numbers), rendered ONLY while a run is genuinely starting.
+                  `running` excludes a dead stream: a placeholder promises
+                  content is coming, and with the stream closed none is. */}
+              {running && (
+                <>
+                  <div className="trip skeleton" aria-hidden="true">
+                    <div className="sk-avatar" /><div className="sk-lines">
+                    <div className="sk-line" /><div className="sk-line short" /></div>
+                  </div>
+                  <div className="trip skeleton" aria-hidden="true">
+                    <div className="sk-avatar" /><div className="sk-lines">
+                    <div className="sk-line" /><div className="sk-line short" /></div>
+                  </div>
+                  <div className="trip skeleton" aria-hidden="true">
+                    <div className="sk-avatar" /><div className="sk-lines">
+                    <div className="sk-line" /><div className="sk-line short" /></div>
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            <div className="tgrid">{tripGroups.map(renderTripGroup)}</div>
+          )}
+          </section>
         </div>
 
-        {/* the log — every row, incl. escalation slots + buttons */}
-        <div className="blotter">
-          {screen.blotter.length === 0 && (
-            <div className="brow">
-              <div className="b-main">
-                <div className="b-body dim-note">
-                  Nothing here yet — entries appear as trips are processed.
+        {/* ---- the full record: every check, disclosure and code ----------
+               (step 3 — collapsed by default, behind a quiet toggle. The
+                JSX inside is the step-2 fineprint block near-verbatim:
+                nothing deleted, headings relabeled to plain English. The
+                panel is local UI state only; it never touches the stream,
+                and `hidden` keeps every row mounted so toggling cannot
+                disturb the render.)
+
+               Pass 10: collapsed, this used to be a large near-black slab
+               holding one small ghost button — the visually heaviest thing
+               on the page and the one that said the least. Collapsed it is
+               now a quiet bar that states WHAT IS INSIDE, using real counts
+               so the reader can decide whether to open it. The dark panel —
+               which is measured, not stylistic: the status palette only
+               reaches AA body contrast on the dark ground — appears only
+               once it is open. --------------------------------------- */}
+        <div className={recordOpen ? "record is-open" : "record"}>
+          <button
+            type="button"
+            className="record-toggle"
+            aria-expanded={recordOpen}
+            aria-controls="full-record"
+            onClick={() => {
+              recordTouchedRef.current = true;
+              setRecordOpen((o) => !o);
+            }}
+          >
+            <span className="rt-main">
+              <span className="rt-k">The full record</span>
+              <span className="rt-sub">
+                Every check, figure and disclosure this run produced
+              </span>
+            </span>
+            <span className="rt-counts" aria-hidden="true">
+              <span className="rt-count">
+                <b className="fig">{screen.blotter.length}</b> entries
+              </span>
+              <span className="rt-count">
+                <b className="fig">{screen.steps.length}</b> steps
+              </span>
+              {screen.rails && screen.rails.length > 0 && (
+                <span className="rt-count">
+                  <b className="fig">{screen.rails.length}</b> sources
+                </span>
+              )}
+            </span>
+            <span className="rt-chev" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M7 10l5 5 5-5" />
+              </svg>
+            </span>
+          </button>
+          <div id="full-record" className="fineprint" hidden={!recordOpen}>
+            <div className="sec fineprint-k">The full record</div>
+
+            {/* Count-check, stated in the UI so a reader can audit the
+                record against the stream without trusting us. Every event
+                the screen received is accounted for in one of these four
+                buckets — the log rows below, the narration, the run header
+                (meta) and the terminal result. Nothing is dropped; some
+                events simply render as something other than a row. */}
+            <p className="rec-count">
+              <b className="num">
+                {screen.blotter.length +
+                  screen.steps.length +
+                  (screen.mandate ? 1 : 0) +
+                  (screen.result ? 1 : 0)}
+              </b>{" "}
+              events received —{" "}
+              <b className="num">{screen.blotter.length}</b> logged in full
+              below, <b className="num">{screen.steps.length}</b> narration
+              step{screen.steps.length === 1 ? "" : "s"}
+              {screen.mandate ? ", the run header" : ""}
+              {screen.result ? ", the result" : ""}.
+            </p>
+
+            {/* search meter — hidden from the main view; stays in the DOM so
+                the step-3 record panel can surface it. */}
+            <div className="visually-hidden">
+              search meter:{" "}
+              {screen.meter ? `${screen.meter.used} of ${screen.meter.max}` : "— of —"}
+            </div>
+
+            {/* ---- 1. the money picture ------------------------------- */}
+            <section className="rec-sec">
+              <h3 className="rec-h">Where every trip stands</h3>
+              {renderFareChart() ?? (
+                <p className="rec-none">
+                  No trip figures yet — this fills in when the desk snapshot
+                  lands.
+                </p>
+              )}
+            </section>
+
+            {/* ---- 2. the process picture ------------------------------ */}
+            <section className="rec-sec">
+              <h3 className="rec-h">How the run went</h3>
+              {renderRunMap() ?? (
+                <p className="rec-none">
+                  Nothing has happened yet — entries appear as trips are
+                  processed.
+                </p>
+              )}
+            </section>
+
+            {/* ---- 3. provenance: per-rail (S12, ADR 0006). Every rail's
+                   own state word AND its full detail sentence — a fallback
+                   never renders in a success tone. -------------------- */}
+            <section className="rec-sec">
+              <h3 className="rec-h">Where the numbers came from</h3>
+              {screen.rails && screen.rails.length > 0 ? (
+                <div className="rails">
+                  {screen.rails.map((rail) => (
+                    <div key={rail.rail} className="rail">
+                      <span className="rail-name">{rail.rail}</span>
+                      <span className={`rail-state ${rail.state}`}>
+                        {rail.label}
+                      </span>
+                      <span className="rail-detail">{rail.detail}</span>
+                    </div>
+                  ))}
                 </div>
+              ) : (
+                <p className="rec-none">
+                  This run reported no per-source provenance.
+                </p>
+              )}
+            </section>
+
+            {/* ---- 4. the raw record: notes, narration, every row ------ */}
+            <section className="rec-sec">
+              <h3 className="rec-h">
+                Every step
+                {screen.blotter.length > 0 && (
+                  <span className="rec-h-n num">
+                    {screen.blotter.length} entries
+                  </span>
+                )}
+              </h3>
+
+              {/* disclosure register: every meta.disclosures[] string */}
+              {screen.disclosures.length > 0 && (
+                <div className="register">
+                  <div className="register-k">notes</div>
+                  <ul>
+                    {screen.disclosures.map((d) => (
+                      <li key={d}>{d}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* narration — the agent's own words, verbatim */}
+              <div className="stream">
+                {screen.steps.length === 0 && (
+                  <div>
+                    <span className="dim">›</span> Working on it.
+                  </div>
+                )}
+                {screen.steps.map((s, i) => (
+                  <div
+                    key={`${s.n}-${i}`}
+                    className={
+                      i === screen.steps.length - 1 &&
+                      !screen.result &&
+                      !screen.cycleFailed
+                        ? "cur"
+                        : undefined
+                    }
+                  >
+                    <span className="dim">›</span> {s.text}
+                  </div>
+                ))}
+              </div>
+
+              {/* the log — every row, incl. escalation slots + buttons */}
+              <div className="blotter">
+                {screen.blotter.length === 0 && (
+                  <div className="brow">
+                    <div className="b-main">
+                      <div className="b-body dim-note">
+                        Nothing here yet — entries appear as trips are
+                        processed.
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {screen.blotter.map(renderBlotter)}
+              </div>
+            </section>
+            </div>
+        </div>
+
+        {/* ---- terminal result -> the summary --------------------------
+               Pass 10: the outcome word carries a state pip, and a poor
+               outcome is presented CALMER and shorter than a good one
+               rather than in a louder colour. */}
+        {screen.result && (
+          <div className={`result-banner ${heroTone === "ok" ? "done" : heroTone}`}>
+            <div className="rb-main">
+              <div className="rb-k">
+                <i className={`pip ${heroPip}`} aria-hidden="true" />
+                {plainStatus(screen.result.status)}
+              </div>
+              <div className="rb-sub">
+                {nothingCommitted
+                  ? "Nothing was bought — this was a dry run."
+                  : "The full breakdown is on the summary."}
               </div>
             </div>
-          )}
-          {screen.blotter.map(renderBlotter)}
-        </div>
-        </div>
-      </div>
-
-      {/* ---- terminal result -> the summary ------------------------------- */}
-      {screen.result && (
-        <div className="result-banner done">
-          <div>
-            <div className="rb-k">{plainStatus(screen.result.status)}</div>
+            <Link className="cta" href={`/close/${deskId}`}>
+              See summary
+              <span className="cta-arrow" aria-hidden="true">→</span>
+            </Link>
           </div>
-          <Link className="cta" href={`/close/${deskId}`}>
-            See summary →
-          </Link>
-        </div>
-      )}
+        )}
 
-      {/* ---- crash path: terminal DESK_CYCLE_FAILED, no result emitted -- */}
-      {screen.cycleFailed && !screen.result && (
-        <div className="result-banner">
-          <div>
-            <div className="rb-k">Stopped early</div>
-            <div className="rb-sub">
-              Something went wrong — nothing was booked past that point.
+        {/* ---- crash path: terminal DESK_CYCLE_FAILED, no result ------ */}
+        {screen.cycleFailed && !screen.result && (
+          <div className="result-banner no">
+            <div className="rb-main">
+              <div className="rb-k">
+                <i className="pip pip-cross" aria-hidden="true" />
+                Stopped early
+              </div>
+              <div className="rb-sub">
+                Something went wrong — nothing was booked past that point.
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <div className="note-soft">
-        Always within budget. Every fare is real.
+        {/* Pass 10: this footnote used to be centred inside the 892px
+            left-hand column while the column itself was left-anchored in a
+            1280px wrap, so it read as centred on nothing. It is now a real
+            page footer on the full content width, with a rule to anchor
+            it. */}
+        <footer className="desk-foot">
+          <span className="note-soft">
+            Always within budget. Every fare is real.
+          </span>
+        </footer>
       </div>
 
       {/* ---- cold-open toast: plain copy only — the reducer's raw body
