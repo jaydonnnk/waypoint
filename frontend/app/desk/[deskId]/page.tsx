@@ -25,6 +25,7 @@ import type { ReactNode } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 
+import FareChart from "../../FareChart";
 import WaypointField from "../../WaypointField";
 import {
   approveDesk,
@@ -329,6 +330,33 @@ function tickTone(event: StreamEvent, snap: Position | undefined): string {
       return "flat";
     default:
       return "flat";
+  }
+}
+
+/** Pass 9: the run map's glyph SHAPE per event kind. Shape carries the
+    kind independently of hue, which is load-bearing here: --warn and --bad
+    resolve to nearly the same colour under deuteranopia (measured in
+    docs/design-research-pass9.md §6c), so amber-vs-red can never be the
+    only difference between "needs your OK" and "price drop". Tone still
+    comes from tickTone(); the accessible word still comes from stepWord(). */
+function glyphShape(event: StreamEvent): string {
+  switch (event.type) {
+    case "mark":
+      return event.stale ? "g-ring" : "g-disc";
+    case "trade":
+      return event.kind === "escalate" ? "g-flag" : "g-diamond";
+    case "escalate":
+      return "g-flag";
+    case "loss":
+      return "g-drop";
+    case "alloc":
+      return "g-rise";
+    case "reconcile":
+      return "g-square";
+    case "error":
+      return "g-cross";
+    default:
+      return "g-disc";
   }
 }
 
@@ -864,6 +892,38 @@ export default function DeskPage() {
     }
   }
 
+  // ---------- Pass 9: the record's diagrams (pure render-time derivations) --
+  // Both read ONLY values the backend sent. The fare chart reads the desk
+  // SNAPSHOT (cost_basis / mark_price / mark_stale are real per-position
+  // fields); the run map reads the blotter's own ARRIVAL ORDER. Neither
+  // computes a figure: bar geometry is derived from real decimals (which the
+  // brief allows) and every printed number is money() over a real value.
+  // No state, no memo, no reducer contact — a replay rebuilds both identically.
+
+  // Real admitted losses, keyed by position — the loss EVENT's own amount,
+  // never a difference computed here. Newest wins (same rule the cards use).
+  const lossByPos = new Map<string, string>();
+  for (const r of screen.blotter) {
+    if (r.event.type === "loss") lossByPos.set(r.event.position_id, r.event.amount);
+  }
+
+  // Run map lanes: every blotter row, INCLUDING escalations (the trips board
+  // deliberately excludes those; the record may not). One lane per position
+  // in first-arrival order; the rare event with no position id gets its own.
+  const laneKeys: string[] = [];
+  const laneIndex = new Map<string, number>();
+  for (const row of screen.blotter) {
+    const pid =
+      "position_id" in row.event && row.event.position_id
+        ? row.event.position_id
+        : null;
+    const key = pid ?? "—";
+    if (!laneIndex.has(key)) {
+      laneIndex.set(key, laneKeys.length);
+      laneKeys.push(key);
+    }
+  }
+
   // ---------- render helpers ----------------------------------------------
 
   /** Pass 8: ONE BOARDING-PASS CARD PER TRIP. The card carries the picture
@@ -1134,6 +1194,170 @@ export default function DeskPage() {
           ))}
         </div>
       </article>
+    );
+  }
+
+  /** Pass 9 — RECORD SECTION 1: "Where every trip stands".
+      The chart itself lives in app/FareChart.tsx so Screen 3's wrap-up can
+      draw the identical picture from the identical fields. This wrapper
+      only chooses the ORDER (first-arrival, so a replay rebuilds the same
+      chart) and hands over the real loss amounts from the stream. */
+  function renderFareChart() {
+    const seen = new Set<string>();
+    const ordered: Position[] = [];
+    for (const g of tripGroups) {
+      const snap = g.pos ? positions[g.pos] : undefined;
+      if (snap && !seen.has(snap.id)) {
+        seen.add(snap.id);
+        ordered.push(snap);
+      }
+    }
+    for (const p of Object.values(positions)) {
+      if (!seen.has(p.id)) {
+        seen.add(p.id);
+        ordered.push(p);
+      }
+    }
+    if (ordered.length === 0) return null;
+    return (
+      <FareChart
+        positions={ordered}
+        currency={currency}
+        authorityCap={screen.mandate?.authority_cap}
+        losses={Object.fromEntries(lossByPos)}
+        caption={
+          <>
+            What each trip cost when it was booked, and what it prices at
+            now — all on one scale.
+            {screen.mandate ? (
+              <>
+                {" "}
+                The dashed rule is your{" "}
+                {money(screen.mandate.authority_cap, currency)} auto-approve
+                limit: anything past it comes back to you.
+              </>
+            ) : null}{" "}
+            <span className="rec-src">Figures from the desk snapshot.</span>
+          </>
+        }
+      />
+    );
+  }
+
+  /** Pass 9 — RECORD SECTION 2: "How the run went".
+      Every blotter entry placed by its REAL arrival order (x) and its own
+      position id (y). Escalations appear here even though the trips board
+      excludes them — the record may not drop a row.
+
+      HONESTY: the x axis is ORDER, not time, and the caption says so — the
+      stream carries no timestamps, so an axis labelled "time" would be
+      invented. Shape encodes the event kind independently of hue (see
+      glyphShape) because --warn and --bad are near-identical under
+      deuteranopia (measured, research doc §6c). */
+  function renderRunMap() {
+    const cols = screen.blotter.length;
+    if (cols === 0) return null;
+    const laneName = (key: string) => {
+      if (key === "—") return "Run-level";
+      const snap = positions[key];
+      return snap?.trip_label?.trim() || friendlyTrip(key);
+    };
+    return (
+      <figure className="rec-fig runmap">
+        <figcaption className="rec-cap">
+          Every entry below, in the order it arrived, on its own trip's line.{" "}
+          <span className="rec-src">
+            Left to right is order of arrival, not elapsed time — the stream
+            carries no clock.
+          </span>
+        </figcaption>
+
+        <div className="rm-scroll">
+          <div
+            className="rm-grid"
+            style={{
+              gridTemplateColumns: `minmax(88px, 150px) repeat(${cols}, minmax(16px, 1fr))`,
+            }}
+          >
+            {laneKeys.map((key, lane) => (
+              <div
+                key={`lane-${key}`}
+                className="rm-lane-k"
+                style={{ gridColumn: 1, gridRow: lane + 1 }}
+              >
+                {laneName(key)}
+              </div>
+            ))}
+            {laneKeys.map((key, lane) => (
+              <i
+                key={`rule-${key}`}
+                className="rm-rule"
+                style={{ gridColumn: `2 / span ${cols}`, gridRow: lane + 1 }}
+                aria-hidden="true"
+              />
+            ))}
+            {screen.blotter.map((row, i) => {
+              const pid =
+                "position_id" in row.event && row.event.position_id
+                  ? row.event.position_id
+                  : null;
+              const lane = laneIndex.get(pid ?? "—") ?? 0;
+              const snap = pid ? positions[pid] : undefined;
+              const word = stepWord(row.event, snap);
+              return (
+                <span
+                  key={row.ix}
+                  className="rm-cell"
+                  style={{ gridColumn: i + 2, gridRow: lane + 1 }}
+                  title={`${i + 1}. ${word}`}
+                >
+                  <i
+                    className={`rm-glyph ${glyphShape(row.event)} ${tickTone(
+                      row.event,
+                      snap
+                    )}`}
+                  />
+                </span>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="rm-legend" aria-hidden="true">
+          <span className="fm-leg">
+            <i className="rm-glyph g-disc flat static" /> fare check
+          </span>
+          <span className="fm-leg">
+            <i className="rm-glyph g-ring wait static" /> price held
+          </span>
+          <span className="fm-leg">
+            <i className="rm-glyph g-diamond flat static" /> decision
+          </span>
+          <span className="fm-leg">
+            <i className="rm-glyph g-flag wait static" /> needs you
+          </span>
+          <span className="fm-leg">
+            <i className="rm-glyph g-drop stop static" /> price drop
+          </span>
+        </div>
+
+        {/* text equivalent — the same sequence, in words */}
+        <ol className="visually-hidden">
+          {screen.blotter.map((row, i) => {
+            const pid =
+              "position_id" in row.event && row.event.position_id
+                ? row.event.position_id
+                : null;
+            const snap = pid ? positions[pid] : undefined;
+            return (
+              <li key={row.ix}>
+                {i + 1}. {stepWord(row.event, snap)}
+                {pid ? ` — ${laneName(pid)}` : ""}
+              </li>
+            );
+          })}
+        </ol>
+      </figure>
     );
   }
 
@@ -1827,10 +2051,28 @@ export default function DeskPage() {
               {recordOpen ? "Hide the full record ↑" : "See the full record →"}
             </button>
             <div id="full-record" className="fineprint" hidden={!recordOpen}>
-            <div className="sec fineprint-k">
-              The full record{screen.blotter.length > 0 &&
-                ` · ${screen.blotter.length} entries`}
-            </div>
+            <div className="sec fineprint-k">The full record</div>
+
+            {/* Count-check, stated in the UI so a reader can audit the
+                record against the stream without trusting us. Every event
+                the screen received is accounted for in one of these four
+                buckets — the log rows below, the narration, the run header
+                (meta) and the terminal result. Nothing is dropped; some
+                events simply render as something other than a row. */}
+            <p className="rec-count">
+              <b className="num">
+                {screen.blotter.length +
+                  screen.steps.length +
+                  (screen.mandate ? 1 : 0) +
+                  (screen.result ? 1 : 0)}
+              </b>{" "}
+              events received —{" "}
+              <b className="num">{screen.blotter.length}</b> logged in full
+              below, <b className="num">{screen.steps.length}</b> narration
+              step{screen.steps.length === 1 ? "" : "s"}
+              {screen.mandate ? ", the run header" : ""}
+              {screen.result ? ", the result" : ""}.
+            </p>
 
             {/* search meter — hidden from the main view; stays in the DOM so
                 the step-3 record panel can surface it. */}
@@ -1839,71 +2081,113 @@ export default function DeskPage() {
               {screen.meter ? `${screen.meter.used} of ${screen.meter.max}` : "— of —"}
             </div>
 
-            {/* disclosure register: every meta.disclosures[] string */}
-            {screen.disclosures.length > 0 && (
-              <div className="register">
-                <div className="register-k">notes</div>
-                <ul>
-                  {screen.disclosures.map((d) => (
-                    <li key={d}>{d}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            {/* ---- 1. the money picture ------------------------------- */}
+            <section className="rec-sec">
+              <h3 className="rec-h">Where every trip stands</h3>
+              {renderFareChart() ?? (
+                <p className="rec-none">
+                  No trip figures yet — this fills in when the desk snapshot
+                  lands.
+                </p>
+              )}
+            </section>
 
-            {/* per-rail provenance strip (S12, ADR 0006): demoted into
-                the full record — ops manager doesn't need this on main view */}
-            {screen.rails && (
-              <div className="rails">
-                <div className="rails-note">
-                  Data sources for this run
+            {/* ---- 2. the process picture ------------------------------ */}
+            <section className="rec-sec">
+              <h3 className="rec-h">How the run went</h3>
+              {renderRunMap() ?? (
+                <p className="rec-none">
+                  Nothing has happened yet — entries appear as trips are
+                  processed.
+                </p>
+              )}
+            </section>
+
+            {/* ---- 3. provenance: per-rail (S12, ADR 0006). Every rail's
+                   own state word AND its full detail sentence — a fallback
+                   never renders in a success tone. -------------------- */}
+            <section className="rec-sec">
+              <h3 className="rec-h">Where the numbers came from</h3>
+              {screen.rails && screen.rails.length > 0 ? (
+                <div className="rails">
+                  {screen.rails.map((rail) => (
+                    <div key={rail.rail} className="rail">
+                      <span className="rail-name">{rail.rail}</span>
+                      <span className={`rail-state ${rail.state}`}>
+                        {rail.label}
+                      </span>
+                      <span className="rail-detail">{rail.detail}</span>
+                    </div>
+                  ))}
                 </div>
-                {screen.rails.map((rail) => (
-                  <div key={rail.rail} className="rail">
-                    <span className="rail-name">{rail.rail}</span>
-                    <span className={`rail-state ${rail.state}`}>{rail.label}</span>
-                    <span className="rail-detail">{rail.detail}</span>
+              ) : (
+                <p className="rec-none">
+                  This run reported no per-source provenance.
+                </p>
+              )}
+            </section>
+
+            {/* ---- 4. the raw record: notes, narration, every row ------ */}
+            <section className="rec-sec">
+              <h3 className="rec-h">
+                Every step
+                {screen.blotter.length > 0 && (
+                  <span className="rec-h-n num">
+                    {screen.blotter.length} entries
+                  </span>
+                )}
+              </h3>
+
+              {/* disclosure register: every meta.disclosures[] string */}
+              {screen.disclosures.length > 0 && (
+                <div className="register">
+                  <div className="register-k">notes</div>
+                  <ul>
+                    {screen.disclosures.map((d) => (
+                      <li key={d}>{d}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* narration — the agent's own words, verbatim */}
+              <div className="stream">
+                {screen.steps.length === 0 && (
+                  <div>
+                    <span className="dim">›</span> Working on it.
+                  </div>
+                )}
+                {screen.steps.map((s, i) => (
+                  <div
+                    key={`${s.n}-${i}`}
+                    className={
+                      i === screen.steps.length - 1 &&
+                      !screen.result &&
+                      !screen.cycleFailed
+                        ? "cur"
+                        : undefined
+                    }
+                  >
+                    <span className="dim">›</span> {s.text}
                   </div>
                 ))}
               </div>
-            )}
 
-            {/* narration — the working log, demoted into the fine print */}
-            <div className="stream">
-              {screen.steps.length === 0 && (
-                <div>
-                  <span className="dim">›</span> Working on it.
-                </div>
-              )}
-              {screen.steps.map((s, i) => (
-                <div
-                  key={`${s.n}-${i}`}
-                  className={
-                    i === screen.steps.length - 1 &&
-                    !screen.result &&
-                    !screen.cycleFailed
-                      ? "cur"
-                      : undefined
-                  }
-                >
-                  <span className="dim">›</span> {s.text}
-                </div>
-              ))}
-            </div>
-
-            {/* the log — every row, incl. escalation slots + buttons */}
-            <div className="blotter">
-              {screen.blotter.length === 0 && (
-                <div className="brow">
-                  <div className="b-main">
-                    <div className="b-body dim-note">
-                      Nothing here yet — entries appear as trips are processed.
+              {/* the log — every row, incl. escalation slots + buttons */}
+              <div className="blotter">
+                {screen.blotter.length === 0 && (
+                  <div className="brow">
+                    <div className="b-main">
+                      <div className="b-body dim-note">
+                        Nothing here yet — entries appear as trips are
+                        processed.
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-              {screen.blotter.map(renderBlotter)}
-            </div>
+                )}
+                {screen.blotter.map(renderBlotter)}
+              </div>
+            </section>
             </div>
           </div>
 

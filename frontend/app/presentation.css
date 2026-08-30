@@ -1002,3 +1002,589 @@
     padding: 4px 12px 14px;
   }
 }
+
+/* ==================================================================== */
+/* §12 — Pass 9: THE RECORD, redrawn. The panel behind "See the full    */
+/* record" was one wall of 15 identical rows; it becomes four titled    */
+/* sections (layer-cake scanning — NN/g), the first two of which are    */
+/* pictures rather than transcripts.                                    */
+/*                                                                      */
+/* Why the whole panel is dark: MEASURED, not stylistic. On --paper the */
+/* status palette only reaches non-text contrast (--good 3.01, --warn   */
+/* 3.04, --faint 2.45 — a fail). On --term-bg #111 the same tokens read */
+/* 6.02 / 5.95 / 7.40. The record is where status colour has to carry   */
+/* meaning, so it lives on the ground where the palette actually works. */
+/* Full numbers + method: docs/design-research-pass9.md §6.             */
+/*                                                                      */
+/* Two colour rules applied throughout this section:                    */
+/*  1. Any token under 4.5:1 on #111 (--bad is 4.34) is used as a       */
+/*     BORDER or DOT — a graphical object needing only 3:1 — never as   */
+/*     body text. Status text is near-white.                            */
+/*  2. Status is never hue alone: --warn and --bad resolve to nearly    */
+/*     the same colour under deuteranopia (#B2B64D vs #B2BA4D), so kind */
+/*     is carried by SHAPE and meaning by a WORD. (WCAG 1.4.1.)         */
+/* ==================================================================== */
+
+.record {
+  padding: 16px 20px 20px;
+}
+.fineprint .sec.fineprint-k {
+  color: #fff;
+  letter-spacing: 0.7px;
+}
+
+/* the count-check — lets a reader audit the record against the stream */
+.rec-count {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--faint);
+  line-height: 1.5;
+}
+.rec-count b {
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ---- sections: the headings the old wall never had ---------------- */
+.rec-sec {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.rec-h {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+  color: #fff;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.rec-h-n {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--faint);
+  letter-spacing: 0.3px;
+}
+.rec-cap {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.72);
+  max-width: 76ch;
+}
+.rec-src { color: var(--faint); }
+.rec-none {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--faint);
+}
+.rec-fig { margin: 0; }
+
+/* ==================================================================== */
+/* §12a — "Where every trip stands": the dumbbell.                      */
+/* One zero-based money axis for every trip, with the mandate's own     */
+/* authority cap drawn as a rule on the SAME scale — which is what      */
+/* makes the escalation self-evident (one mark crosses the line).       */
+/* Dot POSITIONS and bar WIDTH are geometry derived from real decimals; */
+/* the gap is never printed, because mark − basis would be client-side  */
+/* arithmetic dressed as a system figure.                               */
+/* ==================================================================== */
+.fm-rows { display: flex; flex-direction: column; }
+.fm-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 3fr) minmax(0, 1.35fr);
+  align-items: center;
+  column-gap: 16px;
+}
+.fm-id { min-width: 0; }
+.fm-trip {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fm-route {
+  display: block;
+  font-size: 11px;
+  color: var(--faint);
+  letter-spacing: 0.4px;
+}
+
+/* the plot strip — no row gap, so the cap rule reads as one line down
+   the whole chart even though each row draws its own segment of it */
+.fm-track {
+  position: relative;
+  height: 42px;
+  min-width: 0;
+}
+.fm-cap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed rgba(255, 255, 255, 0.45);
+}
+.fm-bar {
+  position: absolute;
+  top: 50%;
+  height: 3px;
+  min-width: 2px;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.26);
+  border-radius: 2px;
+}
+.fm-dot {
+  position: absolute;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  margin-left: -5.5px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+/* Where it was booked — a TICK, not a dot. Five of the six trips moved by
+   under 4% of the axis, so two same-sized dots collapsed into one blob and
+   the dumbbell read as a single mark. A thin tick never merges with the
+   dot: coincident values show the disc with the tick standing proud of it
+   (= barely moved), and any real gap opens into a proper dumbbell. The
+   positions are unchanged — this is legibility, not rescaling. */
+.fm-basis {
+  width: 2px;
+  height: 15px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--faint);
+  border: 0;
+  z-index: 1;
+}
+/* where it prices now — solid and bright (neutral: a move is not itself
+   good or bad, and the app's own judgment arrives as a loss event) */
+.fm-mark {
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  background: var(--paper);
+  border: 2px solid var(--paper);
+  z-index: 2;
+}
+/* past the manager's cap — amber, and the row also prints the words */
+.fm-mark.over {
+  background: var(--warn);
+  border-color: var(--warn);
+}
+/* stale = SHAPE, not opacity: a hollow ring at the same diameter. The
+   research found size/shape outperform transparency for uncertainty, and
+   a faded dot would drop below contrast. Declared last so a mark that is
+   both stale and over the cap keeps the ring and takes the amber. */
+.fm-mark.stale {
+  background: transparent;
+  border-color: var(--warn);
+}
+.fm-dot.static {
+  position: static;
+  margin: 0;
+  transform: none;
+  flex: none;
+}
+.fm-basis.static { height: 11px; }
+
+.fm-read { min-width: 0; text-align: right; }
+.fm-figs {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 5px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.fm-was { color: var(--faint); }
+.fm-to { color: rgba(255, 255, 255, 0.4); }
+.fm-now { color: #fff; font-weight: 600; }
+.fm-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 8px;
+  margin-top: 3px;
+}
+.fm-word {
+  font-size: 10.5px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+/* The stale word appears on five of six rows here — it is the RULE, not
+   the exception, and five amber shouts cancel each other out (Von Restorff:
+   emphasis must be scarce). So it states itself quietly; the amber ring on
+   the mark still carries the tone, and the word is still present for
+   WCAG 1.4.1. The genuine exception takes the only emphasis in the chart. */
+.fm-word.wait { color: var(--faint); }
+.fm-word.over {
+  color: var(--warn);
+  font-weight: 700;
+  background: rgba(200, 129, 30, 0.16);
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+}
+/* --bad is 4.34:1 on #111 — under the 4.5 body threshold. So the red is
+   a 3px rule (a graphical object: 3:1 is the bar, and it clears it) and
+   the figure itself is near-white. */
+.fm-word.no {
+  color: var(--paper);
+  border-left: 3px solid var(--bad);
+  padding-left: 6px;
+}
+
+/* the axis: zero on the left, the cap labelled where its rule sits */
+.fm-axis {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 3fr) minmax(0, 1.35fr);
+  column-gap: 16px;
+  align-items: center;
+  margin-top: 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  padding-top: 6px;
+}
+.fm-axis-zero {
+  grid-column: 1;
+  justify-self: end;
+  font-size: 10.5px;
+  color: var(--faint);
+}
+.fm-axis-track { grid-column: 2; position: relative; height: 14px; }
+.fm-axis-cap {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 10.5px;
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.fm-legend,
+.rm-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 14px;
+  font-size: 11px;
+  color: var(--faint);
+}
+.fm-leg { display: inline-flex; align-items: center; gap: 6px; }
+.fm-leg-rule {
+  width: 14px;
+  height: 0;
+  border-top: 1px dashed rgba(255, 255, 255, 0.6);
+  display: block;
+}
+
+/* ==================================================================== */
+/* §12b — "How the run went": the laned run map.                        */
+/* x = ARRIVAL ORDER of blotter entries (the stream carries no clock —  */
+/* the caption says so, and the axis is never labelled time).           */
+/* y = one lane per position, first-arrival order. Shape carries kind.  */
+/* ==================================================================== */
+.rm-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+.rm-grid {
+  display: grid;
+  align-items: center;
+  row-gap: 3px;
+  min-width: min-content;
+}
+.rm-lane-k {
+  font-size: 11px;
+  color: var(--faint);
+  padding-right: 12px;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.rm-rule {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  align-self: center;
+  z-index: 0;
+}
+.rm-cell {
+  display: grid;
+  place-items: center;
+  height: 24px;
+  z-index: 1;
+}
+
+/* shapes — the kind, independent of hue (see the §12 header note) */
+.rm-glyph {
+  display: block;
+  width: 9px;
+  height: 9px;
+  box-sizing: border-box;
+}
+.rm-glyph.static { flex: none; }
+.g-disc { border-radius: 50%; background: currentColor; }
+.g-ring {
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  background: transparent;
+}
+.g-diamond { background: currentColor; transform: rotate(45deg); }
+.g-square { background: currentColor; }
+.g-flag {
+  background: currentColor;
+  transform: rotate(45deg);
+  box-shadow: 0 0 0 2.5px rgba(200, 129, 30, 0.32);
+}
+.g-drop {
+  width: 0;
+  height: 0;
+  background: transparent;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 8px solid currentColor;
+}
+.g-rise {
+  width: 0;
+  height: 0;
+  background: transparent;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 8px solid currentColor;
+}
+.g-cross { position: relative; background: transparent; }
+.g-cross::before,
+.g-cross::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: currentColor;
+}
+.g-cross::before { transform: translateY(-50%) rotate(45deg); }
+.g-cross::after { transform: translateY(-50%) rotate(-45deg); }
+
+/* tone — colour supports the shape, never replaces it */
+.rm-glyph.flat { color: rgba(255, 255, 255, 0.75); }
+.rm-glyph.good { color: var(--good); }
+.rm-glyph.wait { color: var(--warn); }
+.rm-glyph.stop { color: var(--bad); }
+
+/* ==================================================================== */
+/* §12c — the raw record on the dark ground.                            */
+/* Nothing is removed: the notes, the narration and all 15 rows survive */
+/* verbatim. They move onto dark surfaces so the status hues clear AA.  */
+/* ==================================================================== */
+.record .register,
+.record .rails {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.record .register + .stream { margin-top: 10px; }
+.record .register-k,
+.record .rails-note {
+  color: var(--faint);
+  letter-spacing: 0.5px;
+}
+.record .register li {
+  color: rgba(255, 255, 255, 0.84);
+  border-top-color: rgba(255, 255, 255, 0.09);
+}
+.record .register li::before { color: rgba(255, 255, 255, 0.28); }
+
+/* provenance rails — a fallback is amber, NEVER a success tone */
+.record .rails { display: flex; flex-direction: column; gap: 10px; }
+.record .rail {
+  display: grid;
+  grid-template-columns: 78px minmax(0, auto);
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: baseline;
+}
+.record .rail-name {
+  color: #fff;
+  font-weight: 600;
+  font-size: 12px;
+}
+.record .rail-state {
+  font-size: 12px;
+  font-weight: 600;
+}
+.record .rail-state.live,
+.record .rail-state.real { color: var(--good); }
+.record .rail-state.comparison,
+.record .rail-state.fallback,
+.record .rail-state.unknown { color: var(--warn); }
+.record .rail-state.recorded,
+.record .rail-state.curated { color: rgba(255, 255, 255, 0.8); }
+.record .rail-detail {
+  grid-column: 2;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+
+.record .stream {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--term-ink);
+}
+.record .stream .dim { color: var(--term-dim); }
+
+/* the rows: dark cards, hue as a left rule (a graphical object) */
+.record .blotter { gap: 6px; margin-top: 12px; }
+.record .brow {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.86);
+}
+.record .brow .b-ix { color: rgba(255, 255, 255, 0.34); }
+.record .brow .b-pos { color: var(--faint); }
+.record .brow .b-body { color: rgba(255, 255, 255, 0.84); }
+.record .brow .b-disc { color: var(--faint); }
+.record .brow .b-body .num { color: #fff; }
+.record .brow.bad { border-left: 3px solid var(--bad); }
+.record .brow.good { border-left: 3px solid var(--good); }
+.record .brow.warn { border-left: 3px solid var(--warn); }
+.record .brow.accent { border-left: 3px solid var(--brand); }
+
+/* chips: near-white text (always clears AA) + a coloured dot, so the
+   kind is legible, the hue is present and neither is load-bearing alone */
+.record .chip {
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.92);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.record .chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.record .chip.mark::before,
+.record .chip.alloc::before { background: var(--good); }
+.record .chip.mark-stale::before,
+.record .chip.escalate::before { background: var(--warn); }
+.record .chip.loss::before,
+.record .chip.error::before { background: var(--bad); }
+.record .chip.trade::before { background: var(--brand); }
+.record .chip.reconcile::before { background: rgba(255, 255, 255, 0.6); }
+
+/* the escalation slot inside the record — same dark language */
+.record .esc {
+  background: rgba(200, 129, 30, 0.09);
+  border-color: rgba(200, 129, 30, 0.4);
+}
+.record .esc .esc-reason { color: rgba(255, 255, 255, 0.88); }
+.record .esc-opt {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.88);
+}
+.record .esc-opt.rec {
+  background: rgba(21, 166, 106, 0.12);
+  border-color: rgba(21, 166, 106, 0.5);
+}
+.record .esc-opt .rec-flag { color: var(--good); }
+.record .esc-note { color: var(--warn); }
+.record .esc-discs { color: var(--faint); }
+.record .esc-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.24);
+  color: #fff;
+}
+
+/* ==================================================================== */
+/* §12d — contrast corrections on the shared components.                */
+/* MEASURED: white on --pop is 2.81:1 at 700/15px, which is body text   */
+/* and fails AA. --ink on --pop is 5.57:1. The hue does not change —    */
+/* only the text colour on it. Same for the landing CTA.                */
+/* ==================================================================== */
+.btn.primary,
+.hero-form .start-btn.primary {
+  color: var(--ink);
+}
+
+/* ==================================================================== */
+/* §12e — responsive. At the stacked widths the plot keeps its own      */
+/* full-width line under the label/figures, so nothing is squeezed and  */
+/* the page never scrolls sideways; the run map scrolls inside itself.  */
+/* ==================================================================== */
+@media (max-width: 860px) {
+  .fm-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+    row-gap: 0;
+    padding: 8px 0 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  .fm-id { grid-column: 1; grid-row: 1; }
+  .fm-read { grid-column: 2; grid-row: 1; }
+  .fm-track {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    height: 26px;
+  }
+  .fm-axis {
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 10px;
+  }
+  .fm-axis-zero { grid-column: 1; justify-self: start; }
+  .fm-axis-track { grid-column: 2; }
+}
+
+@media (max-width: 620px) {
+  .record { padding: 14px 14px 18px; }
+  .rec-sec { margin-top: 18px; padding-top: 14px; }
+  .fm-trip { font-size: 12px; }
+  .fm-figs { font-size: 11.5px; }
+  .record .rail { grid-template-columns: minmax(0, 1fr); }
+  .record .rail-detail { grid-column: 1; }
+}
+
+/* The record is a settled artefact, not live work: nothing in these
+   diagrams animates on open. Stated explicitly so a later pass doesn't
+   add an entrance tween here by reflex — the labor-illusion argument
+   for motion applies to work being watched, not to an audit trail. */
+@media (prefers-reduced-motion: reduce) {
+  .rec-fig,
+  .rm-glyph,
+  .fm-dot { animation: none; transition: none; }
+}
+
+/* ==================================================================== */
+/* §12f — Screen 3: the wrap-up's peak-end picture.                     */
+/* The close page is a cream card, but the chart's status hues only     */
+/* clear AA on the dark ground (§12 header). So the chart arrives as a  */
+/* dark evidence panel inset into the card — the same surface, and the  */
+/* same visual language, as the run's record. It reads as "here is the  */
+/* proof", which is exactly the note to end on.                         */
+/* ==================================================================== */
+.close-chart {
+  background: var(--term-bg);
+  border-radius: var(--r-card);
+  padding: 16px 20px 18px;
+  margin-top: var(--sp-5);
+  box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.42);
+}
+.close-chart .sec {
+  color: rgba(255, 255, 255, 0.72);
+  margin-bottom: 6px;
+}
+.close-chart .rec-cap { margin-bottom: 14px; }

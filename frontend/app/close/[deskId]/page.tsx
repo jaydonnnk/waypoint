@@ -20,10 +20,11 @@ import type { ReactNode } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 
+import FareChart from "../../FareChart";
 import WaypointField from "../../WaypointField";
 import { getDeskClose, getDeskSnapshot, type CloseOutcome } from "@/lib/api";
 import { money } from "@/lib/format";
-import type { DeskResult, DeskStatus } from "@/lib/types";
+import type { DeskResult, DeskStatus, Position } from "@/lib/types";
 
 gsap.registerPlugin(useGSAP);
 
@@ -80,6 +81,12 @@ export default function ClosePage() {
     budget: number;
     phase: Phase["kind"];
   } | null>(null);
+  // Pass 9 (additive): the wrap-up draws the SAME fare chart as Screen 2's
+  // record, from the same snapshot call already made below. Empty/undefined
+  // until that snapshot lands, so the chart simply doesn't render rather
+  // than showing a figure it doesn't have.
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [cap, setCap] = useState<string | undefined>(undefined);
 
   const load = useCallback(() => {
     setPhase({ kind: "waiting" });
@@ -99,6 +106,8 @@ export default function ClosePage() {
       .then((snap) => {
         if (cancelled) return;
         setCurrency(snap.mandate.currency);
+        setPositions(snap.positions);
+        setCap(snap.mandate.authority_cap);
         // Strict summation (mirrors the desk page's extractBudgetFigures):
         // any unparseable figure makes the WHOLE sum non-finite and the
         // figures stay null — never coerce garbage to 0, which could wrongly
@@ -412,7 +421,18 @@ export default function ClosePage() {
 
       <div className="run close-status-card">
         <p className={`close-call ${copy.cls}`}>{copy.call}</p>
-        <p className="close-sub">{copy.sub}</p>
+        {/* Pass 9 (honesty): the per-status sub-line says "Every booking is
+            done." — true of a live run, but flatly contradicted two lines
+            later by "Nothing was bought in this run" whenever real spend is
+            zero. Same REAL condition as the hero wording (post-outcome
+            snapshot, zero spend across every budget); no new figure, no new
+            branch, just a sentence that stops disagreeing with the one
+            under it. Every other status keeps its own copy verbatim. */}
+        <p className="close-sub">
+          {nothingSpent && result.status === "closed"
+            ? "Every trip was judged and logged — and nothing was booked."
+            : copy.sub}
+        </p>
 
         {/* the one number that matters — bound to result.pnl, never invented */}
         <div className="budget">
@@ -447,6 +467,38 @@ export default function ClosePage() {
               {money(String(figures.budget - figures.spent), currency)} left
             </div>
           </>
+        )}
+
+        {/* Pass 9 — the peak-end picture. Screen 3 was three stat tiles; the
+            last thing anyone sees is now WHERE EVERY TRIP ENDED UP, in the
+            same visual language as the run's record. No loss amounts are
+            passed: the close page has no stream, and a loss figure it
+            didn't receive would be invented. */}
+        {positions.length > 0 && (
+          <div className="close-chart">
+            <div className="sec">Where every trip stands</div>
+            <FareChart
+              positions={positions}
+              currency={currency}
+              authorityCap={cap}
+              caption={
+                <>
+                  What each trip cost when it was booked, and what it prices
+                  at now.
+                  {cap ? (
+                    <>
+                      {" "}
+                      The dashed rule is your {money(cap, currency)}{" "}
+                      auto-approve limit.
+                    </>
+                  ) : null}{" "}
+                  <span className="rec-src">
+                    Figures from the desk snapshot.
+                  </span>
+                </>
+              }
+            />
+          </div>
         )}
 
         {/* demoted record zone — the counts live here, small and secondary */}
